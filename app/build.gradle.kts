@@ -25,6 +25,8 @@ android {
         versionCode = 103
         versionName = "0.1.3"
         vectorDrawables.useSupportLibrary = true
+        // Default code server for "I have a code". Empty hides the feature; Settings can override.
+        buildConfigField("String", "CODE_SERVER", "\"\"")
     }
 
     signingConfigs {

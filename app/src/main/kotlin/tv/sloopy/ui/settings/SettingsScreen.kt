@@ -2,6 +2,7 @@ package tv.sloopy.ui.settings
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -53,6 +54,8 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
     val scope = rememberCoroutineScope()
     var pinEntry by remember { mutableStateOf("") }
     var showPin by remember { mutableStateOf(false) }
+    val codeServerSaved by vm.prefs.codeServer.collectAsState(initial = null)
+    var codeServerEdit by remember(codeServerSaved) { mutableStateOf(codeServerSaved ?: "") }
 
     BackHandler { onBack() }
 
@@ -83,6 +86,14 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
             }
             Row(Modifier.padding(top = 14.dp)) {
                 SloopyButton("Add provider", onClick = { onEditProvider("new") }, primary = true)
+            }
+
+            Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.Bottom) {
+                Box(Modifier.width(520.dp)) {
+                    Field("Login code server (optional)", codeServerEdit, { codeServerEdit = it }, mono = true, placeholder = if (BuildConfig.CODE_SERVER.isBlank()) "https://…" else BuildConfig.CODE_SERVER, keyboard = androidx.compose.ui.text.input.KeyboardType.Uri)
+                }
+                Spacer(Modifier.width(12.dp))
+                SloopyButton("Save", onClick = { scope.launch { vm.prefs.setCodeServer(codeServerEdit) } }, modifier = Modifier.padding(bottom = 2.dp))
             }
 
             Section("Listings")

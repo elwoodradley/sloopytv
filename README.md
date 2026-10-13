@@ -89,6 +89,15 @@ sessions derive a key from the code and a per-session salt instead. Six wrong co
 minutes end the session. The TV decrypts with `core/.../crypto/NaCl.kt`, which is tested
 against tweetnacl's own output.
 
+## Login codes (for operators)
+
+`codes/` is a Cloudflare Worker that turns a customer's login into a six-digit code: single
+use, dies after 24 hours, login stored encrypted under a key derived from the code (PBKDF2
+100k rounds, AES-256-GCM) and decrypted on the TV. The operator mints codes on a
+password-protected admin page; the customer types the code on the Add Provider screen.
+Deploy steps are in `codes/README.md`; the deployed address goes into `CODE_SERVER` in
+`app/build.gradle.kts` (or Settings › "Login code server" on any one box).
+
 ## Remote
 
 | Key | Live picture |

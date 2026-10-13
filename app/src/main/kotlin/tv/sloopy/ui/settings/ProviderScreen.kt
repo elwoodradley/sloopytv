@@ -27,6 +27,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
@@ -72,6 +73,9 @@ fun ProviderScreen(vm: SloopyViewModel, providerId: String?, onDone: () -> Unit,
     val scope = rememberCoroutineScope()
     val firstField = remember { FocusRequester() }
     val providerList by vm.providerList.collectAsState()
+    val codeServer by vm.codeServer.collectAsState()
+    val codeFocus = remember { FocusRequester() }
+    val toCode = Modifier.focusProperties { right = if (codeServer.isNotBlank() && existing == null) codeFocus else FocusRequester.Default }
     val hasProviders = providerList.isNotEmpty()
 
     LaunchedEffect(Unit) { runCatching { firstField.requestFocus() } }
@@ -95,15 +99,39 @@ fun ProviderScreen(vm: SloopyViewModel, providerId: String?, onDone: () -> Unit,
         } catch (e: Exception) { error = TLog.userMessage(e); null }
     }
 
+    /** A login arrived from the phone page or a code: fill the form, test, and save without another press. */
+    fun applyPayload(p: tv.sloopy.pair.PairPayload) {
+        error = null; result = null
+        val looksM3u = p.user.isEmpty() && !p.url.contains("get.php") && !p.url.contains("player_api")
+        kind = if (looksM3u) ProviderKind.M3U else ProviderKind.XTREAM
+        name = p.name
+        // A pasted get.php link carries the login in its query: split it out so the
+        // password never sits in the Server field on screen.
+        val split = if (!looksM3u) runCatching { tv.sloopy.core.xtream.XtreamCredentials.parse(p.url, p.user, p.pass) }.getOrNull() else null
+        url = split?.baseUrl ?: p.url; user = split?.username ?: p.user; pass = split?.password ?: p.pass
+        val rec = build() ?: return
+        testing = true
+        scope.launch {
+            if (rec.kind == ProviderKind.XTREAM) {
+                runCatching { vm.catalog.testXtream(rec) }
+                    .onSuccess { result = it; vm.saveProvider(rec); vm.refresh(rec); onDone() }
+                    .onFailure { error = TLog.userMessage(it) }
+            } else {
+                vm.saveProvider(rec); vm.refresh(rec); onDone()
+            }
+            testing = false
+        }
+    }
+
     Row(Modifier.fillMaxSize().background(Sloopy.ground).padding(horizontal = 72.dp, vertical = 40.dp)) {
         Column(Modifier.width(600.dp).verticalScroll(rememberScrollState())) {
             Label("Settings · Providers · " + if (existing == null) "New" else "Edit")
             Text(if (!hasProviders && existing == null) "NOTHING'S PLUGGED IN YET" else if (existing == null) "ADD A PROVIDER" else "EDIT PROVIDER", style = Sloopy.titleHuge.copy(fontSize = androidx.compose.ui.unit.TextUnit(54f, androidx.compose.ui.unit.TextUnitType.Sp)), modifier = Modifier.padding(top = 8.dp), maxLines = 1)
 
             Row(Modifier.padding(top = 14.dp)) {
-                SloopyButton("Xtream codes", onClick = { kind = ProviderKind.XTREAM }, primary = kind == ProviderKind.XTREAM, modifier = Modifier.focusRequester(firstField))
+                SloopyButton("Xtream codes", onClick = { kind = ProviderKind.XTREAM }, primary = kind == ProviderKind.XTREAM, modifier = Modifier.focusRequester(firstField).then(toCode))
                 Spacer(Modifier.width(10.dp))
-                SloopyButton("M3U playlist", onClick = { kind = ProviderKind.M3U }, primary = kind == ProviderKind.M3U)
+                SloopyButton("M3U playlist", onClick = { kind = ProviderKind.M3U }, primary = kind == ProviderKind.M3U, modifier = toCode)
             }
 
             Field("Name", name, { name = it }, placeholder = "Home")
@@ -161,29 +189,19 @@ fun ProviderScreen(vm: SloopyViewModel, providerId: String?, onDone: () -> Unit,
         Spacer(Modifier.width(60.dp))
 
         Column(Modifier.width(560.dp)) {
-            if (existing == null) PairPanel(onReceived = { p ->
-                // Fill the form, then test and save without another press.
-                error = null; result = null
-                val looksM3u = p.user.isEmpty() && !p.url.contains("get.php") && !p.url.contains("player_api")
-                kind = if (looksM3u) ProviderKind.M3U else ProviderKind.XTREAM
-                name = p.name
-                // A pasted get.php link carries the login in its query: split it out so the
-                // password never sits in the Server field on screen.
-                val split = if (!looksM3u) runCatching { tv.sloopy.core.xtream.XtreamCredentials.parse(p.url, p.user, p.pass) }.getOrNull() else null
-                url = split?.baseUrl ?: p.url; user = split?.username ?: p.user; pass = split?.password ?: p.pass
-                val rec = build() ?: return@PairPanel
-                testing = true
-                scope.launch {
-                    if (rec.kind == ProviderKind.XTREAM) {
-                        runCatching { vm.catalog.testXtream(rec) }
-                            .onSuccess { result = it; vm.saveProvider(rec); vm.refresh(rec); onDone() }
-                            .onFailure { error = TLog.userMessage(it) }
-                    } else {
-                        vm.saveProvider(rec); vm.refresh(rec); onDone()
+            if (existing == null) {
+                // Code entry first: it sits level with the buttons on the left, so a Right press
+                // from them lands on it. The QR panel follows.
+                if (codeServer.isNotBlank()) CodePanel(busy = testing, focusRequester = codeFocus, onRedeem = { code ->
+                    error = null; result = null; testing = true
+                    scope.launch {
+                        runCatching { tv.sloopy.pair.CodeClient.redeem(codeServer, code) }
+                            .onSuccess { testing = false; applyPayload(it) }
+                            .onFailure { testing = false; error = TLog.userMessage(it) }
                     }
-                    testing = false
-                }
-            })
+                })
+                PairPanel(onReceived = ::applyPayload)
+            }
             if (result != null) ResultPanel(result!!, plainHttp = url.trim().startsWith("http://", true))
         }
     }
@@ -204,7 +222,7 @@ private fun PairPanel(onReceived: (tv.sloopy.pair.PairPayload) -> Unit) {
     LaunchedEffect(received) { received?.let(onReceived) }
 
     Column(Modifier.fillMaxWidth().padding(bottom = 24.dp)) {
-        Label("Sign in from your phone")
+        Label("Or sign in from your phone")
         if (s == null) {
             Text("Couldn't start on this network.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 10.dp))
             return
@@ -222,6 +240,24 @@ private fun PairPanel(onReceived: (tv.sloopy.pair.PairPayload) -> Unit) {
             }
         }
         if (received != null) Text("Received. Testing the connection…", style = Sloopy.body.copy(color = Sloopy.amber), modifier = Modifier.padding(top = 12.dp))
+        Hairline(color = Sloopy.hair2, modifier = Modifier.padding(top = 22.dp))
+    }
+}
+
+/** Six digits from the operator, typed with the remote. */
+@Composable
+private fun CodePanel(busy: Boolean, focusRequester: FocusRequester, onRedeem: (String) -> Unit) {
+    var code by remember { mutableStateOf("") }
+    Column(Modifier.fillMaxWidth().padding(bottom = 20.dp)) {
+        Label("Have a login code?")
+        Text("If your provider gave you a six-digit code, type it here. It works once.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 8.dp))
+        Row(verticalAlignment = Alignment.Bottom) {
+            Box(Modifier.width(220.dp)) {
+                Field("Code", code, { code = it.filter { ch -> ch.isDigit() }.take(6) }, modifier = Modifier.focusRequester(focusRequester), mono = true, placeholder = "000000", keyboard = KeyboardType.Number)
+            }
+            Spacer(Modifier.width(16.dp))
+            SloopyButton(if (busy) "Hang on…" else "Use code", primary = true, enabled = !busy && code.length == 6, onClick = { onRedeem(code) }, modifier = Modifier.padding(bottom = 2.dp))
+        }
         Hairline(color = Sloopy.hair2, modifier = Modifier.padding(top = 22.dp))
     }
 }

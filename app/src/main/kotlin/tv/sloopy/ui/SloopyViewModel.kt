@@ -128,6 +128,10 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val introEnabled: StateFlow<Boolean> = prefs.introEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val osdSeconds: StateFlow<Int> = prefs.osdSeconds.stateIn(viewModelScope, SharingStarted.Eagerly, 4)
 
+    /** Settings override, else the build's default. Empty means the feature is hidden. */
+    val codeServer: StateFlow<String> = prefs.codeServer.map { it?.takeIf { s -> s.isNotBlank() } ?: tv.sloopy.BuildConfig.CODE_SERVER }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, tv.sloopy.BuildConfig.CODE_SERVER)
+
     val hasPin: StateFlow<Boolean> = prefs.pinHash.map { it != null }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
 
     private var nowJob: Job? = null

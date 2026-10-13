@@ -45,6 +45,9 @@ class Prefs(private val context: Context) {
     val osdSeconds: Flow<Int> = ds.data.map { it[intPreferencesKey("osd_seconds")] ?: 4 }
     suspend fun setOsdSeconds(v: Int) = ds.edit { it[intPreferencesKey("osd_seconds")] = v }
 
+    val codeServer: Flow<String?> = ds.data.map { it[stringPreferencesKey("code_server")] }
+    suspend fun setCodeServer(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("code_server")) else it[stringPreferencesKey("code_server")] = v.trim() }
+
     val pinSalt: Flow<String?> = ds.data.map { it[stringPreferencesKey("pin_salt")] }
     val pinHash: Flow<String?> = ds.data.map { it[stringPreferencesKey("pin_hash")] }
     suspend fun setPin(saltHex: String?, hashHex: String?) = ds.edit {

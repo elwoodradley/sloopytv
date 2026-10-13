@@ -51,6 +51,14 @@ from the version and must only rise). The updater (`update/Updater.kt`) keys on 
 `sloopytv.apk`. Debug builds read `files/update_api` for a local manifest; the updater test
 (`adb reverse tcp:8099`, python http.server with latest.json + a debug APK) is in the session notes.
 
+## Code server
+`codes/src/index.js` (Cloudflare Worker, KV `CODES`, secret `ADMIN_PASSWORD`). Local run:
+`cd codes && npx wrangler@4 dev --local --port 8787` with `.dev.vars` holding the password;
+`adb reverse tcp:8787 tcp:8787` and set Settings › Login code server to `http://127.0.0.1:8787`.
+The TV-side decrypt (`pair/CodeClient.decrypt`) has a unit test against a Worker-produced blob.
+On the provider screen, Right from the Xtream/M3U buttons is wired to the code field with
+`focusProperties`; geometric focus search did not find it.
+
 ## Pairing test without a phone
 `adb forward tcp:8765 tcp:8765`, `curl http://127.0.0.1:8765/` for the salt, read the code
 from `adb shell uiautomator dump`, then run tweetnacl under macOS `jsc` to derive the key and
