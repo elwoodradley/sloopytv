@@ -152,7 +152,18 @@ class Updater(private val context: Context) {
         val candidate = pm.getPackageArchiveInfo(file.absolutePath, flags) ?: throw IllegalStateException("The file is not an app package")
         if (candidate.packageName != context.packageName) throw IllegalStateException("That package is not SloopyTV")
         val mine = pm.getPackageInfo(context.packageName, flags)
-        if (certDigests(candidate) != certDigests(mine)) throw IllegalStateException("The update is not signed with SloopyTV's key. Refusing to install it.")
+        var candidateCerts = certDigests(candidate)
+        if (candidateCerts.isEmpty()) {
+            // Android 9 to 11 leave signingInfo empty for an APK file read from disk; the old
+            // signatures call still works there.
+            @Suppress("DEPRECATION")
+            val legacy = pm.getPackageArchiveInfo(file.absolutePath, PackageManager.GET_SIGNATURES)
+            @Suppress("DEPRECATION")
+            candidateCerts = (legacy?.signatures ?: emptyArray()).map { sig -> MessageDigest.getInstance("SHA-256").digest(sig.toByteArray()).joinToString("") { "%02x".format(it) } }.toSet()
+        }
+        // If the OS cannot report a certificate at all, the system installer still enforces
+        // same-signer on install, so defer to it rather than block a legitimate update.
+        if (candidateCerts.isNotEmpty() && candidateCerts != certDigests(mine)) throw IllegalStateException("The update is not signed with SloopyTV's key. Refusing to install it.")
         @Suppress("DEPRECATION")
         val candidateCode = if (Build.VERSION.SDK_INT >= 28) candidate.longVersionCode else candidate.versionCode.toLong()
         if (candidateCode <= BuildConfig.VERSION_CODE) throw IllegalStateException("That build is not newer than this one")
