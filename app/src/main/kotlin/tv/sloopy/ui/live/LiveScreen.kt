@@ -151,7 +151,7 @@ fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
         }
 
         when (overlay) {
-            Overlay.OSD -> current?.let { Osd(vm, it, playing) }
+            Overlay.OSD -> current?.let { Osd(vm, it, playing, pstate.quality) }
             Overlay.NUMBER -> NumberEntry(digits, channels.firstOrNull { it.number == digits.toIntOrNull() })
             Overlay.CHANNELS -> ChannelsOverlay(vm, onClose = { overlay = Overlay.NONE })
             Overlay.DECK -> Deck(go = { overlay = Overlay.NONE; go(it) }, onClose = { overlay = Overlay.NONE })
@@ -181,7 +181,7 @@ private fun PlayerSurface(vm: SloopyViewModel) {
 
 @UnstableApi
 @Composable
-private fun Osd(vm: SloopyViewModel, channel: ChannelEntity, playing: Playing?) {
+private fun Osd(vm: SloopyViewModel, channel: ChannelEntity, playing: Playing?, quality: String?) {
     var nowNext by remember(channel.id) { mutableStateOf<List<ProgrammeEntity>>(emptyList()) }
     val provider by vm.active.collectAsState()
     LaunchedEffect(channel.id) {
@@ -210,6 +210,7 @@ private fun Osd(vm: SloopyViewModel, channel: ChannelEntity, playing: Playing?) 
                 )
                 if (next != null) Text("Next · " + next.title + " · " + fmt(next.startEpoch), style = Sloopy.listSub.copy(color = Color.White.copy(alpha = 0.55f)), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp).width(900.dp))
             }
+            if (quality != null) Text(quality, style = Sloopy.mono14.copy(color = Color.White.copy(alpha = 0.6f)), modifier = Modifier.padding(top = 12.dp))
         }
         Row(Modifier.align(Alignment.TopEnd).padding(end = 72.dp, top = 62.dp), verticalAlignment = Alignment.CenterVertically) {
             if (playing is Playing.Live) { LiveDot(); Spacer(Modifier.width(9.dp)); Text("LIVE", style = Sloopy.labelBright.copy(color = Color.White.copy(alpha = 0.8f))) }

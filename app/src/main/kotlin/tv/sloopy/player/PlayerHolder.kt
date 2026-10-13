@@ -27,6 +27,8 @@ data class PlayerState(
     val isLive: Boolean = true,
     val positionMs: Long = 0,
     val durationMs: Long = 0,
+    /** e.g. "1080p · 50 fps · H.264 · AAC 2.0", once the decoders have started. */
+    val quality: String? = null,
 )
 
 /**
@@ -80,7 +82,13 @@ class PlayerHolder(context: Context) {
                     )
                 }
                 override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {
-                    _state.value = _state.value.copy(videoWidth = videoSize.width, videoHeight = videoSize.height)
+                    _state.value = _state.value.copy(videoWidth = videoSize.width, videoHeight = videoSize.height, quality = describe(videoSize.width, videoSize.height))
+                }
+                override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
+                    val s = _state.value
+                    val q = describe(s.videoWidth, s.videoHeight)
+                    TLog.d { "stream quality: $q" }
+                    _state.value = s.copy(quality = q)
                 }
                 override fun onPlayerError(error: PlaybackException) {
                     TLog.w { "player error ${error.errorCodeName}: ${Redact.apply(error.message)}" }
@@ -97,6 +105,49 @@ class PlayerHolder(context: Context) {
                 }
             })
         }
+
+    /** Human line for the badge from the formats the player is actually decoding. */
+    private fun describe(w: Int, h: Int): String? {
+        val v = player.videoFormat
+        val a = player.audioFormat
+        if (v == null && a == null && h <= 0) return null
+        val parts = ArrayList<String>()
+        val height = if (h > 0) h else v?.height ?: 0
+        if (height > 0) parts.add(
+            when {
+                height >= 2000 -> "4K"
+                height >= 1000 -> "1080p"
+                height >= 700 -> "720p"
+                height >= 500 -> "576p"
+                else -> "${height}p"
+            }
+        )
+        val fps = v?.frameRate ?: 0f
+        if (fps > 0f) parts.add(if (fps % 1f == 0f) "${fps.toInt()} fps" else "%.2f fps".format(fps))
+        codecName(v?.sampleMimeType)?.let { parts.add(it) }
+        val audio = codecName(a?.sampleMimeType)
+        if (audio != null) {
+            val ch = a?.channelCount ?: 0
+            parts.add(audio + when (ch) { 1 -> " mono"; 2 -> " 2.0"; 6 -> " 5.1"; 8 -> " 7.1"; else -> "" })
+        }
+        return parts.takeIf { it.isNotEmpty() }?.joinToString(" · ")
+    }
+
+    private fun codecName(mime: String?): String? = when (mime) {
+        null -> null
+        androidx.media3.common.MimeTypes.VIDEO_H264 -> "H.264"
+        androidx.media3.common.MimeTypes.VIDEO_H265 -> "H.265"
+        androidx.media3.common.MimeTypes.VIDEO_MPEG2 -> "MPEG-2"
+        androidx.media3.common.MimeTypes.VIDEO_VP9 -> "VP9"
+        androidx.media3.common.MimeTypes.VIDEO_AV1 -> "AV1"
+        androidx.media3.common.MimeTypes.AUDIO_AAC -> "AAC"
+        androidx.media3.common.MimeTypes.AUDIO_AC3 -> "AC-3"
+        androidx.media3.common.MimeTypes.AUDIO_E_AC3, androidx.media3.common.MimeTypes.AUDIO_E_AC3_JOC -> "E-AC-3"
+        androidx.media3.common.MimeTypes.AUDIO_MPEG, androidx.media3.common.MimeTypes.AUDIO_MPEG_L2 -> "MP2"
+        androidx.media3.common.MimeTypes.AUDIO_DTS -> "DTS"
+        androidx.media3.common.MimeTypes.AUDIO_OPUS -> "Opus"
+        else -> mime.substringAfter('/').uppercase().take(8)
+    }
 
     fun play(url: String, isLive: Boolean, startPositionMs: Long = 0) {
         currentUrl = url

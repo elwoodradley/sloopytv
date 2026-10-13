@@ -97,6 +97,7 @@ fun VodPlayerScreen(vm: SloopyViewModel, onBack: () -> Unit) {
                 Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 72.dp, vertical = 48.dp).fillMaxWidth()) {
                     Text(v?.title?.uppercase() ?: "", style = Sloopy.osdName.copy(fontSize = Sloopy.titleBig.fontSize), maxLines = 1, overflow = TextOverflow.Ellipsis)
                     if (v?.subtitle != null) Text(v.subtitle, style = Sloopy.bodyBig.copy(color = Color.White.copy(alpha = 0.8f)), modifier = Modifier.padding(top = 6.dp))
+                    if (state.quality != null) Text(state.quality!!, style = Sloopy.mono14.copy(color = Color.White.copy(alpha = 0.6f)), modifier = Modifier.padding(top = 6.dp))
                     Row(Modifier.padding(top = 16.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(fmtMs(pos), style = Sloopy.mono16.copy(color = Color.White))
                         Spacer(Modifier.width(16.dp))
