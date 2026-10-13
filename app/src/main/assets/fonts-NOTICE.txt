@@ -1,0 +1,7 @@
+Bundled typefaces, all under the SIL Open Font License 1.1 (https://openfontlicense.org):
+
+- Big Shoulders Display, Copyright 2019 The Big Shoulders Project Authors (https://github.com/xotypeco/big_shoulders)
+- Instrument Sans, Copyright 2022 The Instrument Sans Project Authors (https://github.com/Instrument/instrument-sans)
+- Geist Mono, Copyright 2023 Vercel, Inc. (https://github.com/vercel/geist-font)
+
+Font files were obtained from https://github.com/google/fonts.

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  IPTV providers overwhelmingly run plain HTTP. The app allows it, but only after the user has
+  seen the warning on the provider screen. Trust is limited to the system CA store: no
+  user-installed CAs, so a rogue certificate on the box cannot intercept https providers.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>
