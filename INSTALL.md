@@ -24,7 +24,7 @@ Works on Fire TV Sticks and Fire TV boxes running Fire OS. It does **not** work 
 1. Open **Downloader**. Say OK to anything it asks the first time.
 2. In the box at the top, type this code and press **Go**:
 
-   # 7839728
+   **7839728**
 
    A page flashes up for a few seconds showing where it's going, then the download starts. If the code doesn't work, type this instead, exactly:
    `github.com/elwoodradley/sloopytv/releases/latest/download/sloopytv.apk`
