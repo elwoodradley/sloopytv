@@ -6,4 +6,7 @@ compatibility_date = "2026-01-01"
 # then paste the id it prints below. Secret: npx wrangler secret put ADMIN_PASSWORD
 [[kv_namespaces]]
 binding = "CODES"
-id = "REPLACE_WITH_KV_ID"
+id = "a1c15e719393462ebefb3f2feca4c303"
+
+# Keep version preview URLs off; one address for the app.
+preview_urls = false

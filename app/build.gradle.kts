@@ -26,7 +26,7 @@ android {
         versionName = "0.1.3"
         vectorDrawables.useSupportLibrary = true
         // Default code server for "I have a code". Empty hides the feature; Settings can override.
-        buildConfigField("String", "CODE_SERVER", "\"\"")
+        buildConfigField("String", "CODE_SERVER", "\"https://sloopytv-codes.sloopytv.workers.dev\"")
     }
 
     signingConfigs {

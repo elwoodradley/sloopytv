@@ -16,7 +16,7 @@ npx wrangler secret put ADMIN_PASSWORD   # the password for the admin page
 npx wrangler deploy                      # prints the site address
 ```
 
-The address looks like `https://sloopytv-codes.<you>.workers.dev`. Put that into the app's
+Deployed at `https://sloopytv-codes.sloopytv.workers.dev`; the admin password is in `keystore/codes-admin-password.txt` (git-ignored). Put that into the app's
 `CODE_SERVER` in `app/build.gradle.kts` and cut a release; customers never see the address.
 
 ## Run locally
