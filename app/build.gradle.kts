@@ -15,11 +15,11 @@ val keystoreProps = Properties().apply {
 }
 
 android {
-    namespace = "tv.tube"
+    namespace = "tv.sloopy"
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "tv.tube.player"
+        applicationId = "tv.sloopy"
         minSdk = 24
         targetSdk = 35
         versionCode = 1
@@ -115,6 +115,8 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.coil.compose)
     implementation(libs.coil.okhttp)
+    implementation(libs.nanohttpd)
+    implementation(libs.zxing.core)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test)

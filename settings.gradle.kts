@@ -20,6 +20,6 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "tube"
+rootProject.name = "sloopytv"
 include(":core")
 include(":app")

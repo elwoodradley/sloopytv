@@ -1,4 +1,4 @@
-# Tube
+# SloopyTV
 
 An IPTV player for Android TV and Fire TV, built around Xtream Codes with M3U/XMLTV as a second
 path. It ships with no channels and no providers. Credentials live in the device keystore, URLs
@@ -13,6 +13,7 @@ there is no analytics or telemetry of any kind.
   - `data/` vault (Android Keystore AES-GCM), provider store, OkHttp, catalogue repository, demo streams
   - `player/` one ExoPlayer for live and on demand
   - `ui/` theme and screens: intro (tube power-on), live, guide, channel list, library, details, VOD player, search, settings, provider setup
+- `app/.../pair/` the phone sign-in: a tiny web server on the home network, a QR code, NaCl-encrypted form
 - `keystore/` release signing key and its password file. Git-ignored. **Back this folder up**: an
   APK signed with a different key cannot update an installed copy.
 - `dist/` built APKs for sharing. Git-ignored.
@@ -29,17 +30,17 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@17 ANDROID_HOME=/opt/homebrew/share/a
 ./gradlew :app:assembleRelease       # signed, minified; app/build/outputs/apk/release/app-release.apk
 ```
 
-Debug builds install as `tv.tube.player.debug`, release as `tv.tube.player`, so both can live on a box.
+Debug builds install as `tv.sloopy.debug`, release as `tv.sloopy`, so both can live on a box.
 
 ## Run on the Mac (Android TV emulator)
 
-An AVD named `tube_tv` (Android 14 TV, 1080p, arm64) is already created.
+An AVD named `tube_tv` (name predates the rename) (Android 14 TV, 1080p, arm64) is already created.
 
 ```bash
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 $ANDROID_HOME/emulator/emulator -avd tube_tv -gpu auto &
 $ANDROID_HOME/platform-tools/adb wait-for-device
-$ANDROID_HOME/platform-tools/adb install -r dist/tube-0.1.0.apk
+$ANDROID_HOME/platform-tools/adb install -r dist/sloopytv-0.1.0.apk
 ```
 
 The emulator window takes keyboard input: arrow keys are the D-pad, Enter is OK, Escape is Back,
@@ -56,11 +57,25 @@ digits type channel numbers.
 ```bash
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 $ANDROID_HOME/platform-tools/adb connect 192.168.1.50:5555
-$ANDROID_HOME/platform-tools/adb install -r dist/tube-0.1.0.apk
+$ANDROID_HOME/platform-tools/adb install -r dist/sloopytv-0.1.0.apk
 ```
 
 Accept the debugging prompt on the TV the first time. Friends without a Mac can use the
 "Downloader" app on the Fire TV to fetch the APK from any link you give them.
+
+## Signing in from a phone
+
+Typing `err74758drue749` with a remote is the worst part of every IPTV app, so the Add Provider
+screen shows a QR code. Scan it with the phone's camera, paste the provider link or type the
+login on the page, submit, and the TV tests and saves it. No server anywhere: the TV itself
+serves the page on the home Wi-Fi (`http://<box ip>:8765/`). If you type the address instead of
+scanning, the page asks for the six-digit code shown on the TV.
+
+The page encrypts the login in the browser with tweetnacl before sending, using a key that
+travels only inside the QR code (the URL fragment, which browsers never send). Typed-code
+sessions derive a key from the code and a per-session salt instead. Six wrong codes or ten
+minutes end the session. The TV decrypts with `core/.../crypto/NaCl.kt`, which is tested
+against tweetnacl's own output.
 
 ## Remote
 

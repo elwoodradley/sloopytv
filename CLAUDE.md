@@ -1,4 +1,4 @@
-# Tube: working notes for Claude
+# SloopyTV: working notes for Claude
 
 ## What this is
 Android TV / Fire TV IPTV player (Xtream Codes first, M3U second). Kotlin, Compose for TV,
@@ -10,7 +10,7 @@ export JAVA_HOME=/opt/homebrew/opt/openjdk@17 ANDROID_HOME=/opt/homebrew/share/a
 ./gradlew :core:test :app:assembleDebug
 ```
 Emulator AVD `tube_tv`; `adb install -r app/build/outputs/apk/debug/app-debug.apk`.
-Debug build id `tv.tube.player.debug`, release `tv.tube.player`. Release signing config reads
+Debug build id `tv.sloopy.debug`, release `tv.sloopy`. Release signing config reads
 `keystore/keystore.properties` (git-ignored; never commit, never print its contents).
 
 Screenshots from the emulator: `adb exec-out screencap -p > shot.png`. The release build blocks
@@ -38,3 +38,15 @@ capture (`FLAG_SECURE`); use the debug build for visual checks. Drive the UI wit
 - Text fields (`Field` in `ProviderScreen.kt`) are two-stage: the row takes D-pad focus, OK opens the keyboard.
   The TV keyboard is a floating window that eats the Back that closes it and reports no IME inset.
 - Screens that need D-pad keys at the root must own focus (`LiveScreen` retries `requestFocus`).
+
+## Voice
+Five touches of copy, no more: HANG ON (buffering), HANG ON SLOOPY (reconnecting), "Nothing on."
+(empty search), "Stay tuned" (quit button), TV-menu headings in Settings (PICTURE, LISTINGS,
+PARENTAL). Everything else, especially errors and the provider form, stays dead straight.
+No O-H-I-O or team references: the user turned that down.
+
+## Pairing test without a phone
+`adb forward tcp:8765 tcp:8765`, `curl http://127.0.0.1:8765/` for the salt, read the code
+from `adb shell uiautomator dump`, then run tweetnacl under macOS `jsc` to derive the key and
+seal a payload, and POST it to `/pair`. The scratch script from the first build lives only in
+the session; rebuild it from `PairPage.kt`'s JavaScript if needed.

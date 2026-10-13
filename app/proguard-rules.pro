@@ -1,4 +1,4 @@
-# Strip all android.util.Log calls from release builds. Logging goes through tv.tube.TLog,
+# Strip all android.util.Log calls from release builds. Logging goes through tv.sloopy.TLog,
 # which is itself a no-op in release, but this removes any stray direct calls too.
 -assumenosideeffects class android.util.Log {
     public static *** d(...);
@@ -17,9 +17,9 @@
 -dontnote kotlinx.serialization.**
 -keepclassmembers class kotlinx.serialization.json.** { *** Companion; }
 -keepclasseswithmembers class kotlinx.serialization.json.** { kotlinx.serialization.KSerializer serializer(...); }
--keep,includedescriptorclasses class tv.tube.**$$serializer { *; }
--keepclassmembers class tv.tube.** { *** Companion; }
--keepclasseswithmembers class tv.tube.** { kotlinx.serialization.KSerializer serializer(...); }
+-keep,includedescriptorclasses class tv.sloopy.**$$serializer { *; }
+-keepclassmembers class tv.sloopy.** { *** Companion; }
+-keepclasseswithmembers class tv.sloopy.** { kotlinx.serialization.KSerializer serializer(...); }
 
 # XmlPull interfaces come from the Android framework at runtime.
 -dontwarn org.xmlpull.**
