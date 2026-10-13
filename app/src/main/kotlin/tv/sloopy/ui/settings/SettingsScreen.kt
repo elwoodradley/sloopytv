@@ -29,6 +29,7 @@ import tv.sloopy.BuildConfig
 import tv.sloopy.core.model.StreamContainer
 import tv.sloopy.data.ProviderKind
 import tv.sloopy.data.RefreshState
+import tv.sloopy.update.UpdateState
 import tv.sloopy.ui.SloopyViewModel
 import tv.sloopy.ui.common.Hairline
 import tv.sloopy.ui.common.Label
@@ -48,6 +49,7 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
     val hasPin by vm.hasPin.collectAsState()
     val categories by vm.liveCategories.collectAsState()
     val locked by vm.lockedGroups.collectAsState()
+    val update by vm.updateState.collectAsState()
     val scope = rememberCoroutineScope()
     var pinEntry by remember { mutableStateOf("") }
     var showPin by remember { mutableStateOf(false) }
@@ -134,6 +136,18 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
 
             Section("About")
             Text("SloopyTV ${BuildConfig.VERSION_NAME}. A player only: it ships with no channels and no providers. Credentials stay in this device's keystore. No analytics, no telemetry.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.width(800.dp))
+            Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                when (val u = update) {
+                    is UpdateState.Available -> { SloopyButton("Install ${u.info.version}", primary = true, onClick = { vm.installUpdate() }); Spacer(Modifier.width(16.dp)); Text("A newer SloopyTV is ready. The Fire TV will ask you to confirm.", style = Sloopy.body) }
+                    is UpdateState.NeedsPermission -> { SloopyButton("Install ${u.info.version}", primary = true, onClick = { vm.installUpdate() }); Spacer(Modifier.width(16.dp)); Text("One-time step: on the screen that opened, turn on \"Allow from this source\" for SloopyTV, press Back, then press Install again.", style = Sloopy.body.copy(color = Sloopy.amber), modifier = Modifier.width(900.dp)) }
+                    is UpdateState.Downloading -> Text("Hang on: downloading ${u.info.version}, ${u.percent}%", style = Sloopy.body.copy(color = Sloopy.amber))
+                    is UpdateState.Ready -> Text("Downloaded. Confirm the install on screen.", style = Sloopy.body.copy(color = Sloopy.amber))
+                    is UpdateState.Failed -> { SloopyButton("Check for updates", onClick = { vm.checkForUpdate(force = true) }); Spacer(Modifier.width(16.dp)); Text(u.message, style = Sloopy.body.copy(color = Sloopy.amber)) }
+                    UpdateState.Checking -> Text("Checking…", style = Sloopy.body)
+                    UpdateState.UpToDate -> { SloopyButton("Check for updates", onClick = { vm.checkForUpdate(force = true) }); Spacer(Modifier.width(16.dp)); Text("This is the latest version.", style = Sloopy.body) }
+                    UpdateState.Idle -> SloopyButton("Check for updates", onClick = { vm.checkForUpdate(force = true) })
+                }
+            }
             Spacer(Modifier.height(40.dp))
         }
     }

@@ -40,11 +40,23 @@ An AVD named `tube_tv` (name predates the rename) (Android 14 TV, 1080p, arm64) 
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 $ANDROID_HOME/emulator/emulator -avd tube_tv -gpu auto &
 $ANDROID_HOME/platform-tools/adb wait-for-device
-$ANDROID_HOME/platform-tools/adb install -r dist/sloopytv-0.1.0.apk
+$ANDROID_HOME/platform-tools/adb install -r dist/sloopytv.apk
 ```
 
 The emulator window takes keyboard input: arrow keys are the D-pad, Enter is OK, Escape is Back,
 digits type channel numbers.
+
+## Releases and self-update
+
+`scripts/release.sh 0.1.2 "notes"` bumps the version, builds and signs, tags, pushes and
+publishes a GitHub Release whose asset is always named `sloopytv.apk`. Installed copies check
+`https://api.github.com/repos/elwoodradley/sloopytv/releases/latest` fifteen seconds after
+launch and every six hours, show a one-line toast, and install from Settings › About after the
+viewer confirms in the system installer. The downloaded APK must have the same package name
+and signing certificate as the running app or it is refused before the installer ever opens.
+Fixed download address for Downloader: `github.com/elwoodradley/sloopytv/releases/latest/download/sloopytv.apk`.
+
+Friend-facing instructions, no computer needed: [INSTALL.md](INSTALL.md).
 
 ## Sideload on a Fire TV Stick or Android TV box
 
@@ -57,7 +69,7 @@ digits type channel numbers.
 ```bash
 export ANDROID_HOME=/opt/homebrew/share/android-commandlinetools
 $ANDROID_HOME/platform-tools/adb connect 192.168.1.50:5555
-$ANDROID_HOME/platform-tools/adb install -r dist/sloopytv-0.1.0.apk
+$ANDROID_HOME/platform-tools/adb install -r dist/sloopytv.apk
 ```
 
 Accept the debugging prompt on the TV the first time. Friends without a Mac can use the

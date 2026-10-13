@@ -19,6 +19,7 @@ class Graph(app: Application) {
     val providers = ProviderStore(vault)
     val db = SloopyDb.open(app)
     val catalog = Catalog(db, providers, prefs)
+    val updater = tv.sloopy.update.Updater(app)
 }
 
 class SloopyApp : Application(), SingletonImageLoader.Factory {

@@ -108,6 +108,22 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val toast: StateFlow<String?> = _toast
 
     val refreshState = catalog.refresh
+    val updater get() = graph.updater
+    val updateState: StateFlow<tv.sloopy.update.UpdateState> = graph.updater.state
+    private var announcedUpdate: String? = null
+
+    fun checkForUpdate(force: Boolean = false) = viewModelScope.launch {
+        val r = updater.check(force)
+        if (r is tv.sloopy.update.UpdateState.Available && announcedUpdate != r.info.version) {
+            announcedUpdate = r.info.version
+            _toast.value = "SloopyTV ${r.info.version} is ready. Settings › About to install."
+        }
+    }
+    fun installUpdate() = viewModelScope.launch {
+        val s = updateState.value
+        val info = (s as? tv.sloopy.update.UpdateState.Available)?.info ?: (s as? tv.sloopy.update.UpdateState.NeedsPermission)?.info ?: return@launch
+        updater.install(info)
+    }
 
     val introEnabled: StateFlow<Boolean> = prefs.introEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val osdSeconds: StateFlow<Int> = prefs.osdSeconds.stateIn(viewModelScope, SharingStarted.Eagerly, 4)
@@ -127,6 +143,11 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         }
         viewModelScope.launch {
             visibleChannels.collect { restartNowPlaying() }
+        }
+        viewModelScope.launch {
+            // Quiet check a little after launch, then every six hours while the app is open.
+            delay(15_000)
+            while (true) { checkForUpdate(); delay(6 * 3600_000L) }
         }
     }
 

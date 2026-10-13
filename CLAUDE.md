@@ -45,6 +45,12 @@ Five touches of copy, no more: HANG ON (buffering), HANG ON SLOOPY (reconnecting
 PARENTAL). Everything else, especially errors and the provider form, stays dead straight.
 No O-H-I-O or team references: the user turned that down.
 
+## Releases
+Use `scripts/release.sh <version> "<notes>"`; never hand-bump without it (versionCode is derived
+from the version and must only rise). The updater (`update/Updater.kt`) keys on the asset name
+`sloopytv.apk`. Debug builds read `files/update_api` for a local manifest; the updater test
+(`adb reverse tcp:8099`, python http.server with latest.json + a debug APK) is in the session notes.
+
 ## Pairing test without a phone
 `adb forward tcp:8765 tcp:8765`, `curl http://127.0.0.1:8765/` for the salt, read the code
 from `adb shell uiautomator dump`, then run tweetnacl under macOS `jsc` to derive the key and
