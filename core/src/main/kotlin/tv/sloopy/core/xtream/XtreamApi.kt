@@ -1,5 +1,7 @@
 package tv.sloopy.core.xtream
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonElement
 import tv.sloopy.core.Redact
 import tv.sloopy.core.model.Account
@@ -108,7 +110,7 @@ class XtreamCredentials private constructor(
  */
 class XtreamApi(private val http: Http, private val creds: XtreamCredentials) {
 
-    private suspend fun fetch(url: String, limit: Long = Limits.JSON_BYTES): JsonElement {
+    private suspend fun fetch(url: String, limit: Long = Limits.JSON_BYTES): JsonElement = withContext(Dispatchers.IO) {
         val resp = try {
             http.get(url, mapOf("Accept" to "application/json", "User-Agent" to USER_AGENT))
         } catch (e: IOException) {
@@ -121,7 +123,7 @@ class XtreamApi(private val http: Http, private val creds: XtreamCredentials) {
             // A panel that is down or a captive portal returns HTML. Say so instead of a JSON stack trace.
             val head = bytes.take(32).toByteArray().decodeToString().trimStart()
             if (head.startsWith("<")) throw XtreamException("Server sent a web page instead of data. Check the address and port.")
-            return try {
+            try {
                 parseJson(bytes)
             } catch (e: Exception) {
                 throw XtreamException("Server sent data the app could not read", e)

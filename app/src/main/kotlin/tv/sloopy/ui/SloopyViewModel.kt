@@ -68,9 +68,40 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         if (p == null) flowOf(emptyList()) else graph.db.channels().all(p.id)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    val liveCategories: StateFlow<List<CategoryEntity>> = active.flatMapLatest { p ->
+    private val rawLiveCategories: StateFlow<List<CategoryEntity>> = active.flatMapLatest { p ->
         if (p == null) flowOf(emptyList()) else graph.db.categories().byKind(p.id, "live")
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    private val groupOrder: StateFlow<List<String>> = active.flatMapLatest { p ->
+        if (p == null) flowOf(emptyList()) else prefs.groupOrder(p.id)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** Provider's groups in the viewer's order; groups the order does not mention keep the provider's order after it. */
+    val liveCategories: StateFlow<List<CategoryEntity>> = combine(rawLiveCategories, groupOrder) { cats, order ->
+        val rank = order.withIndex().associate { (i, id) -> id to i }
+        cats.sortedWith(compareBy({ rank[it.id] ?: Int.MAX_VALUE }, { it.sortKey }))
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    fun moveGroup(id: String, delta: Int) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val ids = liveCategories.value.map { it.id }.toMutableList()
+        val i = ids.indexOf(id); val j = i + delta
+        if (i < 0 || j < 0 || j >= ids.size) return@launch
+        ids[i] = ids[j].also { ids[j] = ids[i] }
+        prefs.setGroupOrder(p.id, ids)
+    }
+
+    val favouriteVodIds: StateFlow<Set<Long>> = active.flatMapLatest { p -> if (p == null) flowOf(emptyList()) else graph.db.favouriteItems().ids(p.id, "vod") }
+        .map { it.toSet() }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    val favouriteSeriesIds: StateFlow<Set<Long>> = active.flatMapLatest { p -> if (p == null) flowOf(emptyList()) else graph.db.favouriteItems().ids(p.id, "series") }
+        .map { it.toSet() }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+
+    fun toggleItemFavourite(kind: String, id: Long) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val set = if (kind == "vod") favouriteVodIds.value else favouriteSeriesIds.value
+        if (id in set) graph.db.favouriteItems().remove(p.id, kind, id)
+        else graph.db.favouriteItems().add(tv.sloopy.data.db.FavouriteItemEntity(p.id, kind, id, System.currentTimeMillis()))
+    }
 
     val favouriteIds: StateFlow<Set<Long>> = active.flatMapLatest { p ->
         if (p == null) flowOf(emptyList()) else graph.db.favourites().ids(p.id)
@@ -103,6 +134,10 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     private val _nowPlaying = MutableStateFlow<Map<String, NowNext>>(emptyMap())
     /** epgId -> what is on now, for whatever the channel list is showing. Refreshed each minute. */
     val nowPlaying: StateFlow<Map<String, NowNext>> = _nowPlaying
+
+    /** Long-press Back from anywhere: close everything and return to the picture. */
+    val homeEvents = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    fun goHome() { homeEvents.tryEmit(Unit) }
 
     private val _toast = MutableStateFlow<String?>(null)
     val toast: StateFlow<String?> = _toast

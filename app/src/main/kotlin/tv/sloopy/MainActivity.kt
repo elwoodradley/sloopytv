@@ -26,6 +26,23 @@ class MainActivity : ComponentActivity() {
         }
     }
 
+    private var backHeld = false
+
+    /** Holding Back for a moment closes whatever is open and returns to live TV. */
+    override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+        if (event.keyCode == android.view.KeyEvent.KEYCODE_BACK) {
+            if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount > 0) {
+                if (!backHeld) { backHeld = true; vm.goHome() }
+                return true
+            }
+            if (event.action == android.view.KeyEvent.ACTION_UP && backHeld) {
+                backHeld = false
+                return true
+            }
+        }
+        return super.dispatchKeyEvent(event)
+    }
+
     override fun onStop() {
         super.onStop()
         vm.saveProgress()

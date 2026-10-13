@@ -116,6 +116,20 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
             SettingRow("Tube power-on at launch", if (intro) "ON" else "OFF") { scope.launch { vm.prefs.setIntroEnabled(!intro) } }
             SettingRow("Channel badge stays for", "$osd S") { scope.launch { vm.prefs.setOsdSeconds(if (osd >= 8) 2 else osd + 1) } }
 
+            Section("Channel groups")
+            Text("The order groups appear in the channel list. Up and Down move a group.", style = Sloopy.body.copy(color = Sloopy.muted))
+            categories.forEachIndexed { i, c ->
+                Column {
+                    Row(Modifier.fillMaxWidth().height(50.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(c.name, style = Sloopy.listName, modifier = Modifier.width(520.dp), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                        SloopyButton("Up", enabled = i > 0, onClick = { vm.moveGroup(c.id, -1) })
+                        Spacer(Modifier.width(8.dp))
+                        SloopyButton("Down", enabled = i < categories.lastIndex, onClick = { vm.moveGroup(c.id, 1) })
+                    }
+                    Hairline(color = Sloopy.hair2)
+                }
+            }
+
             Section("Parental")
             if (!hasPin) {
                 Row(verticalAlignment = Alignment.CenterVertically) {

@@ -133,6 +133,18 @@ interface FavouriteDao {
 }
 
 @Dao
+interface FavouriteItemDao {
+    @Query("SELECT itemId FROM favourite_items WHERE providerId = :p AND kind = :kind ORDER BY addedAt DESC")
+    fun ids(p: String, kind: String): Flow<List<Long>>
+
+    @Insert(onConflict = OnConflictStrategy.IGNORE)
+    suspend fun add(f: FavouriteItemEntity)
+
+    @Query("DELETE FROM favourite_items WHERE providerId = :p AND kind = :kind AND itemId = :id")
+    suspend fun remove(p: String, kind: String, id: Long)
+}
+
+@Dao
 interface ProgressDao {
     @Query("SELECT * FROM progress WHERE providerId = :p ORDER BY updatedAt DESC LIMIT :limit")
     fun recent(p: String, limit: Int = 30): Flow<List<ProgressEntity>>
@@ -160,6 +172,9 @@ interface VodDao {
 
     @Query("SELECT * FROM vod WHERE providerId = :p AND id = :id")
     suspend fun byId(p: String, id: Long): VodEntity?
+
+    @Query("SELECT * FROM vod WHERE providerId = :p AND id IN (:ids)")
+    suspend fun byIds(p: String, ids: List<Long>): List<VodEntity>
 
     @Query("SELECT * FROM vod WHERE providerId = :p AND name LIKE '%' || :q || '%' ORDER BY name LIMIT :limit")
     suspend fun search(p: String, q: String, limit: Int = 100): List<VodEntity>
@@ -190,6 +205,9 @@ interface SeriesDao {
 
     @Query("SELECT * FROM series WHERE providerId = :p AND id = :id")
     suspend fun byId(p: String, id: Long): SeriesEntity?
+
+    @Query("SELECT * FROM series WHERE providerId = :p AND id IN (:ids)")
+    suspend fun byIds(p: String, ids: List<Long>): List<SeriesEntity>
 
     @Query("SELECT * FROM series WHERE providerId = :p AND name LIKE '%' || :q || '%' ORDER BY name LIMIT :limit")
     suspend fun search(p: String, q: String, limit: Int = 100): List<SeriesEntity>

@@ -25,7 +25,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import tv.sloopy.ui.common.isDown
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,6 +59,7 @@ fun LibraryScreen(vm: SloopyViewModel, kind: String, go: (String) -> Unit, onBac
     val refresh by vm.refreshState.collectAsState()
     var focusedTile by remember { mutableStateOf<Tile?>(null) }
     var focusedRow by remember { mutableStateOf("") }
+    val lastTile = remember { mutableStateOf<FocusRequester?>(null) }
 
     BackHandler { onBack() }
 
@@ -74,6 +81,14 @@ fun LibraryScreen(vm: SloopyViewModel, kind: String, go: (String) -> Unit, onBac
     val continueTiles = remember(progress, kind) {
         progress.filter { if (kind == "vod") it.kind == "vod" else it.kind == "episode" }
             .map { Tile(if (it.kind == "episode") (it.parentId ?: it.itemId) else it.itemId, if (it.kind == "episode") "series" else "vod", it.title, it.image, it.subtitle, it.positionMs.toFloat() / it.durationMs.coerceAtLeast(1), it.container, it.parentId, it.positionMs) }
+    }
+    val favIds by (if (kind == "vod") vm.favouriteVodIds else vm.favouriteSeriesIds).collectAsState()
+    val myList by produceState<List<Tile>>(emptyList(), provider?.id, kind, favIds) {
+        val p = provider ?: return@produceState
+        val ids = favIds.toList()
+        value = if (ids.isEmpty()) emptyList()
+        else if (kind == "vod") vm.graph.db.vod().byIds(p.id, ids).sortedBy { ids.indexOf(it.id) }.map { Tile(it.id, "vod", it.name, it.poster, it.year, container = it.container) }
+        else vm.graph.db.series().byIds(p.id, ids).sortedBy { ids.indexOf(it.id) }.map { Tile(it.id, "series", it.name, it.cover, it.releaseDate?.take(4)) }
     }
     val total by produceState(0, provider?.id, kind) {
         val p = provider ?: return@produceState
@@ -97,7 +112,20 @@ fun LibraryScreen(vm: SloopyViewModel, kind: String, go: (String) -> Unit, onBac
             }
         }
 
-        LazyColumn(Modifier.fillMaxSize(), contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 40.dp)) {
+        // Fast Up/Down across rows can land focus on a tile that is no longer composed, which
+        // leaves nothing focused. Catch that and hand focus back to the last tile that had it.
+        var hasFocus by remember { mutableStateOf(false) }
+        LazyColumn(
+            Modifier.fillMaxSize()
+                .onFocusChanged { hasFocus = it.hasFocus }
+                .onPreviewKeyEvent { ev ->
+                    if (ev.isDown && !hasFocus && lastTile.value != null) { runCatching { lastTile.value?.requestFocus() }; true } else false
+                },
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 40.dp),
+        ) {
+            if (myList.isNotEmpty()) item("mylist") {
+                TileRow("My list", myList, onFocus = { focusedTile = it; focusedRow = "My list" }, onOpen = { onOpen(it.id) })
+            }
             if (continueTiles.isNotEmpty()) item("continue") {
                 TileRow("Continue watching", continueTiles, wide = true, onFocus = { focusedTile = it; focusedRow = "Continue watching" }, onOpen = { onOpen(it.id) })
             }
@@ -124,33 +152,38 @@ private fun CategoryRow(vm: SloopyViewModel, kind: String, cat: CategoryEntity, 
 }
 
 @Composable
-fun TileRow(title: String, tiles: List<Tile>, wide: Boolean = false, onFocus: (Tile) -> Unit, onOpen: (Tile) -> Unit) {
+fun TileRow(title: String, tiles: List<Tile>, wide: Boolean = false, onFocus: (Tile) -> Unit, onOpen: (Tile) -> Unit, lastTile: androidx.compose.runtime.MutableState<FocusRequester?> = remember { mutableStateOf(null) }) {
     Column(Modifier.padding(top = 6.dp)) {
         Row(Modifier.padding(start = 72.dp).height(36.dp), verticalAlignment = Alignment.Bottom) {
             Text(title.uppercase(), style = Sloopy.titleRow)
             Spacer(Modifier.width(14.dp))
             Label("${tiles.size}")
         }
-        LazyRow(contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 72.dp, vertical = 10.dp), horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(14.dp)) {
+        LazyRow(
+            modifier = Modifier.focusRestorer().focusGroup(),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 72.dp, vertical = 10.dp),
+            horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(14.dp),
+        ) {
             items(tiles, key = { it.kind + it.id }) { t ->
-                Poster(t, wide = wide, onFocus = { onFocus(t) }, onClick = { onOpen(t) })
+                Poster(t, wide = wide, onFocus = { onFocus(t) }, onClick = { onOpen(t) }, lastTile = lastTile)
             }
         }
     }
 }
 
 @Composable
-fun Poster(t: Tile, wide: Boolean = false, onFocus: () -> Unit, onClick: () -> Unit) {
+fun Poster(t: Tile, wide: Boolean = false, onFocus: () -> Unit, onClick: () -> Unit, lastTile: androidx.compose.runtime.MutableState<FocusRequester?>? = null) {
     val w = if (wide) 246.dp else 158.dp
     val h = if (wide) 138.dp else 237.dp
     var focused by remember { mutableStateOf(false) }
+    val fr = remember { FocusRequester() }
     Surface(
         onClick = onClick,
         shape = ClickableSurfaceDefaults.shape(RectangleShape),
         colors = ClickableSurfaceDefaults.colors(containerColor = Sloopy.surface2, focusedContainerColor = Sloopy.surface2),
         border = ClickableSurfaceDefaults.border(focusedBorder = androidx.tv.material3.Border(androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.75f)), shape = RectangleShape)),
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1.06f),
-        modifier = Modifier.size(w, h).onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() },
+        modifier = Modifier.size(w, h).focusRequester(fr).onFocusChanged { focused = it.isFocused; if (it.isFocused) { onFocus(); lastTile?.value = fr } },
     ) {
         Box(Modifier.fillMaxSize()) {
             if (t.image != null) AsyncImage(model = t.image, contentDescription = t.title, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)

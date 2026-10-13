@@ -38,6 +38,7 @@ import androidx.media3.common.util.UnstableApi
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
+import kotlinx.coroutines.launch
 import tv.sloopy.ui.Groups
 import tv.sloopy.ui.SloopyViewModel
 import tv.sloopy.ui.common.BACK_KEYS
@@ -68,8 +69,15 @@ fun ChannelsOverlay(vm: SloopyViewModel, onClose: () -> Unit) {
     val unlocked by vm.unlockedSession.collectAsState()
 
     val listState = rememberLazyListState()
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
     val currentFocus = remember { FocusRequester() }
     val firstFocus = remember { FocusRequester() }
+    val lastFocus = remember { FocusRequester() }
+    var focusedIndex by remember { mutableStateOf(-1) }
+    val groupState = rememberLazyListState()
+    val firstGroupFocus = remember { FocusRequester() }
+    val lastGroupFocus = remember { FocusRequester() }
+    var focusedGroup by remember { mutableStateOf(-1) }
     val now = System.currentTimeMillis() / 1000
 
     val groups = remember(categories, locked, unlocked) {
@@ -88,25 +96,33 @@ fun ChannelsOverlay(vm: SloopyViewModel, onClose: () -> Unit) {
             .background(Brush.horizontalGradient(0f to Color(0xF80B0B0C), 0.56f to Color(0xF00B0B0C), 0.72f to Color(0x8C0B0B0C), 1f to Color.Transparent))
             .onPreviewKeyEvent { ev ->
                 if (!ev.isDown) return@onPreviewKeyEvent false
+                // Lists wrap: Up from the top lands on the last entry, Down from the bottom on the first.
+                fun wrap(state: androidx.compose.foundation.lazy.LazyListState, index: Int, fr: FocusRequester) {
+                    scope.launch { state.scrollToItem(index); repeat(12) { kotlinx.coroutines.delay(40); if (runCatching { fr.requestFocus() }.getOrDefault(false)) return@launch } }
+                }
                 when {
                     ev.inKeys(BACK_KEYS) -> { onClose(); true }
-                    ev.isKey(Key.DirectionRight) && false -> true
+                    ev.isKey(Key.DirectionUp) && focusedIndex == 0 && channels.size > 1 -> { wrap(listState, channels.lastIndex, lastFocus); true }
+                    ev.isKey(Key.DirectionDown) && focusedIndex == channels.lastIndex && channels.size > 1 -> { wrap(listState, 0, firstFocus); true }
+                    ev.isKey(Key.DirectionUp) && focusedGroup == 0 && groups.size > 1 -> { wrap(groupState, groups.lastIndex, lastGroupFocus); true }
+                    ev.isKey(Key.DirectionDown) && focusedGroup == groups.lastIndex && groups.size > 1 -> { wrap(groupState, 0, firstGroupFocus); true }
                     else -> false
                 }
             }
     ) {
         Row(Modifier.fillMaxSize().padding(start = 72.dp, top = 54.dp, bottom = 36.dp)) {
             // Groups rail
-            LazyColumn(Modifier.width(190.dp).fillMaxHeight().padding(top = 42.dp)) {
-                itemsIndexed(groups, key = { _, g -> g.first }) { _, (id, name) ->
+            LazyColumn(state = groupState, modifier = Modifier.width(190.dp).fillMaxHeight().padding(top = 42.dp)) {
+                itemsIndexed(groups, key = { _, g -> g.first }) { gi, (id, name) ->
                     var focused by remember { mutableStateOf(false) }
+                    val gfr = if (gi == 0) firstGroupFocus else if (gi == groups.lastIndex) lastGroupFocus else null
                     val cur = id == group
                     Surface(
                         onClick = { vm.selectGroup(id) },
                         shape = ClickableSurfaceDefaults.shape(RectangleShape),
                         colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color.Transparent, contentColor = Sloopy.muted, focusedContentColor = Color.White),
                         scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
-                        modifier = Modifier.fillMaxWidth().height(40.dp).onFocusChanged { focused = it.isFocused },
+                        modifier = Modifier.fillMaxWidth().height(40.dp).then(if (gfr != null) Modifier.focusRequester(gfr) else Modifier).onFocusChanged { focused = it.isFocused; if (it.isFocused) { focusedGroup = gi; focusedIndex = -1 } },
                     ) {
                         Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
                             Box(Modifier.size(5.dp).background(if (cur) Sloopy.amber else Color.Transparent))
@@ -124,7 +140,7 @@ fun ChannelsOverlay(vm: SloopyViewModel, onClose: () -> Unit) {
                         val isCurrent = c.id == current?.id
                         val np = c.epgId?.let { nowPlaying[it] }
                         var focused by remember { mutableStateOf(false) }
-                        val fr = if (isCurrent) currentFocus else if (i == 0) firstFocus else null
+                        val fr = if (isCurrent) currentFocus else if (i == 0) firstFocus else if (i == channels.lastIndex) lastFocus else null
                         Surface(
                             onClick = { vm.tune(c); onClose() },
                             onLongClick = { vm.toggleFavourite(c) },
@@ -134,7 +150,7 @@ fun ChannelsOverlay(vm: SloopyViewModel, onClose: () -> Unit) {
                             scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
                             modifier = Modifier.fillMaxWidth().height(66.dp)
                                 .then(if (fr != null) Modifier.focusRequester(fr) else Modifier)
-                                .onFocusChanged { focused = it.isFocused },
+                                .onFocusChanged { focused = it.isFocused; if (it.isFocused) { focusedIndex = i; focusedGroup = -1 } },
                         ) {
                             Column {
                                 Row(Modifier.fillMaxWidth().height(65.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {

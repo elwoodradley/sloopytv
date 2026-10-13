@@ -53,6 +53,8 @@ import tv.sloopy.ui.theme.Sloopy
 @Composable
 fun DetailsScreen(vm: SloopyViewModel, kind: String, id: Long, onBack: () -> Unit, onPlay: () -> Unit) {
     val provider by vm.active.collectAsState()
+    val favVod by vm.favouriteVodIds.collectAsState()
+    val favSeries by vm.favouriteSeriesIds.collectAsState()
     var error by remember { mutableStateOf<String?>(null) }
     val playFocus = remember { FocusRequester() }
     BackHandler { onBack() }
@@ -82,9 +84,10 @@ fun DetailsScreen(vm: SloopyViewModel, kind: String, id: Long, onBack: () -> Uni
                 Text(info?.plot ?: "", style = Sloopy.bodyBig, maxLines = 4, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 12.dp).width(820.dp))
                 if (info?.cast != null) Text("Cast: ${info!!.cast}", style = Sloopy.body.copy(color = Sloopy.muted), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 8.dp).width(820.dp))
                 if (error != null) Text(error!!, style = Sloopy.body.copy(color = Sloopy.amber), modifier = Modifier.padding(top = 8.dp))
-                Spacer(Modifier.weight(1f))
+                Spacer(Modifier.height(28.dp))
                 Row {
                     val b = base
+                    val onList = id in favVod
                     SloopyButton(if (resume > 0) "Resume · ${fmtMs(resume)}" else "Play", primary = true, enabled = b != null, modifier = Modifier.focusRequester(playFocus), onClick = {
                         if (b != null) { vm.playVod(b.id, title, b.year, image, info?.container ?: b.container, "vod", null, resume); onPlay() }
                     })
@@ -92,6 +95,8 @@ fun DetailsScreen(vm: SloopyViewModel, kind: String, id: Long, onBack: () -> Uni
                         Spacer(Modifier.width(10.dp))
                         SloopyButton("From the start", onClick = { val bb = base ?: return@SloopyButton; vm.playVod(bb.id, title, bb.year, image, info?.container ?: bb.container, "vod", null, 0); onPlay() })
                     }
+                    Spacer(Modifier.width(10.dp))
+                    SloopyButton(if (onList) "On your list" else "Add to list", onClick = { vm.toggleItemFavourite("vod", id) })
                 }
             }
         }
@@ -105,7 +110,7 @@ fun DetailsScreen(vm: SloopyViewModel, kind: String, id: Long, onBack: () -> Uni
         LaunchedEffect(info) { if (season == null) season = info?.seasons?.firstOrNull() }
         val title = info?.series?.name ?: base?.name ?: ""
         val image = info?.series?.backdrop ?: base?.backdrop ?: base?.cover
-        val episodes = info?.episodes?.get(season) ?: emptyList()
+        val episodes = season?.let { s -> info?.episodes?.get(s) } ?: emptyList()
 
         Backdrop(image) {
             Row(Modifier.fillMaxSize().padding(horizontal = 72.dp, vertical = 48.dp)) {
@@ -116,6 +121,8 @@ fun DetailsScreen(vm: SloopyViewModel, kind: String, id: Long, onBack: () -> Uni
                     Text(info?.series?.plot ?: base?.plot ?: "", style = Sloopy.bodyBig, maxLines = 5, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 12.dp))
                     if (error != null) Text(error!!, style = Sloopy.body.copy(color = Sloopy.amber), modifier = Modifier.padding(top = 8.dp))
                     Spacer(Modifier.height(20.dp))
+                    SloopyButton(if (id in favSeries) "On your list" else "Add to list", onClick = { vm.toggleItemFavourite("series", id) })
+                    Spacer(Modifier.height(14.dp))
                     Row {
                         info?.seasons?.take(12)?.forEach { s ->
                             SloopyButton("S$s", primary = s == season, onClick = { season = s }, modifier = Modifier.padding(end = 8.dp))

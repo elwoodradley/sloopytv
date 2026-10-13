@@ -60,6 +60,7 @@ import tv.sloopy.ui.common.Hairline
 import tv.sloopy.ui.common.Label
 import tv.sloopy.ui.common.LiveDot
 import tv.sloopy.ui.common.ProgressHairline
+import tv.sloopy.ui.common.QuitPrompt
 import tv.sloopy.ui.common.TopNav
 import tv.sloopy.ui.common.isDown
 import tv.sloopy.ui.common.isKey
@@ -79,7 +80,7 @@ private data class Focused(val channel: ChannelEntity, val prog: ProgrammeEntity
 
 @UnstableApi
 @Composable
-fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit) {
+fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, onQuit: () -> Unit) {
     val provider by vm.active.collectAsState()
     val channels by vm.visibleChannels.collectAsState()
     val current by vm.currentChannel.collectAsState()
@@ -97,7 +98,12 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit) {
     val dpPerSec: Float = SLOT.value / 1800f
     val density = androidx.compose.ui.platform.LocalDensity.current.density
 
-    BackHandler { onBack() }
+    // Back here is the second Back from the picture: offer to switch off. Stay tuned returns to TV.
+    var quit by remember { mutableStateOf(false) }
+    BackHandler { quit = true }
+    val firstRowFocus = remember { FocusRequester() }
+    val lastRowFocus = remember { FocusRequester() }
+    var focusedRow by remember { mutableStateOf(-1) }
 
     // The grid is wider than the screen only once rows exist, so wait for a real max scroll.
     var scrolledToNow by remember { mutableStateOf(false) }
@@ -116,12 +122,19 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit) {
         didInitialFocus = true
     }
 
+    Box(Modifier.fillMaxSize()) {
     Column(
         Modifier.fillMaxSize().background(Sloopy.ground)
             .onPreviewKeyEvent { ev ->
                 if (!ev.isDown) return@onPreviewKeyEvent false
                 when {
                     ev.isKey(Key.Guide) -> { onBack(); true }
+                    ev.isKey(Key.DirectionUp) && focusedRow == 0 && channels.size > 1 -> {
+                        scope.launch { listState.scrollToItem(channels.lastIndex); repeat(12) { kotlinx.coroutines.delay(40); if (runCatching { lastRowFocus.requestFocus() }.getOrDefault(false)) return@launch } }; true
+                    }
+                    ev.isKey(Key.DirectionDown) && focusedRow == channels.lastIndex && channels.size > 1 -> {
+                        scope.launch { listState.scrollToItem(0); repeat(12) { kotlinx.coroutines.delay(40); if (runCatching { firstRowFocus.requestFocus() }.getOrDefault(false)) return@launch } }; true
+                    }
                     ev.isKey(Key.ChannelUp, Key.PageUp) -> { scope.launch { listState.scrollToItem((listState.firstVisibleItemIndex - 10).coerceAtLeast(0)) }; true }
                     ev.isKey(Key.ChannelDown, Key.PageDown) -> { scope.launch { listState.scrollToItem((listState.firstVisibleItemIndex + 10).coerceAtMost(channels.lastIndex.coerceAtLeast(0))) }; true }
                     else -> false
@@ -155,18 +168,22 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit) {
             Hairline()
 
             LazyColumn(state = listState, modifier = Modifier.fillMaxSize()) {
-                itemsIndexed(channels, key = { _, c -> c.id }) { _, c ->
+                itemsIndexed(channels, key = { _, c -> c.id }) { i, c ->
+                    val isCur = c.id == current?.id || (current == null && i == 0)
                     GuideRow(
                         vm = vm, channel = c, isCurrent = c.id == current?.id,
                         winStart = winStart, winEnd = winEnd, nowEpoch = nowEpoch, dpPerSec = dpPerSec,
                         hScroll = hScroll,
-                        nowFocus = if (c.id == current?.id || (current == null && c == channels.firstOrNull())) nowFocus else null,
-                        onFocused = { p -> focused = Focused(c, p) },
+                        nowFocus = when { isCur -> nowFocus; i == 0 -> firstRowFocus; i == channels.lastIndex -> lastRowFocus; else -> null },
+                        requestOnLoad = isCur,
+                        onFocused = { p -> focusedRow = i; focused = Focused(c, p) },
                         onSelect = { p -> onSelect(vm, c, p, nowEpoch, go) },
                     )
                 }
             }
         }
+    }
+    if (quit) QuitPrompt(onQuit = onQuit, onCancel = { quit = false; onBack() })
     }
 }
 
@@ -200,6 +217,7 @@ private fun GuideRow(
     winStart: Long, winEnd: Long, nowEpoch: Long, dpPerSec: Float,
     hScroll: androidx.compose.foundation.ScrollState,
     nowFocus: FocusRequester?,
+    requestOnLoad: Boolean,
     onFocused: (ProgrammeEntity?) -> Unit,
     onSelect: (ProgrammeEntity?) -> Unit,
 ) {
@@ -212,7 +230,7 @@ private fun GuideRow(
     }
 
     LaunchedEffect(progs, nowFocus) {
-        if (nowFocus != null && progs != null) {
+        if (requestOnLoad && nowFocus != null && progs != null) {
             kotlinx.coroutines.delay(50)
             runCatching { nowFocus.requestFocus() }
             // Focus pulls the cell into view at the right edge; put "now" one slot in from the left instead.

@@ -85,9 +85,12 @@ private fun SloopyNav(vm: SloopyViewModel, startAtProviders: Boolean, onQuit: ()
             else -> nav.navigate(route) { launchSingleTop = true; popUpTo("live") }
         }
     }
+    LaunchedEffect(Unit) {
+        vm.homeEvents.collect { nav.navigate("live") { popUpTo("live") { inclusive = true }; launchSingleTop = true } }
+    }
     NavHost(nav, startDestination = if (startAtProviders) "provider/new" else "live") {
         composable("live") { LiveScreen(vm, go = go, onQuit = onQuit) }
-        composable("guide") { GuideScreen(vm, go = go, onBack = { nav.popBackStack() }) }
+        composable("guide") { GuideScreen(vm, go = go, onBack = { go("live") }, onQuit = onQuit) }
         composable("movies") { LibraryScreen(vm, kind = "vod", go = go, onBack = { nav.popBackStack() }, onOpen = { id -> nav.navigate("details/vod/$id") }) }
         composable("series") { LibraryScreen(vm, kind = "series", go = go, onBack = { nav.popBackStack() }, onOpen = { id -> nav.navigate("details/series/$id") }) }
         composable("details/{kind}/{id}", arguments = listOf(navArgument("kind") { type = NavType.StringType }, navArgument("id") { type = NavType.LongType })) { e ->

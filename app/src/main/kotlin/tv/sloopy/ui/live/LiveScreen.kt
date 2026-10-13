@@ -45,6 +45,7 @@ import tv.sloopy.ui.common.Clock
 import tv.sloopy.ui.common.LiveDot
 import tv.sloopy.ui.common.OK_KEYS
 import tv.sloopy.ui.common.ProgressHairline
+import tv.sloopy.ui.common.QuitPrompt
 import tv.sloopy.ui.common.TopNav
 import tv.sloopy.ui.common.SloopyButton
 import tv.sloopy.ui.common.digit
@@ -98,13 +99,13 @@ fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
         }
     }
 
+    // Back on the bare picture opens the guide; on any overlay it just closes the overlay.
+    // Holding Back anywhere comes back here with everything closed (see MainActivity).
     BackHandler {
-        overlay = when (overlay) {
-            Overlay.NONE -> Overlay.QUIT
-            else -> Overlay.NONE
-        }
         digits = ""
+        if (overlay == Overlay.NONE) go("guide") else overlay = Overlay.NONE
     }
+    LaunchedEffect(Unit) { vm.homeEvents.collect { overlay = Overlay.NONE; digits = "" } }
 
     Box(
         Modifier
@@ -237,23 +238,6 @@ private fun Deck(go: (String) -> Unit, onClose: () -> Unit) {
     ) {
         Box(Modifier.focusRequester(first)) {
             TopNav(current = "live", onSelect = { if (it == "live") onClose() else go(it) }, modifier = Modifier.padding(top = 24.dp))
-        }
-    }
-}
-
-@Composable
-private fun QuitPrompt(onQuit: () -> Unit, onCancel: () -> Unit) {
-    val first = remember { FocusRequester() }
-    LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
-    Box(Modifier.fillMaxSize().background(Color(0x99000000)), contentAlignment = Alignment.Center) {
-        Column(Modifier.background(Sloopy.ground).padding(40.dp)) {
-            Text("SWITCH OFF?", style = Sloopy.titleBig)
-            Spacer(Modifier.height(24.dp))
-            Row {
-                SloopyButton("Switch off", onClick = onQuit, primary = true, modifier = Modifier.focusRequester(first))
-                Spacer(Modifier.width(12.dp))
-                SloopyButton("Stay tuned", onClick = onCancel)
-            }
         }
     }
 }

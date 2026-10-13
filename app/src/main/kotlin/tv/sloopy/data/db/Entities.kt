@@ -63,6 +63,10 @@ data class EpgChannelEntity(
 @Entity(tableName = "favourites", primaryKeys = ["providerId", "channelId"])
 data class FavouriteEntity(val providerId: String, val channelId: Long, val addedAt: Long)
 
+/** Movies and series on the viewer's list. */
+@Entity(tableName = "favourite_items", primaryKeys = ["providerId", "kind", "itemId"])
+data class FavouriteItemEntity(val providerId: String, val kind: String, val itemId: Long, val addedAt: Long)
+
 @Entity(tableName = "progress", primaryKeys = ["providerId", "kind", "itemId"], indices = [Index("providerId", "updatedAt")])
 data class ProgressEntity(
     val providerId: String,
