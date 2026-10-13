@@ -134,6 +134,7 @@ fun DetailsScreen(vm: SloopyViewModel, kind: String, id: Long, onBack: () -> Uni
                     items(episodes, key = { it.id }) { ep ->
                         val watched = latest?.takeIf { it.itemId == ep.id }
                         EpisodeRow(ep, watched?.positionMs ?: 0, watched?.durationMs ?: 0, onClick = {
+                            vm.setEpisodeQueue(id, title, image, info?.seasons?.flatMap { sn -> info?.episodes?.get(sn) ?: emptyList() } ?: emptyList())
                             vm.playVod(ep.id, title, "S${ep.season} E${ep.number} · ${ep.title}", ep.image ?: image, ep.container, "episode", id, watched?.positionMs ?: 0)
                             onPlay()
                         })

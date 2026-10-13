@@ -41,6 +41,8 @@ import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Surface
 import androidx.tv.material3.Text
 import coil3.compose.AsyncImage
+import kotlinx.coroutines.launch
+import tv.sloopy.ui.common.isKey
 import tv.sloopy.data.db.CategoryEntity
 import tv.sloopy.data.db.ProgressEntity
 import tv.sloopy.ui.SloopyViewModel
@@ -112,28 +114,55 @@ fun LibraryScreen(vm: SloopyViewModel, kind: String, go: (String) -> Unit, onBac
             }
         }
 
-        // Fast Up/Down across rows can land focus on a tile that is no longer composed, which
-        // leaves nothing focused. Catch that and hand focus back to the last tile that had it.
+        // Up and Down between rows are handled here, not by geometric focus search: the target
+        // row is scrolled into view first, then its last-focused poster gets focus. A row with
+        // nothing in it yet is skipped. This is what stops the highlight getting lost.
+        val rowKeys = remember(myList.isNotEmpty(), continueTiles.isNotEmpty(), recent.isNotEmpty(), categories) {
+            buildList { if (myList.isNotEmpty()) add("mylist"); if (continueTiles.isNotEmpty()) add("continue"); if (recent.isNotEmpty()) add("recent"); categories.forEach { add("cat-" + it.id) } }
+        }
+        val rowRequesters = remember { mutableMapOf<String, FocusRequester>() }
+        fun req(key: String) = rowRequesters.getOrPut(key) { FocusRequester() }
+        var focusedRowKey by remember { mutableStateOf<String?>(null) }
+        val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+        val scope = androidx.compose.runtime.rememberCoroutineScope()
         var hasFocus by remember { mutableStateOf(false) }
         LazyColumn(
-            Modifier.fillMaxSize()
+            state = listState,
+            modifier = Modifier.fillMaxSize()
                 .onFocusChanged { hasFocus = it.hasFocus }
                 .onPreviewKeyEvent { ev ->
-                    if (ev.isDown && !hasFocus && lastTile.value != null) { runCatching { lastTile.value?.requestFocus() }; true } else false
+                    if (!ev.isDown) return@onPreviewKeyEvent false
+                    val dir = when { ev.isKey(androidx.compose.ui.input.key.Key.DirectionDown) -> 1; ev.isKey(androidx.compose.ui.input.key.Key.DirectionUp) -> -1; else -> 0 }
+                    if (dir == 0) {
+                        if (!hasFocus && lastTile.value != null) { runCatching { lastTile.value?.requestFocus() }; return@onPreviewKeyEvent true }
+                        return@onPreviewKeyEvent false
+                    }
+                    val cur = rowKeys.indexOf(focusedRowKey)
+                    if (cur < 0) return@onPreviewKeyEvent false
+                    if (dir < 0 && cur == 0) return@onPreviewKeyEvent false   // let Up leave the list for the nav bar
+                    scope.launch {
+                        var t = cur + dir
+                        while (t in rowKeys.indices) {
+                            listState.scrollToItem(t)
+                            repeat(8) { kotlinx.coroutines.delay(40); if (runCatching { req(rowKeys[t]).requestFocus() }.getOrDefault(false)) return@launch }
+                            t += dir
+                        }
+                    }
+                    true
                 },
             contentPadding = androidx.compose.foundation.layout.PaddingValues(bottom = 40.dp),
         ) {
             if (myList.isNotEmpty()) item("mylist") {
-                TileRow("My list", myList, onFocus = { focusedTile = it; focusedRow = "My list" }, onOpen = { onOpen(it.id) })
+                TileRow("My list", myList, requester = req("mylist"), onFocus = { focusedTile = it; focusedRow = "My list"; focusedRowKey = "mylist" }, onOpen = { onOpen(it.id) }, lastTile = lastTile)
             }
             if (continueTiles.isNotEmpty()) item("continue") {
-                TileRow("Continue watching", continueTiles, wide = true, onFocus = { focusedTile = it; focusedRow = "Continue watching" }, onOpen = { onOpen(it.id) })
+                TileRow("Continue watching", continueTiles, wide = true, requester = req("continue"), onFocus = { focusedTile = it; focusedRow = "Continue watching"; focusedRowKey = "continue" }, onOpen = { onOpen(it.id) }, lastTile = lastTile)
             }
             if (recent.isNotEmpty()) item("recent") {
-                TileRow("Recently added", recent, onFocus = { focusedTile = it; focusedRow = "Recently added · $total titles" }, onOpen = { onOpen(it.id) })
+                TileRow("Recently added", recent, requester = req("recent"), onFocus = { focusedTile = it; focusedRow = "Recently added · $total titles"; focusedRowKey = "recent" }, onOpen = { onOpen(it.id) }, lastTile = lastTile)
             }
             items(categories, key = { "cat-" + it.id }) { cat ->
-                CategoryRow(vm, kind, cat, onFocus = { focusedTile = it; focusedRow = cat.name }, onOpen = { onOpen(it.id) })
+                CategoryRow(vm, kind, cat, requester = req("cat-" + cat.id), onFocus = { focusedTile = it; focusedRow = cat.name; focusedRowKey = "cat-" + cat.id }, onOpen = { onOpen(it.id) }, lastTile = lastTile)
             }
         }
     }
@@ -141,18 +170,18 @@ fun LibraryScreen(vm: SloopyViewModel, kind: String, go: (String) -> Unit, onBac
 
 @UnstableApi
 @Composable
-private fun CategoryRow(vm: SloopyViewModel, kind: String, cat: CategoryEntity, onFocus: (Tile) -> Unit, onOpen: (Tile) -> Unit) {
+private fun CategoryRow(vm: SloopyViewModel, kind: String, cat: CategoryEntity, requester: FocusRequester, onFocus: (Tile) -> Unit, onOpen: (Tile) -> Unit, lastTile: androidx.compose.runtime.MutableState<FocusRequester?>) {
     val provider by vm.active.collectAsState()
     val tiles by produceState<List<Tile>>(emptyList(), cat.id) {
         val p = provider ?: return@produceState
         value = if (kind == "vod") vm.graph.db.vod().byCategory(p.id, cat.id, 60).map { Tile(it.id, "vod", it.name, it.poster, it.year, container = it.container) }
         else vm.graph.db.series().byCategory(p.id, cat.id, 60).map { Tile(it.id, "series", it.name, it.cover, it.releaseDate?.take(4)) }
     }
-    if (tiles.isNotEmpty()) TileRow(cat.name, tiles, onFocus = onFocus, onOpen = onOpen)
+    if (tiles.isNotEmpty()) TileRow(cat.name, tiles, requester = requester, onFocus = onFocus, onOpen = onOpen, lastTile = lastTile)
 }
 
 @Composable
-fun TileRow(title: String, tiles: List<Tile>, wide: Boolean = false, onFocus: (Tile) -> Unit, onOpen: (Tile) -> Unit, lastTile: androidx.compose.runtime.MutableState<FocusRequester?> = remember { mutableStateOf(null) }) {
+fun TileRow(title: String, tiles: List<Tile>, wide: Boolean = false, requester: FocusRequester = remember { FocusRequester() }, onFocus: (Tile) -> Unit, onOpen: (Tile) -> Unit, lastTile: androidx.compose.runtime.MutableState<FocusRequester?> = remember { mutableStateOf(null) }) {
     Column(Modifier.padding(top = 6.dp)) {
         Row(Modifier.padding(start = 72.dp).height(36.dp), verticalAlignment = Alignment.Bottom) {
             Text(title.uppercase(), style = Sloopy.titleRow)
@@ -160,7 +189,7 @@ fun TileRow(title: String, tiles: List<Tile>, wide: Boolean = false, onFocus: (T
             Label("${tiles.size}")
         }
         LazyRow(
-            modifier = Modifier.focusRestorer().focusGroup(),
+            modifier = Modifier.focusRequester(requester).focusRestorer().focusGroup(),
             contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 72.dp, vertical = 10.dp),
             horizontalArrangement = androidx.compose.foundation.layout.Arrangement.spacedBy(14.dp),
         ) {

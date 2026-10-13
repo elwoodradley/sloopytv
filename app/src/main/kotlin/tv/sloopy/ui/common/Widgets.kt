@@ -166,7 +166,7 @@ fun TopNav(current: String, onSelect: (String) -> Unit, modifier: Modifier = Mod
     }
 }
 
-val NAV_ITEMS = listOf("live" to "Live", "guide" to "Guide", "movies" to "Movies", "series" to "Series", "search" to "Search", "settings" to "Settings")
+val NAV_ITEMS = listOf("live" to "Live", "guide" to "Guide", "movies" to "Movies", "series" to "Series", "history" to "History", "search" to "Search", "settings" to "Settings")
 
 // ---- Key helpers ---------------------------------------------------------------------------
 

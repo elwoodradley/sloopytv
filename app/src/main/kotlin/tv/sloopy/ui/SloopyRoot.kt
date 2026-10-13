@@ -28,6 +28,8 @@ import androidx.navigation.navArgument
 import androidx.tv.material3.Text
 import kotlinx.coroutines.delay
 import tv.sloopy.ui.guide.GuideScreen
+import tv.sloopy.ui.hub.HubScreen
+import tv.sloopy.ui.library.HistoryScreen
 import tv.sloopy.ui.intro.SloopyPowerOff
 import tv.sloopy.ui.intro.SloopyPowerOn
 import tv.sloopy.ui.library.DetailsScreen
@@ -88,17 +90,24 @@ private fun SloopyNav(vm: SloopyViewModel, startAtProviders: Boolean, onQuit: ()
     LaunchedEffect(Unit) {
         vm.homeEvents.collect { nav.navigate("live") { popUpTo("live") { inclusive = true }; launchSingleTop = true } }
     }
-    NavHost(nav, startDestination = if (startAtProviders) "provider/new" else "live") {
+    // Hard cuts between screens, no cross-fade: the design language allows motion only for the tube.
+    NavHost(
+        nav, startDestination = if (startAtProviders) "provider/new" else "live",
+        enterTransition = { androidx.compose.animation.EnterTransition.None }, exitTransition = { androidx.compose.animation.ExitTransition.None },
+        popEnterTransition = { androidx.compose.animation.EnterTransition.None }, popExitTransition = { androidx.compose.animation.ExitTransition.None },
+    ) {
         composable("live") { LiveScreen(vm, go = go, onQuit = onQuit) }
-        composable("guide") { GuideScreen(vm, go = go, onBack = { go("live") }, onQuit = onQuit) }
-        composable("movies") { LibraryScreen(vm, kind = "vod", go = go, onBack = { nav.popBackStack() }, onOpen = { id -> nav.navigate("details/vod/$id") }) }
-        composable("series") { LibraryScreen(vm, kind = "series", go = go, onBack = { nav.popBackStack() }, onOpen = { id -> nav.navigate("details/series/$id") }) }
+        composable("hub") { HubScreen(vm, go = go, onQuit = onQuit) }
+        composable("guide") { GuideScreen(vm, go = go, onBack = { go("hub") }) }
+        composable("history") { HistoryScreen(vm, go = go, onBack = { go("hub") }, onPlay = { nav.navigate("vodplayer") }) }
+        composable("movies") { LibraryScreen(vm, kind = "vod", go = go, onBack = { go("hub") }, onOpen = { id -> nav.navigate("details/vod/$id") }) }
+        composable("series") { LibraryScreen(vm, kind = "series", go = go, onBack = { go("hub") }, onOpen = { id -> nav.navigate("details/series/$id") }) }
         composable("details/{kind}/{id}", arguments = listOf(navArgument("kind") { type = NavType.StringType }, navArgument("id") { type = NavType.LongType })) { e ->
             DetailsScreen(vm, kind = e.arguments!!.getString("kind")!!, id = e.arguments!!.getLong("id"), onBack = { nav.popBackStack() }, onPlay = { nav.navigate("vodplayer") })
         }
         composable("vodplayer") { VodPlayerScreen(vm, onBack = { nav.popBackStack() }) }
-        composable("search") { SearchScreen(vm, go = go, onBack = { nav.popBackStack() }, onOpen = { kind, id -> nav.navigate("details/$kind/$id") }) }
-        composable("settings") { SettingsScreen(vm, go = go, onBack = { nav.popBackStack() }, onEditProvider = { id -> nav.navigate("provider/$id") }) }
+        composable("search") { SearchScreen(vm, go = go, onBack = { go("hub") }, onOpen = { kind, id -> nav.navigate("details/$kind/$id") }) }
+        composable("settings") { SettingsScreen(vm, go = go, onBack = { go("hub") }, onEditProvider = { id -> nav.navigate("provider/$id") }) }
         composable("provider/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { e ->
             val id = e.arguments!!.getString("id")!!
             ProviderScreen(

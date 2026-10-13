@@ -60,7 +60,6 @@ import tv.sloopy.ui.common.Hairline
 import tv.sloopy.ui.common.Label
 import tv.sloopy.ui.common.LiveDot
 import tv.sloopy.ui.common.ProgressHairline
-import tv.sloopy.ui.common.QuitPrompt
 import tv.sloopy.ui.common.TopNav
 import tv.sloopy.ui.common.isDown
 import tv.sloopy.ui.common.isKey
@@ -70,7 +69,7 @@ import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
 private val SLOT = 228.dp            // 30 minutes
-private val CHANNEL_COL = 270.dp
+private val CHANNEL_COL = 236.dp
 private val ROW_H = 54.dp
 private val HEADER_H = 33.dp
 private const val HOURS_BACK = 2L
@@ -80,7 +79,7 @@ private data class Focused(val channel: ChannelEntity, val prog: ProgrammeEntity
 
 @UnstableApi
 @Composable
-fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, onQuit: () -> Unit) {
+fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit) {
     val provider by vm.active.collectAsState()
     val channels by vm.visibleChannels.collectAsState()
     val current by vm.currentChannel.collectAsState()
@@ -98,12 +97,13 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, o
     val dpPerSec: Float = SLOT.value / 1800f
     val density = androidx.compose.ui.platform.LocalDensity.current.density
 
-    // Back here is the second Back from the picture: offer to switch off. Stay tuned returns to TV.
-    var quit by remember { mutableStateOf(false) }
-    BackHandler { quit = true }
+    // Back here is the second Back from the picture: the main menu.
+    BackHandler { onBack() }
     val firstRowFocus = remember { FocusRequester() }
     val lastRowFocus = remember { FocusRequester() }
     var focusedRow by remember { mutableStateOf(-1) }
+    val groupNow by vm.group.collectAsState()
+    LaunchedEffect(groupNow) { listState.scrollToItem(0); focused = null }
 
     // The grid is wider than the screen only once rows exist, so wait for a real max scroll.
     var scrolledToNow by remember { mutableStateOf(false) }
@@ -145,8 +145,11 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, o
 
         DetailPanel(vm, focused, current)
 
-        // Grid
-        Column(Modifier.fillMaxSize().padding(horizontal = 72.dp).clipToBounds()) {
+        // Groups rail, then the grid
+        Row(Modifier.fillMaxSize().padding(horizontal = 72.dp)) {
+        GroupRail(vm, Modifier.width(196.dp).fillMaxHeight())
+        Spacer(Modifier.width(18.dp))
+        Column(Modifier.fillMaxSize().clipToBounds()) {
             // Header
             Row(Modifier.fillMaxWidth().height(HEADER_H)) {
                 Box(Modifier.width(CHANNEL_COL).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
@@ -182,8 +185,42 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, o
                 }
             }
         }
+        }
     }
-    if (quit) QuitPrompt(onQuit = onQuit, onCancel = { quit = false; onBack() })
+    }
+}
+
+/** ALL, favourites, then the provider's groups in the viewer's order. Selecting one filters the grid. */
+@UnstableApi
+@Composable
+private fun GroupRail(vm: SloopyViewModel, modifier: Modifier) {
+    val categories by vm.liveCategories.collectAsState()
+    val group by vm.group.collectAsState()
+    val locked by vm.lockedGroups.collectAsState()
+    val unlocked by vm.unlockedSession.collectAsState()
+    val groups = remember(categories, locked, unlocked) {
+        listOf(tv.sloopy.ui.Groups.ALL to "All", tv.sloopy.ui.Groups.FAV to "Favourites") + categories.filter { unlocked || it.id !in locked }.map { it.id to it.name }
+    }
+    val state = rememberLazyListState()
+    LaunchedEffect(groups) { val i = groups.indexOfFirst { it.first == group }; if (i > 3) state.scrollToItem(i - 3) }
+    LazyColumn(state = state, modifier = modifier.padding(top = HEADER_H + 1.dp)) {
+        itemsIndexed(groups, key = { _, g -> g.first }) { _, (id, name) ->
+            var fc by remember { mutableStateOf(false) }
+            val cur = id == group
+            androidx.tv.material3.Surface(
+                onClick = { vm.selectGroup(id) },
+                shape = ClickableSurfaceDefaults.shape(RectangleShape),
+                colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color.Transparent, contentColor = Sloopy.muted, focusedContentColor = Color.White),
+                scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+                modifier = Modifier.fillMaxWidth().height(40.dp).onFocusChanged { fc = it.isFocused },
+            ) {
+                Row(Modifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
+                    Box(Modifier.size(5.dp).background(if (cur) Sloopy.amber else Color.Transparent))
+                    Spacer(Modifier.width(11.dp))
+                    Text(name.uppercase(), style = Sloopy.labelBright.copy(color = if (cur || fc) Color.Unspecified else Sloopy.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+            }
+        }
     }
 }
 

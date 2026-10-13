@@ -49,6 +49,13 @@ class Prefs(private val context: Context) {
     fun groupOrder(providerId: String): Flow<List<String>> = ds.data.map { p -> p[orderKey(providerId)]?.split('\u0001')?.filter { it.isNotEmpty() } ?: emptyList() }
     suspend fun setGroupOrder(providerId: String, ids: List<String>) = ds.edit { it[orderKey(providerId)] = ids.joinToString("\u0001") }
 
+    private fun recentKey(providerId: String) = stringPreferencesKey("recent_$providerId")
+    fun recentChannels(providerId: String): Flow<List<Long>> = ds.data.map { p -> p[recentKey(providerId)]?.split(',')?.mapNotNull { it.toLongOrNull() } ?: emptyList() }
+    suspend fun pushRecent(providerId: String, channelId: Long) = ds.edit { p ->
+        val cur = p[recentKey(providerId)]?.split(',')?.mapNotNull { it.toLongOrNull() } ?: emptyList()
+        p[recentKey(providerId)] = (listOf(channelId) + cur.filter { it != channelId }).take(11).joinToString(",")
+    }
+
     val codeServer: Flow<String?> = ds.data.map { it[stringPreferencesKey("code_server")] }
     suspend fun setCodeServer(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("code_server")) else it[stringPreferencesKey("code_server")] = v.trim() }
 

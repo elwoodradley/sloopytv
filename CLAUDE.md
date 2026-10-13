@@ -34,6 +34,12 @@ capture (`FLAG_SECURE`); use the debug build for visual checks. Drive the UI wit
 - Layout numbers are mockup px / 1.333: `TubeRoot` overrides `LocalDensity` so 1dp = 1/1440 of screen width.
 - The tube power-on plays only at launch and on switch-off. Channel changes are a hard cut with the bare badge; no other motion.
 
+## Navigation chain (TiviMate-style, user-approved)
+Picture → Back → Guide (groups rail on the left) → Back → Hub menu (`ui/hub/HubScreen.kt`) → Back →
+"Switch off?" prompt. Hold Back anywhere returns to the picture (`MainActivity.dispatchKeyEvent` → `vm.goHome()`).
+OK on the picture opens `InfoOverlay` (badge, ten recent channels, action bar); OK on a recent tile switches.
+NavHost transitions are all `None`: hard cuts only.
+
 ## TV input conventions
 - Text fields (`Field` in `ProviderScreen.kt`) are two-stage: the row takes D-pad focus, OK opens the keyboard.
   The TV keyboard is a floating window that eats the Back that closes it and reports no IME inset.

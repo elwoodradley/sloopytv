@@ -29,6 +29,8 @@ data class PlayerState(
     val durationMs: Long = 0,
     /** e.g. "1080p · 50 fps · H.264 · AAC 2.0", once the decoders have started. */
     val quality: String? = null,
+    /** Playback reached the end of a film or episode. */
+    val ended: Boolean = false,
 )
 
 /**
@@ -79,6 +81,7 @@ class PlayerHolder(context: Context) {
                     _state.value = _state.value.copy(
                         isBuffering = playbackState == Player.STATE_BUFFERING,
                         durationMs = if (duration == C.TIME_UNSET) 0 else duration,
+                        ended = playbackState == Player.STATE_ENDED,
                     )
                 }
                 override fun onVideoSizeChanged(videoSize: androidx.media3.common.VideoSize) {

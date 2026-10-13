@@ -263,10 +263,35 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- Playback ---------------------------------------------------------------------------
 
+    /** The ten channels watched most recently, newest first, for the OK overlay. */
+    val recentChannels: StateFlow<List<ChannelEntity>> = combine(channels, active.flatMapLatest { p -> if (p == null) flowOf(emptyList()) else prefs.recentChannels(p.id) }) { all, ids ->
+        val byId = all.associateBy { it.id }
+        ids.mapNotNull { byId[it] }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+
+    /** The episodes around the one playing, so the player can offer the next one. */
+    var episodeQueue: List<tv.sloopy.core.model.Episode> = emptyList()
+        private set
+    var episodeQueueSeries: Pair<Long, String>? = null   // series id, series title
+        private set
+    var episodeQueueImage: String? = null
+        private set
+
+    fun setEpisodeQueue(seriesId: Long, seriesTitle: String, image: String?, episodes: List<tv.sloopy.core.model.Episode>) {
+        episodeQueue = episodes; episodeQueueSeries = seriesId to seriesTitle; episodeQueueImage = image
+    }
+
+    fun nextEpisodeAfter(episodeId: Long): tv.sloopy.core.model.Episode? {
+        val i = episodeQueue.indexOfFirst { it.id == episodeId }
+        return if (i >= 0 && i + 1 < episodeQueue.size) episodeQueue[i + 1] else null
+    }
+
+    fun forgetProgress(r: tv.sloopy.data.db.ProgressEntity) = viewModelScope.launch { graph.db.progress().remove(r.providerId, r.kind, r.itemId) }
+
     fun tune(c: ChannelEntity) {
         val p = active.value ?: return
         _playing.value = Playing.Live(c)
-        viewModelScope.launch { prefs.setLastChannel(p.id, c.id) }
+        viewModelScope.launch { prefs.setLastChannel(p.id, c.id); prefs.pushRecent(p.id, c.id) }
         try {
             player.play(catalog.liveUrl(p, c), isLive = true)
         } catch (e: Exception) {

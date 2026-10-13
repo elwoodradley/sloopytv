@@ -57,7 +57,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
 
-private enum class Overlay { NONE, OSD, NUMBER, CHANNELS, DECK, QUIT }
+private enum class Overlay { NONE, OSD, NUMBER, CHANNELS, DECK, QUIT, INFO }
 
 @UnstableApi
 @Composable
@@ -116,7 +116,7 @@ fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             .focusable()
             .onPreviewKeyEvent { ev ->
                 if (!ev.isDown) return@onPreviewKeyEvent false
-                if (overlay == Overlay.CHANNELS || overlay == Overlay.DECK || overlay == Overlay.QUIT) return@onPreviewKeyEvent false
+                if (overlay == Overlay.CHANNELS || overlay == Overlay.DECK || overlay == Overlay.QUIT || overlay == Overlay.INFO) return@onPreviewKeyEvent false
                 val d = ev.digit
                 when {
                     d != null -> { digits = (digits + d).takeLast(4); overlay = Overlay.NUMBER; true }
@@ -124,10 +124,7 @@ fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                     ev.isKey(Key.DirectionDown, Key.ChannelDown) -> { vm.step(1); true }
                     ev.isKey(Key.DirectionLeft) -> { overlay = Overlay.CHANNELS; true }
                     ev.isKey(Key.DirectionRight, Key.Menu) -> { overlay = Overlay.DECK; true }
-                    ev.inKeys(OK_KEYS) -> {
-                        overlay = if (overlay == Overlay.OSD) Overlay.CHANNELS else { osdTick++; Overlay.OSD }
-                        true
-                    }
+                    ev.inKeys(OK_KEYS) -> { overlay = Overlay.INFO; true }
                     ev.isKey(Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause) -> {
                         val p = vm.player.player; if (p.isPlaying) p.pause() else p.play(); true
                     }
@@ -152,6 +149,7 @@ fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
 
         when (overlay) {
             Overlay.OSD -> current?.let { Osd(vm, it, playing, pstate.quality) }
+            Overlay.INFO -> current?.let { InfoOverlay(vm, it, playing, pstate.quality, onClose = { overlay = Overlay.NONE }, go = go, openChannels = { overlay = Overlay.CHANNELS }) }
             Overlay.NUMBER -> NumberEntry(digits, channels.firstOrNull { it.number == digits.toIntOrNull() })
             Overlay.CHANNELS -> ChannelsOverlay(vm, onClose = { overlay = Overlay.NONE })
             Overlay.DECK -> Deck(go = { overlay = Overlay.NONE; go(it) }, onClose = { overlay = Overlay.NONE })
@@ -181,7 +179,7 @@ private fun PlayerSurface(vm: SloopyViewModel) {
 
 @UnstableApi
 @Composable
-private fun Osd(vm: SloopyViewModel, channel: ChannelEntity, playing: Playing?, quality: String?) {
+internal fun Osd(vm: SloopyViewModel, channel: ChannelEntity, playing: Playing?, quality: String?) {
     var nowNext by remember(channel.id) { mutableStateOf<List<ProgrammeEntity>>(emptyList()) }
     val provider by vm.active.collectAsState()
     LaunchedEffect(channel.id) {

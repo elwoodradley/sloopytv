@@ -57,6 +57,28 @@ fun VodPlayerScreen(vm: SloopyViewModel, onBack: () -> Unit) {
     val focus = remember { FocusRequester() }
 
     LaunchedEffect(Unit) { focus.requestFocus() }
+
+    // Series: when an episode ends, offer the next one with an eight-second countdown.
+    val v = playing as? Playing.Vod
+    val next = remember(v?.id) { if (v?.kind == "episode") vm.nextEpisodeAfter(v.id) else null }
+    var countdown by remember { mutableStateOf(-1) }
+    val playNext: () -> Unit = {
+        countdown = -1
+        val series = vm.episodeQueueSeries
+        if (next != null && series != null) {
+            vm.playVod(next.id, series.second, "S${next.season} E${next.number} · ${next.title}", next.image ?: vm.episodeQueueImage, next.container, "episode", series.first, 0)
+            showBar = true; tick++
+        }
+    }
+    LaunchedEffect(v?.id) { countdown = -1 }
+    LaunchedEffect(state.ended, v?.id) {
+        if (state.ended && next != null) {
+            vm.saveProgress()
+            countdown = 8
+            while (countdown > 0) { delay(1000); if (countdown > 0) countdown-- }
+            if (countdown == 0) playNext()
+        }
+    }
     LaunchedEffect(Unit) { while (true) { pos = vm.player.position(); dur = vm.player.duration(); delay(500) } }
     LaunchedEffect(tick, showBar) { if (showBar && vm.player.player.isPlaying) { delay(4000); showBar = false } }
 
@@ -74,6 +96,8 @@ fun VodPlayerScreen(vm: SloopyViewModel, onBack: () -> Unit) {
                 val p = vm.player.player
                 fun seek(ms: Long) { p.seekTo((p.currentPosition + ms).coerceIn(0, dur.coerceAtLeast(0))); showBar = true; tick++ }
                 when {
+                    countdown >= 0 && ev.inKeys(OK_KEYS) -> { playNext(); true }
+                    countdown >= 0 && ev.inKeys(tv.sloopy.ui.common.BACK_KEYS) -> { countdown = -1; true }
                     (ev.inKeys(OK_KEYS) || ev.isKey(Key.MediaPlayPause)) -> { if (p.isPlaying) p.pause() else p.play(); showBar = true; tick++; true }
                     ev.isKey(Key.MediaPlay) -> { p.play(); true }
                     ev.isKey(Key.MediaPause) -> { p.pause(); showBar = true; true }
@@ -91,8 +115,15 @@ fun VodPlayerScreen(vm: SloopyViewModel, onBack: () -> Unit) {
             factory = { ctx -> PlayerView(ctx).apply { useController = false; resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT; setShutterBackgroundColor(android.graphics.Color.BLACK); player = vm.player.player } },
             update = { it.player = vm.player.player },
         )
+        if (countdown >= 0 && next != null) {
+            Column(Modifier.align(Alignment.BottomEnd).padding(end = 72.dp, bottom = 150.dp).background(Color(0xE60B0B0C)).padding(24.dp)) {
+                Text("NEXT UP", style = Sloopy.label)
+                Text("S${next.season} E${next.number} · ${next.title}", style = Sloopy.listName.copy(color = Color.White), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 6.dp).width(520.dp))
+                Text("Playing in $countdown", style = Sloopy.titleBig.copy(color = Sloopy.amber), modifier = Modifier.padding(top = 8.dp))
+                Text("OK plays now · Back cancels", style = Sloopy.label.copy(color = Sloopy.dim), modifier = Modifier.padding(top = 8.dp))
+            }
+        }
         if (showBar || !state.isPlaying) {
-            val v = playing as? Playing.Vod
             Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.6f to Color.Transparent, 1f to Color(0xCC000000)))) {
                 Column(Modifier.align(Alignment.BottomStart).padding(horizontal = 72.dp, vertical = 48.dp).fillMaxWidth()) {
                     Text(v?.title?.uppercase() ?: "", style = Sloopy.osdName.copy(fontSize = Sloopy.titleBig.fontSize), maxLines = 1, overflow = TextOverflow.Ellipsis)
