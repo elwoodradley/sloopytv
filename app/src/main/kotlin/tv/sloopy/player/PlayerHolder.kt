@@ -86,7 +86,7 @@ class PlayerHolder(context: Context) {
                 }
                 override fun onTracksChanged(tracks: androidx.media3.common.Tracks) {
                     val s = _state.value
-                    val q = describe(s.videoWidth, s.videoHeight)
+                    val q = describe(s.videoWidth, s.videoHeight) ?: s.quality   // early track events carry no formats yet
                     TLog.d { "stream quality: $q" }
                     _state.value = s.copy(quality = q)
                 }
