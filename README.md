@@ -54,7 +54,7 @@ publishes a GitHub Release whose asset is always named `sloopytv.apk`. Installed
 launch and every six hours, show a one-line toast, and install from Settings › About after the
 viewer confirms in the system installer. The downloaded APK must have the same package name
 and signing certificate as the running app or it is refused before the installer ever opens.
-Fixed download address for Downloader: `github.com/elwoodradley/sloopytv/releases/latest/download/sloopytv.apk`.
+Fixed download address for Downloader: `github.com/elwoodradley/sloopytv/releases/latest/download/sloopytv.apk`, or the AFTVnews short code **7839728**.
 
 Friend-facing instructions, no computer needed: [INSTALL.md](INSTALL.md).
 
