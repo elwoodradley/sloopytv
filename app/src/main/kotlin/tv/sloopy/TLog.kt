@@ -8,7 +8,7 @@ import tv.sloopy.core.Redact
  * written at all in release builds. Never call android.util.Log directly.
  */
 object TLog {
-    private const val TAG = "Tube"
+    private const val TAG = "Sloopy"
     private val enabled = BuildConfig.DEBUG
 
     fun d(msg: () -> String) { if (enabled) Log.d(TAG, Redact.apply(msg())) }

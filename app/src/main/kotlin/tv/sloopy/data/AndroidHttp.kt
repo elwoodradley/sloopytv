@@ -17,7 +17,7 @@ import java.util.concurrent.TimeUnit
  * loader use.
  *
  *  - No logging interceptor, ever. URLs carry credentials.
- *  - Redirects are followed only to http(s), and never across scheme from https to http.
+ *  - Redirects are followed only to http(s).
  *  - Modest timeouts so a dead provider fails fast on the UI.
  */
 object AndroidHttp {
@@ -29,8 +29,11 @@ object AndroidHttp {
             .readTimeout(30, TimeUnit.SECONDS)
             .writeTimeout(12, TimeUnit.SECONDS)
             .callTimeout(0, TimeUnit.SECONDS)
+            // Xtream panels answer stream requests with a 302 to a load-balanced host, often
+            // switching between http and https on the way. Follow those; the scheme guard still
+            // rejects anything that is not http(s), and OkHttp cannot redirect to other schemes.
             .followRedirects(true)
-            .followSslRedirects(false)
+            .followSslRedirects(true)
             .retryOnConnectionFailure(true)
             .addInterceptor(SchemeGuard)
             .addInterceptor(UserAgent)
