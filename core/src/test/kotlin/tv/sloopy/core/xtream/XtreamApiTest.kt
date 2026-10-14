@@ -117,4 +117,16 @@ class XtreamApiTest {
         assertEquals("Evening News", e[0].title)
         assertTrue(e[0].hasArchive)
     }
+
+    @Test
+    fun `full epg table decodes base64 and skips rows without times`() = runBlocking {
+        val http = FakeHttp(mapOf("get_simple_data_table" to """{"epg_listings":[
+            {"id":"1","title":"RXZlbmluZyBOZXdz","description":"SGVhZGxpbmVz","start_timestamp":"1792008000","stop_timestamp":"1792011600","has_archive":"0"},
+            {"id":"2","title":"bm8gdGltZXM="}]}"""))
+        val e = XtreamApi(http, creds).fullEpg(101)
+        assertEquals(1, e.size)
+        assertEquals("Evening News", e[0].title)
+        assertEquals("Headlines", e[0].description)
+        assertEquals(1792008000L, e[0].startEpoch)
+    }
 }

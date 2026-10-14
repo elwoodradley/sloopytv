@@ -56,6 +56,7 @@ object Limits {
     const val XMLTV_BYTES = 512L * 1024 * 1024      // a 7 day guide for 10k channels, decompressed
     const val M3U_BYTES = 64L * 1024 * 1024
     const val MAX_TEXT = 4_000                       // any single title / description
+    const val MAX_PROGRAMMES_PER_CHANNEL = 2_000     // one channel's get_simple_data_table
     const val MAX_PROGRAMMES = 3_000_000
     const val MAX_CHANNELS = 200_000
 }

@@ -281,8 +281,15 @@ class XtreamApi(private val http: Http, private val creds: XtreamCredentials) {
     }
 
     /** Now/next for one channel, for providers whose XMLTV is missing or stale. */
-    suspend fun shortEpg(streamId: Long, limit: Int = 4): List<ShortEpg> {
-        val root = fetch(creds.api("get_short_epg", mapOf("stream_id" to streamId.toString(), "limit" to limit.toString())))
+    suspend fun shortEpg(streamId: Long, limit: Int = 4): List<ShortEpg> =
+        epgListings(creds.api("get_short_epg", mapOf("stream_id" to streamId.toString(), "limit" to limit.toString())))
+
+    /** The panel's whole guide table for one channel: the fallback when xmltv.php is refused. */
+    suspend fun fullEpg(streamId: Long): List<ShortEpg> =
+        epgListings(creds.api("get_simple_data_table", mapOf("stream_id" to streamId.toString()))).take(Limits.MAX_PROGRAMMES_PER_CHANNEL)
+
+    private suspend fun epgListings(url: String): List<ShortEpg> {
+        val root = fetch(url)
         val list = root.obj?.get("epg_listings").asList()
         return list.mapNotNull { o ->
             val start = o.long("start_timestamp") ?: return@mapNotNull null

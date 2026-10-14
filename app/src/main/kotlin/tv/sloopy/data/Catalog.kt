@@ -39,6 +39,9 @@ sealed class RefreshState {
  * The provider cache: channels, categories, guide, library. One instance per app.
  * Everything heavy runs on IO; refreshes are serialised per provider.
  */
+/** The key guide rows are stored under: the provider's EPG id, else one made from the stream id. */
+fun channelEpgKey(c: ChannelEntity): String = c.epgId ?: "xc:${c.id}"
+
 class Catalog(private val db: SloopyDb, private val providers: ProviderStore, private val prefs: Prefs) {
     private val lock = Mutex()
     private val _refresh = MutableStateFlow<RefreshState>(RefreshState.Idle)
@@ -228,6 +231,22 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
 
     suspend fun programmes(p: String, epgId: String, from: Long, to: Long): List<ProgrammeEntity> =
         db.programmes().window(p, epgGen(p), epgId, from, to)
+
+    /**
+     * One channel's guide from the panel's own table (get_simple_data_table), for providers that
+     * refuse xmltv.php. Stored under the current generation like XMLTV rows.
+     */
+    suspend fun fetchChannelEpg(record: ProviderRecord, channel: ChannelEntity): Int = withContext(Dispatchers.IO) {
+        if (record.kind != ProviderKind.XTREAM) return@withContext 0
+        val list = XtreamApi(AndroidHttp.core, record.xtream()).fullEpg(channel.id)
+        val gen = epgGen(record.id)
+        val key = channelEpgKey(channel)
+        db.programmes().deleteFor(record.id, gen, key)
+        db.programmes().insertBatchBlocking(list.map {
+            ProgrammeEntity(providerId = record.id, gen = gen, epgId = key, startEpoch = it.startEpoch, stopEpoch = it.stopEpoch, title = it.title, description = it.description, category = null, episode = null, icon = null)
+        })
+        list.size
+    }
 
     suspend fun programmesMany(p: String, epgIds: List<String>, from: Long, to: Long): List<ProgrammeEntity> =
         if (epgIds.isEmpty()) emptyList() else db.programmes().windowMany(p, epgGen(p), epgIds, from, to)

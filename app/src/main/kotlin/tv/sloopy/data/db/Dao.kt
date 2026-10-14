@@ -101,6 +101,9 @@ interface ProgrammeDao {
     @Insert(onConflict = OnConflictStrategy.IGNORE)
     fun insertBatchBlocking(list: List<ProgrammeEntity>)
 
+    @Query("DELETE FROM programmes WHERE providerId = :p AND gen = :gen AND epgId = :epgId")
+    suspend fun deleteFor(p: String, gen: Int, epgId: String)
+
     @Query("DELETE FROM programmes WHERE providerId = :p AND gen != :keepGen")
     suspend fun deleteOtherGens(p: String, keepGen: Int)
 

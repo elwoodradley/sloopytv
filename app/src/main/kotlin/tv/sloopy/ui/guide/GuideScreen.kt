@@ -230,7 +230,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             )
             Label("Guide  ·  " + dayLabel(nowEpoch), bright = true)
             val epgError by vm.epgError.collectAsState()
-            if (epgError != null) { Spacer(Modifier.width(28.dp)); Text("Guide feed failed: $epgError", style = Sloopy.label.copy(color = Sloopy.amber), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            if (epgError != null) { Spacer(Modifier.width(28.dp)); Text("Guide feed refused ($epgError) · using the provider's channel guide instead", style = Sloopy.label.copy(color = Sloopy.amber), maxLines = 1, overflow = TextOverflow.Ellipsis) }
             Spacer(Modifier.weight(1f)); Clock()
         }
 
@@ -366,9 +366,9 @@ private fun GuideRow(
 ) {
     val density = androidx.compose.ui.platform.LocalDensity.current.density
     // Served from the view model's cache when it has the row, so a re-entry draws on the first frame.
-    val epg = channel.epgId
-    val progs by produceState<List<ProgrammeEntity>?>(initialValue = if (epg == null) emptyList() else vm.cachedProgrammes(epg, winStart), epg, winStart) {
-        value = if (epg == null) emptyList() else vm.programmesFor(epg, winStart)
+    val key = tv.sloopy.data.channelEpgKey(channel)
+    val progs by produceState<List<ProgrammeEntity>?>(initialValue = vm.cachedProgrammes(key, winStart), key, winStart) {
+        value = vm.programmesFor(channel, winStart)
     }
 
     Column {
@@ -470,8 +470,7 @@ private fun Cell(
 private fun DetailPanel(vm: SloopyViewModel, f: Focused?, current: ChannelEntity?, nowEpoch: Long) {
     val fallback by produceState<Focused?>(null, current?.id) {
         val c = current ?: return@produceState
-        val epg = c.epgId
-        val prog = if (epg == null) null else vm.programmesFor(epg, vm.guideWindowStart(nowEpoch)).firstOrNull { it.startEpoch <= nowEpoch && it.stopEpoch > nowEpoch }
+        val prog = vm.programmesFor(c, vm.guideWindowStart(nowEpoch)).firstOrNull { it.startEpoch <= nowEpoch && it.stopEpoch > nowEpoch }
         value = Focused(c, prog)
     }
     val shown = f ?: fallback

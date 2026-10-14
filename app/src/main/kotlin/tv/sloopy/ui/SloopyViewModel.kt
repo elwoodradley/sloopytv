@@ -11,6 +11,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
@@ -312,11 +313,35 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     private fun epgKey(epgId: String, winStart: Long) = "$winStart|$epgId"
     fun guideWindowStart(now: Long = System.currentTimeMillis() / 1000): Long = (now / 1800) * 1800 - GUIDE_HOURS_BACK * 3600
     fun cachedProgrammes(epgId: String, winStart: Long): List<tv.sloopy.data.db.ProgrammeEntity>? = epgCache[epgKey(epgId, winStart)]
-    suspend fun programmesFor(epgId: String, winStart: Long): List<tv.sloopy.data.db.ProgrammeEntity> {
-        cachedProgrammes(epgId, winStart)?.let { return it }
+    private val channelEpgFetched = java.util.concurrent.ConcurrentHashMap<Long, Long>()
+    private val channelEpgGate = kotlinx.coroutines.sync.Semaphore(3)
+    /**
+     * Guide rows for one channel: cache, then the database, then (Xtream only, at most hourly per
+     * channel) the panel's own per-channel table for providers whose xmltv.php is refused.
+     */
+    suspend fun programmesFor(channel: ChannelEntity, winStart: Long): List<tv.sloopy.data.db.ProgrammeEntity> {
+        val key = tv.sloopy.data.channelEpgKey(channel)
+        cachedProgrammes(key, winStart)?.takeIf { it.isNotEmpty() }?.let { return it }
         val p = active.value ?: return emptyList()
-        return runCatching { catalog.programmes(p.id, epgId, winStart, winStart + (GUIDE_HOURS_BACK + GUIDE_HOURS_FWD) * 3600) }
-            .getOrDefault(emptyList()).also { epgCache[epgKey(epgId, winStart)] = it }
+        val winEnd = winStart + (GUIDE_HOURS_BACK + GUIDE_HOURS_FWD) * 3600
+        var rows = runCatching { catalog.programmes(p.id, key, winStart, winEnd) }.getOrDefault(emptyList())
+        if (rows.isEmpty() && p.kind == tv.sloopy.data.ProviderKind.XTREAM) {
+            val now = System.currentTimeMillis()
+            if (now - (channelEpgFetched[channel.id] ?: 0L) > 3600_000L) {
+                channelEpgFetched[channel.id] = now
+                try {
+                    channelEpgGate.withPermit { catalog.fetchChannelEpg(p, channel) }
+                } catch (e: kotlinx.coroutines.CancellationException) {
+                    channelEpgFetched.remove(channel.id); throw e            // row scrolled away: try again next time
+                } catch (e: Exception) {
+                    channelEpgFetched[channel.id] = now - 3600_000L + 600_000L   // refused: wait ten minutes before asking again
+                    TLog.w { "channel epg: ${TLog.userMessage(e)}" }
+                }
+                rows = runCatching { catalog.programmes(p.id, key, winStart, winEnd) }.getOrDefault(emptyList())
+            }
+        }
+        epgCache[epgKey(key, winStart)] = rows
+        return rows
     }
     fun prefetchGuide() = viewModelScope.launch {
         val p = active.value ?: return@launch
@@ -326,7 +351,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val i = list.indexOfFirst { it.id == currentChannel.value?.id }.coerceAtLeast(0)
         val ws = guideWindowStart()
         val ids = list.subList((i - 20).coerceAtLeast(0), (i + 25).coerceAtMost(list.size))
-            .mapNotNull { it.epgId }.distinct().filter { cachedProgrammes(it, ws) == null }
+            .map { tv.sloopy.data.channelEpgKey(it) }.distinct().filter { cachedProgrammes(it, ws) == null }
         if (ids.isEmpty()) return@launch
         val rows = runCatching { catalog.programmesMany(p.id, ids, ws, ws + (GUIDE_HOURS_BACK + GUIDE_HOURS_FWD) * 3600) }.getOrDefault(emptyList()).groupBy { it.epgId }
         ids.forEach { epgCache[epgKey(it, ws)] = rows[it] ?: emptyList() }
