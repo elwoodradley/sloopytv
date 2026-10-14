@@ -29,6 +29,8 @@ data class PlayerState(
     val durationMs: Long = 0,
     /** e.g. "1080p · 50 fps · H.264 · AAC 2.0", once the decoders have started. */
     val quality: String? = null,
+    /** Frames per second of the video being decoded, 0 until known. Drives refresh-rate matching. */
+    val frameRate: Float = 0f,
     /** Playback reached the end of a film or episode. */
     val ended: Boolean = false,
 )
@@ -91,7 +93,8 @@ class PlayerHolder(context: Context) {
                     val s = _state.value
                     val q = describe(s.videoWidth, s.videoHeight) ?: s.quality   // early track events carry no formats yet
                     TLog.d { "stream quality: $q" }
-                    _state.value = s.copy(quality = q)
+                    val fps = player.videoFormat?.frameRate ?: 0f
+                    _state.value = s.copy(quality = q, frameRate = if (fps > 0f) fps else s.frameRate)
                 }
                 override fun onPlayerError(error: PlaybackException) {
                     TLog.w { "player error ${error.errorCodeName}: ${Redact.apply(error.message)}" }
@@ -153,6 +156,7 @@ class PlayerHolder(context: Context) {
     }
 
     fun play(url: String, isLive: Boolean, startPositionMs: Long = 0) {
+        _state.value = _state.value.copy(frameRate = 0f)
         currentUrl = url
         retries = 0
         _state.value = PlayerState(isLive = isLive, isBuffering = true)

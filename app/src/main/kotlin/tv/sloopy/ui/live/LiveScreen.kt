@@ -241,5 +241,4 @@ private fun Deck(go: (String) -> Unit, onClose: () -> Unit) {
     }
 }
 
-private val hhmm = DateTimeFormatter.ofPattern("HH:mm")
-internal fun fmt(epoch: Long): String = Instant.ofEpochSecond(epoch).atZone(ZoneId.systemDefault()).format(hhmm)
+internal fun fmt(epoch: Long): String = tv.sloopy.ui.common.TimeFmt.hhmm(epoch)

@@ -50,7 +50,6 @@ fun HistoryScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit,
         val p = provider ?: return@produceState
         vm.graph.db.progress().recent(p.id, 200).collect { value = it }
     }
-    val fmt = DateTimeFormatter.ofPattern("EEE d MMM · HH:mm")
 
     Column(Modifier.fillMaxSize().background(Sloopy.ground)) {
         ScreenHeader("History")
@@ -83,7 +82,7 @@ fun HistoryScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit,
                                 Column(Modifier.weight(1f)) {
                                     Label(if (r.kind == "episode") "Episode" else "Movie")
                                     Text(r.title, style = Sloopy.listName.copy(color = Color.Unspecified), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-                                    Text(listOfNotNull(r.subtitle, "$pct% watched", Instant.ofEpochMilli(r.updatedAt).atZone(ZoneId.systemDefault()).format(fmt)).joinToString("  ·  "), style = Sloopy.listSub, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(listOfNotNull(r.subtitle, "$pct% watched", tv.sloopy.ui.common.TimeFmt.dateTime(r.updatedAt)).joinToString("  ·  "), style = Sloopy.listSub, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
                                 Text("RESUME", style = Sloopy.label)
                             }

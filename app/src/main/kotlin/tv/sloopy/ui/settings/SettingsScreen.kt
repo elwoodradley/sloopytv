@@ -167,6 +167,16 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                     }
                     "picture" -> {
                         Section("Picture")
+                        val theme by vm.theme.collectAsState()
+                        val clock12 by vm.clock12.collectAsState()
+                        val frm by vm.frameRateMatch.collectAsState()
+                        SettingRow("Theme", tv.sloopy.ui.theme.Palettes.byId(theme).name.uppercase()) {
+                            val all = tv.sloopy.ui.theme.Palettes.all; val i = all.indexOfFirst { it.id == theme }
+                            scope.launch { vm.prefs.setTheme(all[(i + 1) % all.size].id) }
+                        }
+                        SettingRow("Clock", if (clock12) "12 HOUR" else "24 HOUR") { scope.launch { vm.prefs.setClock12(!clock12) } }
+                        SettingRow("Match the TV's refresh rate to the stream", if (frm) "ON" else "OFF") { scope.launch { vm.prefs.setFrameRateMatch(!frm) } }
+                        Text("Stops the judder on 50 fps channels when the TV runs at 60. The picture goes black for a moment when the rate changes.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 4.dp, bottom = 10.dp).width(760.dp))
                         SettingRow("Tube power-on at launch", if (intro) "ON" else "OFF") { scope.launch { vm.prefs.setIntroEnabled(!intro) } }
                         SettingRow("Channel badge stays for", "$osd S") { scope.launch { vm.prefs.setOsdSeconds(if (osd >= 8) 2 else osd + 1) } }
                     }

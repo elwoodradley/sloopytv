@@ -126,7 +126,7 @@ fun ProgressHairline(fraction: Float, modifier: Modifier = Modifier, track: Colo
 fun Clock(style: TextStyle = Sloopy.clock, modifier: Modifier = Modifier) {
     var now by remember { mutableStateOf(LocalTime.now()) }
     LaunchedEffect(Unit) { while (true) { now = LocalTime.now(); delay(10_000) } }
-    Text(now.format(DateTimeFormatter.ofPattern("HH:mm")), style = style, modifier = modifier)
+    Text(TimeFmt.clock(now), style = style, modifier = modifier)
 }
 
 @Composable

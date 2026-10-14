@@ -43,6 +43,28 @@ class Prefs(private val context: Context) {
     suspend fun setIntroEnabled(v: Boolean) = ds.edit { it[booleanPreferencesKey("intro_enabled")] = v }
 
     val osdSeconds: Flow<Int> = ds.data.map { it[intPreferencesKey("osd_seconds")] ?: 4 }
+
+    val clock12: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("clock_12h")] ?: false }
+    suspend fun setClock12(v: Boolean) = ds.edit { it[booleanPreferencesKey("clock_12h")] = v }
+
+    val theme: Flow<String> = ds.data.map { it[stringPreferencesKey("theme")] ?: "phosphor" }
+    suspend fun setTheme(v: String) = ds.edit { it[stringPreferencesKey("theme")] = v }
+
+    /** Ask the display for a refresh rate that matches the stream (50 Hz for European channels). */
+    val frameRateMatch: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("frame_rate_match")] ?: false }
+    suspend fun setFrameRateMatch(v: Boolean) = ds.edit { it[booleanPreferencesKey("frame_rate_match")] = v }
+
+    /** "provider" | "number" | "name", per group. */
+    private fun sortKey(providerId: String, group: String) = stringPreferencesKey("channel_sort_${providerId}_$group")
+    fun channelSort(providerId: String, group: String): Flow<String> = ds.data.map { it[sortKey(providerId, group)] ?: "provider" }
+    suspend fun setChannelSort(providerId: String, group: String, v: String) = ds.edit { it[sortKey(providerId, group)] = v }
+
+    val searchHistory: Flow<List<String>> = ds.data.map { p -> p[stringPreferencesKey("search_history")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
+    suspend fun pushSearch(q: String) = ds.edit { p ->
+        val cur = p[stringPreferencesKey("search_history")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList()
+        p[stringPreferencesKey("search_history")] = (listOf(q.trim()) + cur.filter { !it.equals(q.trim(), ignoreCase = true) }).take(10).joinToString("\u0001")
+    }
+    suspend fun clearSearchHistory() = ds.edit { it.remove(stringPreferencesKey("search_history")) }
     suspend fun setOsdSeconds(v: Int) = ds.edit { it[intPreferencesKey("osd_seconds")] = v }
 
     private fun orderKey(providerId: String) = stringPreferencesKey("group_order_$providerId")

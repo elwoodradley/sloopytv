@@ -118,8 +118,19 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     private val _group = MutableStateFlow(Groups.ALL)
     val group: StateFlow<String> = _group
 
+    /** "provider" | "number" | "name" for the selected group. */
+    val channelSort: StateFlow<String> = combine(active, _group) { p, g -> p?.id to g }
+        .flatMapLatest { (pid, g) -> if (pid == null) flowOf("provider") else prefs.channelSort(pid, g) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, "provider")
+    fun setChannelSort(mode: String) = viewModelScope.launch { active.value?.let { prefs.setChannelSort(it.id, _group.value, mode) } }
+    /** "az" sorts the groups by name; "provider" restores the provider's order. */
+    fun sortGroups(mode: String) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        prefs.setGroupOrder(p.id, if (mode == "az") rawLiveCategories.value.sortedBy { it.name.lowercase() }.map { it.id } else emptyList())
+    }
+
     /** Channels in the selected group, locked groups hidden until unlocked for this session. */
-    val visibleChannels: StateFlow<List<ChannelEntity>> =
+    private val visibleBase: StateFlow<List<ChannelEntity>> =
         combine(channels, _group, favouriteIds, lockedGroups, unlockedSession) { all, g, favs, locked, unlocked ->
             val base = when (g) {
                 Groups.ALL -> all
@@ -128,6 +139,9 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (unlocked) base else base.filter { it.categoryId !in locked }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val visibleChannels: StateFlow<List<ChannelEntity>> = combine(visibleBase, channelSort) { list, mode ->
+        when (mode) { "number" -> list.sortedBy { it.number }; "name" -> list.sortedBy { it.name.lowercase() }; else -> list }
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     private val _playing = MutableStateFlow<Playing?>(null)
     val playing: StateFlow<Playing?> = _playing
@@ -173,6 +187,13 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     val introEnabled: StateFlow<Boolean> = prefs.introEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val clock12: StateFlow<Boolean> = prefs.clock12.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val theme: StateFlow<String> = prefs.theme.stateIn(viewModelScope, SharingStarted.Eagerly, "phosphor")
+    val frameRateMatch: StateFlow<Boolean> = prefs.frameRateMatch.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    init {
+        viewModelScope.launch { clock12.collect { tv.sloopy.ui.common.TimeFmt.twelveHour = it } }
+        viewModelScope.launch { theme.collect { tv.sloopy.ui.theme.Sloopy.palette = tv.sloopy.ui.theme.Palettes.byId(it) } }
+    }
     val osdSeconds: StateFlow<Int> = prefs.osdSeconds.stateIn(viewModelScope, SharingStarted.Eagerly, 4)
 
     /** Settings override, else the build's default. Empty means the feature is hidden. */

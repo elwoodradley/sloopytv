@@ -3,7 +3,10 @@ package tv.sloopy.ui.guide
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusable
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -21,6 +24,8 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -64,6 +69,7 @@ import tv.sloopy.ui.Groups
 import tv.sloopy.ui.SloopyViewModel
 import tv.sloopy.ui.common.BACK_KEYS
 import tv.sloopy.ui.common.ChannelLogo
+import tv.sloopy.ui.common.ChoicePrompt
 import tv.sloopy.ui.common.Clock
 import tv.sloopy.ui.common.Hairline
 import tv.sloopy.ui.common.inKeys
@@ -86,6 +92,12 @@ private val SLOT = 228.dp            // 30 minutes
 private val CHANNEL_COL = 330.dp
 private val ROW_H = 64.dp
 private val HEADER_H = 36.dp
+
+/** Focus inside the timeline must not scroll it: the guide moves the timeline on its own terms. */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+private val NoBringIntoView = object : BringIntoViewSpec {
+    override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float = 0f
+}
 
 private data class Focused(val channel: ChannelEntity, val prog: ProgrammeEntity?)
 
@@ -123,6 +135,13 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     val lastRowFocus = remember { FocusRequester() }
     val railFocus = remember { FocusRequester() }
     var focusedRow by remember { mutableStateOf(-1) }
+    // Vertical moves keep a cursor time and land on the cell under it in the next row, without
+    // scrolling the timeline (TiviMate behaviour). Only Left and Right move time.
+    val cellRequesters = remember { mutableMapOf<String, FocusRequester>() }
+    val rowProgs = remember { mutableMapOf<Long, List<ProgrammeEntity>>() }
+    var cursorEpoch by remember { mutableStateOf(nowEpoch) }
+    var verticalMove by remember { mutableStateOf(false) }
+    var timelinePx by remember { mutableStateOf(0) }
 
     var rail by remember { mutableStateOf(if (vm.takeGuideOpensAtSections()) Rail.SECTIONS else Rail.NONE) }
     var quit by remember { mutableStateOf(false) }
@@ -130,6 +149,9 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     // Press-and-hold on a group picks it up; Up/Down move it; OK or Back drop it.
     var grabbed by remember { mutableStateOf<String?>(null) }
     var dropOnUp by remember { mutableStateOf(false) }
+    // Menu on the remote: quick sort for the groups (on the rail) or the channels (in the grid).
+    var sortMenu by remember { mutableStateOf<String?>(null) }
+    val channelSort by vm.channelSort.collectAsState()
 
     val dpPerSec: Float = SLOT.value / 1800f
     val density = androidx.compose.ui.platform.LocalDensity.current.density
@@ -168,6 +190,49 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     }
     suspend fun focusRail() { repeat(40) { delay(50); if (runCatching { railFocus.requestFocus() }.getOrDefault(false)) return } }
 
+    fun viewStartEpoch(): Long = winStart + (hScroll.value / (dpPerSec * density)).toLong()
+    /** The cell in [list] under the cursor time; else the next one; else the last; else the no-data cell. */
+    fun pickKey(c: ChannelEntity, list: List<ProgrammeEntity>): String {
+        val t = cursorEpoch
+        val p = list.firstOrNull { it.startEpoch <= t && it.stopEpoch > t }
+            ?: list.firstOrNull { it.startEpoch > t && it.startEpoch < winEnd }
+            ?: list.lastOrNull { it.stopEpoch > winStart }
+        return "${c.id}|${p?.startEpoch ?: "nodata"}"
+    }
+    suspend fun focusRow(target: Int) {
+        val c = channels.getOrNull(target) ?: return
+        verticalMove = true
+        val vis = listState.layoutInfo.visibleItemsInfo
+        if (vis.none { it.index == target }) {
+            val below = target > (vis.lastOrNull()?.index ?: 0)
+            listState.scrollToItem(if (below) (target - 8).coerceAtLeast(0) else target)
+        }
+        repeat(25) {
+            val list = rowProgs[c.id]
+            if (list != null) {
+                val fr = cellRequesters[pickKey(c, list)]
+                if (fr != null && runCatching { fr.requestFocus() }.getOrDefault(false)) return
+            }
+            delay(40)
+        }
+        verticalMove = false
+    }
+    /** After a horizontal move: the cursor follows the cell and the timeline scrolls only as far as needed. */
+    fun cellFocused(p: ProgrammeEntity?) {
+        if (verticalMove) { verticalMove = false; return }
+        if (p == null) return
+        val a = maxOf(p.startEpoch, winStart)
+        cursorEpoch = maxOf(a, viewStartEpoch())
+        val xs = ((a - winStart) * dpPerSec * density).toInt()
+        val slot = (SLOT.value * density).toInt()
+        val target = when {
+            xs < hScroll.value -> xs
+            timelinePx > 0 && xs > hScroll.value + timelinePx - slot -> xs - slot
+            else -> return
+        }
+        scope.launch { hScroll.scrollTo(target.coerceIn(0, hScroll.maxValue)) }
+    }
+
     LaunchedEffect(Unit) { if (vm.epgError.value != null) vm.refreshEpgNow() }
     LaunchedEffect(rail, quit) { if (!quit) { if (rail == Rail.NONE) focusGrid() else focusRail(); parking = false } }
     // A new group's channels arrive a moment after the selection; land on them when they do.
@@ -182,7 +247,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     Column(
         Modifier.fillMaxSize().background(Sloopy.ground)
             .onPreviewKeyEvent { ev ->
-                if (quit) return@onPreviewKeyEvent false
+                if (quit || sortMenu != null) return@onPreviewKeyEvent false
                 // Taken here on key-up: something below the grid cells swallows Back's key-down and
                 // drops focus instead, so the system BackHandler never saw every other press.
                 if (grabbed != null) {
@@ -203,19 +268,16 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                 if (!ev.isDown) return@onPreviewKeyEvent false
                 val inGrid = rail == Rail.NONE
                 when {
-                    ev.isKey(Key.Guide, Key.Menu) -> { setRail(if (inGrid) Rail.GROUPS else Rail.NONE); true }
+                    ev.isKey(Key.Guide) -> { setRail(if (inGrid) Rail.GROUPS else Rail.NONE); true }
+                    ev.isKey(Key.Menu) -> { sortMenu = if (rail == Rail.GROUPS) "groups" else if (inGrid) "channels" else null; sortMenu != null }
                     // Left off the edge of the grid opens the groups, never a random rail row.
                     inGrid && ev.isKey(Key.DirectionLeft) && (hScroll.value == 0 || focused?.prog == null) -> { setRail(Rail.GROUPS); true }
                     !inGrid && ev.isKey(Key.DirectionLeft) -> true
                     !inGrid && ev.isKey(Key.DirectionRight) -> { setRail(if (rail == Rail.SECTIONS) Rail.GROUPS else Rail.NONE); true }
-                    inGrid && ev.isKey(Key.DirectionUp) && focusedRow == 0 && channels.size > 1 -> {
-                        scope.launch { listState.scrollToItem(channels.lastIndex); repeat(12) { delay(40); if (runCatching { lastRowFocus.requestFocus() }.getOrDefault(false)) return@launch } }; true
-                    }
-                    inGrid && ev.isKey(Key.DirectionDown) && focusedRow == channels.lastIndex && channels.size > 1 -> {
-                        scope.launch { listState.scrollToItem(0); repeat(12) { delay(40); if (runCatching { firstRowFocus.requestFocus() }.getOrDefault(false)) return@launch } }; true
-                    }
-                    inGrid && ev.isKey(Key.ChannelUp, Key.PageUp) -> { scope.launch { listState.scrollToItem((listState.firstVisibleItemIndex - 10).coerceAtLeast(0)) }; true }
-                    inGrid && ev.isKey(Key.ChannelDown, Key.PageDown) -> { scope.launch { listState.scrollToItem((listState.firstVisibleItemIndex + 10).coerceAtMost(channels.lastIndex.coerceAtLeast(0))) }; true }
+                    inGrid && channels.isNotEmpty() && ev.isKey(Key.DirectionUp) -> { scope.launch { focusRow(if (focusedRow <= 0) channels.lastIndex else focusedRow - 1) }; true }
+                    inGrid && channels.isNotEmpty() && ev.isKey(Key.DirectionDown) -> { scope.launch { focusRow(if (focusedRow >= channels.lastIndex) 0 else focusedRow + 1) }; true }
+                    inGrid && channels.isNotEmpty() && ev.isKey(Key.ChannelUp, Key.PageUp) -> { scope.launch { focusRow((focusedRow - 10).coerceAtLeast(0)) }; true }
+                    inGrid && channels.isNotEmpty() && ev.isKey(Key.ChannelDown, Key.PageDown) -> { scope.launch { focusRow((focusedRow + 10).coerceAtMost(channels.lastIndex)) }; true }
                     else -> false
                 }
             }
@@ -240,7 +302,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
         if (rail != Rail.NONE) {
             Column(Modifier.width(RAIL_W).fillMaxHeight()) {
                 RailHeader(
-                    when { grabbed != null -> "Moving · Up/Down · OK drops"; rail == Rail.GROUPS -> "Groups · hold OK to move"; else -> "SloopyTV" },
+                    when { grabbed != null -> "Moving · Up/Down · OK drops"; rail == Rail.GROUPS -> "Groups · hold OK to move · Menu sorts"; else -> "SloopyTV" },
                     amber = grabbed != null,
                 )
                 if (rail == Rail.GROUPS) GroupRail(groups, groupNow, railFocus, grabbed, onGrab = { grabbed = it }) { id ->
@@ -284,8 +346,11 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                         vm = vm, channel = c, isCurrent = c.id == current?.id,
                         winStart = winStart, winEnd = winEnd, nowEpoch = nowEpoch, dpPerSec = dpPerSec,
                         hScroll = hScroll, requesters = requesters,
-                        onFocused = { p -> focusedRow = i; focused = Focused(c, p) },
+                        onFocused = { p -> focusedRow = i; focused = Focused(c, p); cellFocused(p) },
                         onSelect = { p -> onSelect(vm, c, p, go) },
+                        onProgs = { list -> rowProgs[c.id] = list },
+                        register = { key, fr -> if (fr == null) cellRequesters.remove(key) else cellRequesters[key] = fr },
+                        onTimelineWidth = { timelinePx = it },
                     )
                 }
             }
@@ -293,6 +358,11 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
         }
     }
     if (quit) QuitPrompt(onQuit = onQuit, onCancel = { quit = false })
+    when (sortMenu) {
+        "groups" -> ChoicePrompt("SORT GROUPS", listOf("az" to "A to Z", "provider" to "Provider order"), onPick = { vm.sortGroups(it); sortMenu = null }, onCancel = { sortMenu = null })
+        "channels" -> ChoicePrompt("SORT THIS GROUP", listOf("provider" to "Provider order", "number" to "By number", "name" to "By name"), current = channelSort, onPick = { vm.setChannelSort(it); sortMenu = null }, onCancel = { sortMenu = null })
+    }
+    LaunchedEffect(sortMenu) { if (sortMenu == null) { if (rail == Rail.NONE) focusGrid() else focusRail() } }
     }
 }
 
@@ -363,6 +433,9 @@ private fun GuideRow(
     requesters: List<FocusRequester>,
     onFocused: (ProgrammeEntity?) -> Unit,
     onSelect: (ProgrammeEntity?) -> Unit,
+    onProgs: (List<ProgrammeEntity>) -> Unit,
+    register: (String, FocusRequester?) -> Unit,
+    onTimelineWidth: (Int) -> Unit,
 ) {
     val density = androidx.compose.ui.platform.LocalDensity.current.density
     // Served from the view model's cache when it has the row, so a re-entry draws on the first frame.
@@ -370,6 +443,7 @@ private fun GuideRow(
     val progs by produceState<List<ProgrammeEntity>?>(initialValue = vm.cachedProgrammes(key, winStart), key, winStart) {
         value = vm.programmesFor(channel, winStart)
     }
+    LaunchedEffect(progs) { progs?.let { onProgs(it) } }
 
     Column {
         Row(Modifier.fillMaxWidth().height(ROW_H)) {
@@ -380,14 +454,17 @@ private fun GuideRow(
                 Text(channel.name, style = Sloopy.listName.copy(fontSize = 21.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
                 if (isCurrent) LiveDot()
             }
-            Box(
-                Modifier.weight(1f).fillMaxHeight().horizontalScroll(hScroll)
+            Box(Modifier.weight(1f).fillMaxHeight().onSizeChanged { onTimelineWidth(it.width) }) {
+             // Focus never scrolls the timeline by itself: the screen scrolls it for horizontal moves only.
+             CompositionLocalProvider(LocalBringIntoViewSpec provides NoBringIntoView) {
+              Box(
+                Modifier.fillMaxSize().horizontalScroll(hScroll)
                     .drawWithContent {
                         drawContent()
                         val x = (nowEpoch - winStart) * dpPerSec * density
                         drawRect(Sloopy.amber, Offset(x, 0f), Size(1.5f * density, size.height))
                     }
-            ) {
+              ) {
               // Explicit width so the shared scroll state knows how far the timeline extends.
               Box(Modifier.width(((winEnd - winStart) * dpPerSec).dp).fillMaxHeight()) {
                 val list = progs
@@ -399,7 +476,8 @@ private fun GuideRow(
                     val x0 = (nowEpoch - winStart - 1800).coerceAtLeast(0)
                     Cell(
                         title = "No guide data", time = "", x = (x0 * dpPerSec).dp, w = (((winEnd - winStart - x0) * dpPerSec).dp), past = true, isNow = false, archive = false,
-                        requesters = requesters, onFocus = { onFocused(null) }, onClick = { onSelect(null) },
+                        requesters = requesters, cellKey = "${channel.id}|nodata", register = register,
+                        onFocus = { onFocused(null) }, onClick = { onSelect(null) },
                     )
                 } else {
                     for (p in list) {
@@ -414,12 +492,15 @@ private fun GuideRow(
                             w = ((b - a) * dpPerSec).dp,
                             past = p.stopEpoch <= nowEpoch, isNow = isNow, archive = channel.archive,
                             requesters = if (isNow) requesters else emptyList(),
+                            cellKey = "${channel.id}|${p.startEpoch}", register = register,
                             onFocus = { onFocused(p) },
                             onClick = { onSelect(p) },
                         )
                     }
                 }
               }
+              }
+             }
             }
         }
         Hairline(color = Sloopy.hair2)
@@ -432,9 +513,12 @@ private fun Cell(
     x: androidx.compose.ui.unit.Dp, w: androidx.compose.ui.unit.Dp,
     past: Boolean, isNow: Boolean, archive: Boolean,
     requesters: List<FocusRequester>,
+    cellKey: String, register: (String, FocusRequester?) -> Unit,
     onFocus: () -> Unit, onClick: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
+    val own = remember { FocusRequester() }
+    DisposableEffect(cellKey) { register(cellKey, own); onDispose { register(cellKey, null) } }
     Surface(
         onClick = onClick,
         shape = ClickableSurfaceDefaults.shape(RectangleShape),
@@ -451,6 +535,7 @@ private fun Cell(
             .padding(top = 2.dp, bottom = 2.dp, end = 1.5.dp)
             .width((w - 1.5.dp).coerceAtLeast(6.dp))
             .height(ROW_H - 4.dp)
+            .focusRequester(own)
             .then(requesters.fold(Modifier as Modifier) { m, r -> m.focusRequester(r) })
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() },
     ) {
@@ -521,7 +606,6 @@ private fun DetailPanel(vm: SloopyViewModel, f: Focused?, current: ChannelEntity
     }
 }
 
-private val HHMM = DateTimeFormatter.ofPattern("HH:mm")
 private val DAY = DateTimeFormatter.ofPattern("EEE d MMM")
-private fun hhmm(epoch: Long) = Instant.ofEpochSecond(epoch).atZone(ZoneId.systemDefault()).format(HHMM)
+private fun hhmm(epoch: Long) = tv.sloopy.ui.common.TimeFmt.hhmm(epoch)
 private fun dayLabel(epoch: Long) = Instant.ofEpochSecond(epoch).atZone(ZoneId.systemDefault()).format(DAY)
