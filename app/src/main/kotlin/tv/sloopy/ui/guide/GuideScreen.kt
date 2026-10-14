@@ -186,8 +186,12 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                 // drops focus instead, so the system BackHandler never saw every other press.
                 if (grabbed != null) {
                     when {
-                        // The key-up of the long press that grabbed it must not drop it; only a fresh press does.
-                        ev.isKey(Key.DirectionCenter, Key.Enter, Key.NumPadEnter) -> { if (ev.isDown) dropOnUp = true else if (dropOnUp) { grabbed = null; dropOnUp = false } }
+                        // Only a fresh press of OK drops it: a real remote repeats key-down while held, and the
+                        // key-up of the long press that grabbed it must not count.
+                        ev.isKey(Key.DirectionCenter, Key.Enter, Key.NumPadEnter) -> {
+                            if (ev.isDown) { if (ev.nativeKeyEvent.repeatCount == 0) dropOnUp = true }
+                            else if (dropOnUp) { grabbed = null; dropOnUp = false }
+                        }
                         ev.inKeys(BACK_KEYS) -> { if (!ev.isDown) grabbed = null }
                         ev.isDown && ev.isKey(Key.DirectionUp) -> vm.moveGroup(grabbed!!, -1)
                         ev.isDown && ev.isKey(Key.DirectionDown) -> vm.moveGroup(grabbed!!, 1)

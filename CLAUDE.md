@@ -18,6 +18,10 @@ capture (`FLAG_SECURE`); use the debug build for visual checks. Drive the UI wit
 `adb shell input keyevent DPAD_LEFT` etc.
 
 ## Rules that matter here
+- The emulator is signed in to the user's real IPTV account, and the app tunes a channel the moment
+  it launches. Providers cap concurrent connections, so an emulator left playing can lock the user
+  out of his own TV. Force-stop the app and kill the emulator the moment a check is done, and never
+  leave it running between steps while the user may be watching.
 - Never call `android.util.Log`; use `TLog`, which redacts and is silent in release.
 - Any string that might contain a URL or credential goes through `Redact.apply` before it is shown or logged.
 - Secrets only in `Vault`. Never in DataStore, Room, logs, or Compose state that outlives the screen.
