@@ -118,7 +118,7 @@ fun InfoOverlay(
                 Spacer(Modifier.width(8.dp))
                 SloopyButton("Guide", onClick = { onClose(); go("guide") })
                 Spacer(Modifier.width(8.dp))
-                SloopyButton("Menu", onClick = { onClose(); go("hub") })
+                SloopyButton("Menu", onClick = { onClose(); vm.guideOpensAtSections = true; go("guide") })
                 Spacer(Modifier.width(20.dp))
                 if (playing is Playing.Live) { LiveDot(); Spacer(Modifier.width(8.dp)); Text("OK on a channel switches · Back closes", style = Sloopy.label.copy(color = Sloopy.dim)) }
             }

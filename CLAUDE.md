@@ -34,11 +34,17 @@ capture (`FLAG_SECURE`); use the debug build for visual checks. Drive the UI wit
 - Layout numbers are mockup px / 1.333: `TubeRoot` overrides `LocalDensity` so 1dp = 1/1440 of screen width.
 - The tube power-on plays only at launch and on switch-off. Channel changes are a hard cut with the bare badge; no other motion.
 
-## Navigation chain (TiviMate-style, user-approved)
-Picture → Back → Guide (groups rail on the left) → Back → Hub menu (`ui/hub/HubScreen.kt`) → Back →
-"Switch off?" prompt. Hold Back anywhere returns to the picture (`MainActivity.dispatchKeyEvent` → `vm.goHome()`).
-OK on the picture opens `InfoOverlay` (badge, ten recent channels, action bar); OK on a recent tile switches.
-NavHost transitions are all `None`: hard cuts only.
+## Navigation chain (TiviMate-style, user-approved 2026-10-13)
+Everything happens inside `GuideScreen`: Picture → Back → grid (focus on the current channel's now
+cell) → Back → groups rail slides out on the current group → Back → the rail shows the sections
+(Live TV, Guide, Movies, Series, History, Search, Settings) → Back → "Switch off?". Right walks the
+rail back in; Left off the grid's edge opens the groups. Hold Back anywhere returns to the picture
+(`MainActivity.dispatchKeyEvent` → `vm.goHome()`). Other screens' Back returns to the guide with the
+sections out (`vm.guideOpensAtSections`). OK on the picture opens `InfoOverlay` (badge, ten recent
+channels, action bar). NavHost transitions are all `None`: hard cuts only.
+Gotcha: something under the guide cells swallows Back's key-down and drops focus, so the guide takes
+Back itself in `onPreviewKeyEvent` (on key-up) and parks focus on a hidden node while the rail is
+rebuilt. Overlays that cancel on Back must consume both key-down and key-up (`QuitPrompt`).
 
 ## TV input conventions
 - Text fields (`Field` in `ProviderScreen.kt`) are two-stage: the row takes D-pad focus, OK opens the keyboard.

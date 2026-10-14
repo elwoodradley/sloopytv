@@ -138,6 +138,9 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     /** Long-press Back from anywhere: close everything and return to the picture. */
     val homeEvents = kotlinx.coroutines.flow.MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     fun goHome() { homeEvents.tryEmit(Unit) }
+    /** Set before navigating to the guide so it opens with the sections panel (the "menu") out. */
+    @Volatile var guideOpensAtSections = false
+    fun takeGuideOpensAtSections(): Boolean = guideOpensAtSections.also { guideOpensAtSections = false }
 
     private val _toast = MutableStateFlow<String?>(null)
     val toast: StateFlow<String?> = _toast

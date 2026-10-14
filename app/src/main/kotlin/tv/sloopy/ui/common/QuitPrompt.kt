@@ -29,7 +29,8 @@ fun QuitPrompt(onQuit: () -> Unit, onCancel: () -> Unit) {
     LaunchedEffect(Unit) { runCatching { first.requestFocus() } }
     Box(
         Modifier.fillMaxSize().background(Color(0x99000000))
-            .onPreviewKeyEvent { if (it.isDown && it.inKeys(BACK_KEYS)) { onCancel(); true } else false },
+            // Both halves of the key are consumed: the screen underneath also acts on Back's key-up.
+            .onPreviewKeyEvent { if (it.inKeys(BACK_KEYS)) { if (!it.isDown) onCancel(); true } else false },
         contentAlignment = Alignment.Center,
     ) {
         Column(Modifier.background(Sloopy.ground).padding(40.dp)) {
