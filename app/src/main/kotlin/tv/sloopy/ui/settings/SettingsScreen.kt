@@ -34,6 +34,7 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import androidx.tv.material3.Text
@@ -180,6 +181,23 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                         SettingRow("Tube power-on at launch", if (intro) "ON" else "OFF") { scope.launch { vm.prefs.setIntroEnabled(!intro) } }
                         SettingRow("Channel badge stays for", "$osd S") { scope.launch { vm.prefs.setOsdSeconds(if (osd >= 8) 2 else osd + 1) } }
                     }
+                    "recordings" -> {
+                        Section("Recordings")
+                        val folder by vm.recordFolder.collectAsState()
+                        val context = androidx.compose.ui.platform.LocalContext.current
+                        val pick = androidx.activity.compose.rememberLauncherForActivityResult(androidx.activity.result.contract.ActivityResultContracts.OpenDocumentTree()) { uri ->
+                            if (uri != null) {
+                                runCatching { context.contentResolver.takePersistableUriPermission(uri, android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION) }
+                                vm.setRecordFolder(uri.toString())
+                            }
+                        }
+                        Text("Where recordings are saved: " + tv.sloopy.record.Recorder.describeFolder(folder), style = Sloopy.body, modifier = Modifier.width(760.dp))
+                        Row(Modifier.padding(top = 14.dp)) {
+                            SloopyButton("Choose a folder or USB drive", primary = true, onClick = { runCatching { pick.launch(null) }.onFailure { vm.toast("This box has no folder picker") } })
+                            if (folder != null) { Spacer(Modifier.width(8.dp)); SloopyButton("Use this stick's storage", onClick = { vm.setRecordFolder(null) }) }
+                        }
+                        Text("A recording uses one of your provider's connections while it runs, the same as watching. Recordings are plain .ts files; any player opens them.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 16.dp).width(760.dp))
+                    }
                     "parental" -> {
                         Section("Parental")
                         if (!hasPin) {
@@ -210,6 +228,59 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                             }
                         }
                     }
+                    "transfer" -> {
+                        Section("Transfer")
+                        val code by vm.syncCode.collectAsState()
+                        val syncedAt by vm.syncedAt.collectAsState()
+                        val status by vm.syncStatus.collectAsState()
+                        var restoreCode by remember { mutableStateOf("") }
+                        var busy by remember { mutableStateOf(false) }
+                        // The button that was pressed disappears when sync flips; keep the highlight on the page.
+                        val syncFirst = remember { FocusRequester() }
+                        var hadCode by remember { mutableStateOf(code != null) }
+                        LaunchedEffect(code != null) { if ((code != null) != hadCode) { hadCode = code != null; delay(80); runCatching { syncFirst.requestFocus() } } }
+                        if (code == null) {
+                            Text("Turn on sync and this stick gets a code. Type that code on any other stick and it becomes a copy: provider login, favourites, group order, History, theme, everything. The code keeps working; the copy is always current.", style = Sloopy.body, modifier = Modifier.width(760.dp))
+                            Row(Modifier.padding(top = 16.dp)) { SloopyButton("Turn on sync", primary = true, onClick = { vm.enableSync() }, modifier = Modifier.focusRequester(syncFirst)) }
+                        } else {
+                            Text("Type this code on another stick, under Transfer from another stick when it asks for a provider, or here under Restore.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.width(760.dp))
+                            Row(Modifier.padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.background(Color.White).padding(10.dp)) { tv.sloopy.ui.common.QrCode(tv.sloopy.sync.SyncClient.pretty(code!!), 150.dp) }
+                                Spacer(Modifier.width(32.dp))
+                                Column {
+                                    Label("Your transfer code")
+                                    Text(tv.sloopy.sync.SyncClient.pretty(code!!), style = Sloopy.titleHuge.copy(fontFamily = Sloopy.mono, letterSpacing = androidx.compose.ui.unit.TextUnit(0.12f, androidx.compose.ui.unit.TextUnitType.Em)))
+                                    Text(if (syncedAt > 0) "Last uploaded " + tv.sloopy.ui.common.TimeFmt.dateTime(syncedAt) else "Not uploaded yet", style = Sloopy.listSub)
+                                    Text("Anyone with this code gets your provider login. Keep it like a password.", style = Sloopy.listSub.copy(color = Sloopy.amber))
+                                }
+                            }
+                            Row(Modifier.padding(top = 18.dp)) {
+                                SloopyButton("Upload now", onClick = { vm.syncNow(announce = true) }, modifier = Modifier.focusRequester(syncFirst))
+                                Spacer(Modifier.width(8.dp))
+                                SloopyButton("New code", onClick = { vm.enableSync() })
+                                Spacer(Modifier.width(8.dp))
+                                SloopyButton("Turn off sync", onClick = { vm.disableSync() })
+                            }
+                        }
+                        if (status != null) Text(status!!, style = Sloopy.body.copy(color = Sloopy.amber), modifier = Modifier.padding(top = 12.dp).width(760.dp))
+                        Section("Restore")
+                        Text("Make this stick a copy of another one. Its code goes here. Nothing on this stick is removed; the other stick's choices are laid over it.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.width(760.dp))
+                        // Right from the field is wired by hand: geometric search does not find the button.
+                        val restoreBtn = remember { FocusRequester() }
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Box(Modifier.width(360.dp)) { Field("Code from the other stick", restoreCode, { restoreCode = it.uppercase() }, mono = true, placeholder = "XXXX-XXXX", modifier = Modifier.focusProperties { right = restoreBtn }) }
+                            Spacer(Modifier.width(12.dp))
+                            SloopyButton(if (busy) "Hang on…" else "Restore", enabled = !busy && tv.sloopy.sync.SyncClient.normalise(restoreCode).length == 8, modifier = Modifier.padding(bottom = 2.dp).focusRequester(restoreBtn), onClick = {
+                                busy = true
+                                scope.launch {
+                                    runCatching { vm.restoreFromCode(restoreCode) }
+                                        .onSuccess { vm.toast("Copied: $it"); restoreCode = "" }
+                                        .onFailure { vm.toast(tv.sloopy.TLog.userMessage(it)) }
+                                    busy = false
+                                }
+                            })
+                        }
+                    }
                     else -> {
                         Section("About")
                         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -232,7 +303,7 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
     }
 }
 
-private val SECTIONS = listOf("providers" to "Providers", "listings" to "Listings", "picture" to "Picture", "parental" to "Parental", "about" to "About")
+private val SECTIONS = listOf("providers" to "Providers", "listings" to "Listings", "picture" to "Picture", "recordings" to "Recordings", "parental" to "Parental", "transfer" to "Transfer", "about" to "About")
 
 @Composable
 private fun Section(title: String) {

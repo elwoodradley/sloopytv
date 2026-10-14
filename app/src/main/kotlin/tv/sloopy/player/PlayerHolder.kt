@@ -57,7 +57,8 @@ class PlayerHolder(context: Context) {
         .setMediaSourceFactory(
             DefaultMediaSourceFactory(context.applicationContext)
                 .setDataSourceFactory(
-                    OkHttpDataSource.Factory(AndroidHttp.client).setUserAgent(AndroidHttp.USER_AGENT)
+                    // http(s) through OkHttp; content:// and file:// (recordings) through the platform sources.
+                    androidx.media3.datasource.DefaultDataSource.Factory(context.applicationContext, OkHttpDataSource.Factory(AndroidHttp.client).setUserAgent(AndroidHttp.USER_AGENT))
                 )
         )
         .setLoadControl(

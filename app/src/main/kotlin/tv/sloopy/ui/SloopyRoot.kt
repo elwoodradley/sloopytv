@@ -48,10 +48,11 @@ fun SloopyRoot(vm: SloopyViewModel, onQuit: () -> Unit) {
     var introDone by rememberSaveable { mutableStateOf(false) }
     var quitting by remember { mutableStateOf(false) }
     val toast by vm.toast.collectAsState()
+    val locked by vm.locked.collectAsState()
 
     val body: @Composable () -> Unit = {
         Box(Modifier.fillMaxSize().background(Sloopy.ground)) {
-            SloopyNav(vm, startAtProviders = providers.isEmpty(), onQuit = { quitting = true })
+            if (locked) tv.sloopy.ui.pay.UnlockScreen(vm) else SloopyNav(vm, startAtProviders = providers.isEmpty(), onQuit = { quitting = true })
             if (toast != null) {
                 LaunchedEffect(toast) { delay(5000); vm.clearToast() }
                 Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp).background(Sloopy.surface2).padding(horizontal = 20.dp, vertical = 12.dp)) {
@@ -97,6 +98,7 @@ private fun SloopyNav(vm: SloopyViewModel, startAtProviders: Boolean, onQuit: ()
     ) {
         composable("live") { LiveScreen(vm, go = go, onQuit = onQuit) }
         composable("guide") { GuideScreen(vm, go = go, onQuit = onQuit) }
+        composable("recordings") { tv.sloopy.ui.record.RecordingsScreen(vm, onBack = { vm.guideOpensAtSections = true; go("guide") }, onPlay = { nav.navigate("vodplayer") }) }
         composable("history") { HistoryScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onPlay = { nav.navigate("vodplayer") }) }
         composable("movies") { LibraryScreen(vm, kind = "vod", go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onOpen = { id -> nav.navigate("details/vod/$id") }) }
         composable("series") { LibraryScreen(vm, kind = "series", go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onOpen = { id -> nav.navigate("details/series/$id") }) }

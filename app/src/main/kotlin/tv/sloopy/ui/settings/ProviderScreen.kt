@@ -51,6 +51,7 @@ import tv.sloopy.ui.SloopyViewModel
 import tv.sloopy.ui.common.Hairline
 import tv.sloopy.ui.common.Label
 import tv.sloopy.ui.common.LiveDot
+import tv.sloopy.ui.common.QrCode
 import tv.sloopy.ui.common.SloopyButton
 import tv.sloopy.ui.theme.Sloopy
 import java.time.Instant
@@ -67,6 +68,8 @@ fun ProviderScreen(vm: SloopyViewModel, providerId: String?, onDone: () -> Unit,
     var user by remember { mutableStateOf(existing?.username ?: "") }
     var pass by remember { mutableStateOf(existing?.password ?: "") }
     var epgUrl by remember { mutableStateOf(existing?.epgUrl ?: "") }
+    var transfer by remember { mutableStateOf(false) }
+    var transferCode by remember { mutableStateOf("") }
     var testing by remember { mutableStateOf(false) }
     var result by remember { mutableStateOf<Account?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
@@ -129,11 +132,28 @@ fun ProviderScreen(vm: SloopyViewModel, providerId: String?, onDone: () -> Unit,
             Text(if (!hasProviders && existing == null) "NOTHING'S PLUGGED IN YET" else if (existing == null) "ADD A PROVIDER" else "EDIT PROVIDER", style = Sloopy.titleHuge.copy(fontSize = androidx.compose.ui.unit.TextUnit(54f, androidx.compose.ui.unit.TextUnitType.Sp)), modifier = Modifier.padding(top = 8.dp), maxLines = 1)
 
             Row(Modifier.padding(top = 14.dp)) {
-                SloopyButton("Xtream codes", onClick = { kind = ProviderKind.XTREAM }, primary = kind == ProviderKind.XTREAM, modifier = Modifier.focusRequester(firstField).then(toCode))
+                SloopyButton("Xtream codes", onClick = { kind = ProviderKind.XTREAM; transfer = false }, primary = kind == ProviderKind.XTREAM && !transfer, modifier = Modifier.focusRequester(firstField).then(toCode))
                 Spacer(Modifier.width(10.dp))
-                SloopyButton("M3U playlist", onClick = { kind = ProviderKind.M3U }, primary = kind == ProviderKind.M3U, modifier = toCode)
+                SloopyButton("M3U playlist", onClick = { kind = ProviderKind.M3U; transfer = false }, primary = kind == ProviderKind.M3U && !transfer, modifier = toCode)
+                if (existing == null && codeServer.isNotBlank()) { Spacer(Modifier.width(10.dp)); SloopyButton("Transfer from another stick", onClick = { transfer = true }, primary = transfer, modifier = toCode) }
             }
 
+            if (transfer) {
+                Text("On the other stick: Settings › Transfer shows an eight-character code. Type it here and this stick becomes a copy: login, favourites, order, History and settings.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 18.dp).width(560.dp))
+                Field("Transfer code", transferCode, { transferCode = it.uppercase() }, mono = true, placeholder = "XXXX-XXXX")
+                Row(Modifier.padding(top = 20.dp)) {
+                    SloopyButton(if (testing) "Hang on…" else "Transfer", primary = true, enabled = !testing && tv.sloopy.sync.SyncClient.normalise(transferCode).length == 8, onClick = {
+                        error = null; testing = true
+                        scope.launch {
+                            runCatching { vm.restoreFromCode(transferCode) }
+                                .onSuccess { testing = false; vm.toast("Copied from your other stick: $it"); onDone() }
+                                .onFailure { testing = false; error = TLog.userMessage(it) }
+                        }
+                    })
+                    if (hasProviders) { Spacer(Modifier.width(10.dp)); SloopyButton("Cancel", onClick = onBack) }
+                }
+                if (error != null) Text(error!!, style = Sloopy.bodyBig.copy(color = Sloopy.amber), modifier = Modifier.padding(top = 18.dp))
+            } else {
             Field("Name", name, { name = it }, placeholder = "Home")
             if (kind == ProviderKind.XTREAM) {
                 Field("Server", url, { url = it }, mono = true, placeholder = "http://host:port  or paste a get.php link", keyboard = KeyboardType.Uri)
@@ -183,6 +203,7 @@ fun ProviderScreen(vm: SloopyViewModel, providerId: String?, onDone: () -> Unit,
                 Text("No provider yet?", style = Sloopy.body.copy(color = Sloopy.muted))
                 Spacer(Modifier.width(12.dp))
                 SloopyButton("Try the demo on public test streams", onClick = { vm.addDemo(); onDone() })
+            }
             }
         }
 
@@ -263,24 +284,6 @@ private fun CodePanel(busy: Boolean, focusRequester: FocusRequester, onRedeem: (
 }
 
 @Composable
-private fun QrCode(text: String, size: androidx.compose.ui.unit.Dp) {
-    val matrix = remember(text) {
-        val hints = mapOf(
-            com.google.zxing.EncodeHintType.ERROR_CORRECTION to com.google.zxing.qrcode.decoder.ErrorCorrectionLevel.M,
-            com.google.zxing.EncodeHintType.MARGIN to 0,
-        )
-        com.google.zxing.qrcode.QRCodeWriter().encode(text, com.google.zxing.BarcodeFormat.QR_CODE, 0, 0, hints)
-    }
-    androidx.compose.foundation.Canvas(Modifier.width(size).height(size)) {
-        val n = matrix.width
-        val cell = this.size.width / n
-        for (y in 0 until n) for (x in 0 until n) if (matrix[x, y]) {
-            drawRect(Color.Black, topLeft = androidx.compose.ui.geometry.Offset(x * cell, y * cell), size = androidx.compose.ui.geometry.Size(cell + 0.5f, cell + 0.5f))
-        }
-    }
-}
-
-@Composable
 private fun LockIcon() {
     androidx.compose.foundation.Canvas(Modifier.padding(top = 3.dp).width(16.dp).height(16.dp)) {
         val w = size.width; val h = size.height; val sw = 1.5.dp.toPx()
@@ -331,6 +334,9 @@ fun Field(
     // text field ends editing, and a second Back ends it explicitly (and, when backLeaves is
     // set, also lets the screen handle Back).
     var innerHadFocus by remember { mutableStateOf(false) }
+    // The Back that ends editing moves focus to the row before its key-up arrives; the row must
+    // swallow that key-up or the screen underneath treats it as its own Back.
+    var swallowBackUp by remember { mutableStateOf(false) }
     Column(Modifier.padding(top = 14.dp).fillMaxWidth()) {
         Label(label)
         androidx.tv.material3.Surface(
@@ -338,7 +344,11 @@ fun Field(
             shape = androidx.tv.material3.ClickableSurfaceDefaults.shape(androidx.compose.ui.graphics.RectangleShape),
             colors = androidx.tv.material3.ClickableSurfaceDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Color.Transparent, contentColor = Sloopy.text, focusedContentColor = Sloopy.text),
             scale = androidx.tv.material3.ClickableSurfaceDefaults.scale(focusedScale = 1f),
-            modifier = modifier.fillMaxWidth().focusRequester(row).onFocusChanged { rowFocused = it.isFocused },
+            modifier = modifier.fillMaxWidth().focusRequester(row).onFocusChanged { rowFocused = it.isFocused }
+                .onPreviewKeyEvent { ev ->
+                    val back = ev.key == androidx.compose.ui.input.key.Key.Back || ev.key == androidx.compose.ui.input.key.Key.Escape
+                    if (back && ev.type == androidx.compose.ui.input.key.KeyEventType.KeyUp && swallowBackUp) { swallowBackUp = false; true } else false
+                },
         ) {
             Box(Modifier.padding(top = 6.dp).fillMaxWidth()) {
                 if (!editing) {
@@ -360,7 +370,7 @@ fun Field(
                                 else if (innerHadFocus) { innerHadFocus = false; editing = false; keyboardController?.hide() }
                             }
                             .onPreviewKeyEvent { ev ->
-                                if (ev.type == androidx.compose.ui.input.key.KeyEventType.KeyDown && (ev.key == androidx.compose.ui.input.key.Key.Back || ev.key == androidx.compose.ui.input.key.Key.Escape)) { stopEditing(); !backLeaves } else false
+                                if (ev.type == androidx.compose.ui.input.key.KeyEventType.KeyDown && (ev.key == androidx.compose.ui.input.key.Key.Back || ev.key == androidx.compose.ui.input.key.Key.Escape)) { stopEditing(); swallowBackUp = !backLeaves; !backLeaves } else false
                             },
                     )
                 }

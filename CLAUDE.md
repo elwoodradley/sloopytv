@@ -57,6 +57,23 @@ Back itself in `onPreviewKeyEvent` (on key-up) and parks focus on a hidden node 
 rebuilt. Overlays that cancel on Back must consume both key-down and key-up (`QuitPrompt`). A
 long press's own key-up must not count as the OK that drops a grabbed group.
 
+## Added in 0.2.0 / 0.3.0 (2026-10-14)
+- Themes are palettes in `ui/theme/Theme.kt` (`Palettes`); `Sloopy.*` colours read the current one.
+  Every time shown goes through `ui/common/TimeFmt` (12/24 h). Both live in the sync bundle.
+- Transfer: `sync/SyncManager` builds the bundle (providers, favourites, order, History, settings,
+  license), `sync/SyncClient` encrypts it with a key from the 8-char code and talks to the code
+  server's `/sync/put` and `/sync/get`; uploads re-run 8 s after any change, a minute apart at most.
+- Paywall: the code server's `/config` names a Gumroad product; `pay/License` verifies keys against
+  Gumroad; `vm.locked` swaps the whole UI for `UnlockScreen`. Empty product = free app.
+- Recording: `record/Recorder.kt` holds the foreground `RecordService` (copies the TS to a file),
+  the alarm receiver, folder handling (SAF tree or the app's own storage). Xtream channels are
+  forced to TS; HLS-only URLs refuse with a message. Recordings play through the VOD player as
+  `Playing.Vod(kind = "recording")`; the player's data source is DefaultDataSource over OkHttp.
+- Remote Menu key in the guide = quick sort (groups A–Z / provider order; channels by number / name).
+- Local code server for tests: `cd codes && npx wrangler@4 dev --local --port 8787 >| /tmp/wrangler.log`
+  (zsh noclobber: use `>|`), `adb reverse tcp:8787 tcp:8787`, Settings › Providers › code server
+  `http://127.0.0.1:8787`. Deploy with `npx wrangler@4 deploy` from `codes/`.
+
 ## TV input conventions
 - Text fields (`Field` in `ProviderScreen.kt`) are two-stage: the row takes D-pad focus, OK opens the keyboard.
   The TV keyboard is a floating window that eats the Back that closes it and reports no IME inset.

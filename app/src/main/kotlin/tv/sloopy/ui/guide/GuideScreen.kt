@@ -106,7 +106,7 @@ private enum class Rail { NONE, GROUPS, SECTIONS }
 
 private val SECTIONS = listOf(
     "live" to "Live TV", "guide" to "Guide", "movies" to "Movies", "series" to "Series",
-    "history" to "History", "search" to "Search", "settings" to "Settings",
+    "history" to "History", "recordings" to "Recordings", "search" to "Search", "settings" to "Settings",
 )
 
 @UnstableApi
@@ -151,6 +151,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     var dropOnUp by remember { mutableStateOf(false) }
     // Menu on the remote: quick sort for the groups (on the rail) or the channels (in the grid).
     var sortMenu by remember { mutableStateOf<String?>(null) }
+    var recordAsk by remember { mutableStateOf<Pair<ChannelEntity, ProgrammeEntity>?>(null) }
     val channelSort by vm.channelSort.collectAsState()
 
     val dpPerSec: Float = SLOT.value / 1800f
@@ -247,7 +248,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     Column(
         Modifier.fillMaxSize().background(Sloopy.ground)
             .onPreviewKeyEvent { ev ->
-                if (quit || sortMenu != null) return@onPreviewKeyEvent false
+                if (quit || sortMenu != null || recordAsk != null) return@onPreviewKeyEvent false
                 // Taken here on key-up: something below the grid cells swallows Back's key-down and
                 // drops focus instead, so the system BackHandler never saw every other press.
                 if (grabbed != null) {
@@ -347,7 +348,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                         winStart = winStart, winEnd = winEnd, nowEpoch = nowEpoch, dpPerSec = dpPerSec,
                         hScroll = hScroll, requesters = requesters,
                         onFocused = { p -> focusedRow = i; focused = Focused(c, p); cellFocused(p) },
-                        onSelect = { p -> onSelect(vm, c, p, go) },
+                        onSelect = { p -> if (p != null && p.startEpoch > System.currentTimeMillis() / 1000) recordAsk = c to p else onSelect(vm, c, p, go) },
                         onProgs = { list -> rowProgs[c.id] = list },
                         register = { key, fr -> if (fr == null) cellRequesters.remove(key) else cellRequesters[key] = fr },
                         onTimelineWidth = { timelinePx = it },
@@ -362,7 +363,10 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
         "groups" -> ChoicePrompt("SORT GROUPS", listOf("az" to "A to Z", "provider" to "Provider order"), onPick = { vm.sortGroups(it); sortMenu = null }, onCancel = { sortMenu = null })
         "channels" -> ChoicePrompt("SORT THIS GROUP", listOf("provider" to "Provider order", "number" to "By number", "name" to "By name"), current = channelSort, onPick = { vm.setChannelSort(it); sortMenu = null }, onCancel = { sortMenu = null })
     }
-    LaunchedEffect(sortMenu) { if (sortMenu == null) { if (rail == Rail.NONE) focusGrid() else focusRail() } }
+    recordAsk?.let { (c, p) ->
+        ChoicePrompt("RECORD?", listOf("record" to "Record ${p.title.take(30)} · ${hhmm(p.startEpoch)}", "no" to "Not now"), onCancel = { recordAsk = null }, onPick = { if (it == "record") vm.scheduleRecording(c, p.title, p.startEpoch, p.stopEpoch); recordAsk = null })
+    }
+    LaunchedEffect(sortMenu, recordAsk) { if (sortMenu == null && recordAsk == null) { if (rail == Rail.NONE) focusGrid() else focusRail() } }
     }
 }
 

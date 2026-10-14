@@ -115,6 +115,22 @@ data class SeriesEntity(
 @Entity(tableName = "meta", primaryKeys = ["providerId", "key"])
 data class MetaEntity(val providerId: String, val key: String, val value: String)
 
+@Entity(tableName = "recordings", indices = [Index("providerId", "startEpoch")])
+data class RecordingEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val providerId: String,
+    val channelId: Long,
+    val channelName: String,
+    val title: String,
+    val startEpoch: Long,
+    val stopEpoch: Long,
+    val status: String,            // scheduled | recording | done | failed
+    val uri: String? = null,
+    val bytes: Long = 0,
+    val error: String? = null,
+    val createdAt: Long = System.currentTimeMillis(),
+)
+
 /** Lightweight projection for the channel list and guide rows. */
 data class NowNext(
     val epgId: String,

@@ -11,6 +11,8 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.drop
+import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
@@ -184,6 +186,128 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val info = (s as? tv.sloopy.update.UpdateState.Available)?.info ?: (s as? tv.sloopy.update.UpdateState.NeedsPermission)?.info
             ?: (s as? tv.sloopy.update.UpdateState.Ready)?.info ?: return@launch
         updater.install(info)
+    }
+
+    // ---- Paywall --------------------------------------------------------------------------------
+    private val _payConfig = MutableStateFlow<tv.sloopy.pay.PayConfig?>(null)
+    val payConfig: StateFlow<tv.sloopy.pay.PayConfig?> = _payConfig
+    private val license: StateFlow<String?> = prefs.license.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    /** True while the operator has a product set and this stick has no key for it. */
+    val locked: StateFlow<Boolean> = combine(_payConfig, license) { c, k -> c?.enabled == true && k.isNullOrBlank() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    suspend fun unlock(key: String) {
+        val c = _payConfig.value ?: throw IllegalStateException("Could not read the unlock settings. Check the connection and try again.")
+        when (val v = tv.sloopy.pay.License.verify(c.gumroadProduct, key)) {
+            is tv.sloopy.pay.Verdict.Valid -> { prefs.setLicense(key); prefs.setLicenseCheckedAt(System.currentTimeMillis()); _toast.value = "Unlocked. Stay tuned." }
+            is tv.sloopy.pay.Verdict.Invalid -> throw IllegalStateException(v.why)
+            tv.sloopy.pay.Verdict.Unknown -> throw IllegalStateException("Could not reach the license server. Check the connection and try again.")
+        }
+    }
+    init {
+        viewModelScope.launch {
+            codeServer.collect { server ->
+                _payConfig.value = tv.sloopy.pay.License.config(server) ?: tv.sloopy.pay.PayConfig("", "", "")
+                // A week after the last check, confirm the key is still good; refunds revoke it, no network keeps it.
+                val c = _payConfig.value ?: return@collect
+                val k = license.value
+                if (c.enabled && !k.isNullOrBlank() && System.currentTimeMillis() - prefs.licenseCheckedAt.first() > 7L * 86_400_000) {
+                    when (tv.sloopy.pay.License.verify(c.gumroadProduct, k)) {
+                        is tv.sloopy.pay.Verdict.Valid -> prefs.setLicenseCheckedAt(System.currentTimeMillis())
+                        is tv.sloopy.pay.Verdict.Invalid -> prefs.setLicense(null)
+                        tv.sloopy.pay.Verdict.Unknown -> {}
+                    }
+                }
+            }
+        }
+    }
+
+    // ---- Recordings ------------------------------------------------------------------------------
+    val recordings: StateFlow<List<tv.sloopy.data.db.RecordingEntity>> = active.flatMapLatest { p -> if (p == null) flowOf(emptyList()) else graph.db.recordings().all(p.id) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val recordFolder: StateFlow<String?> = prefs.recordFolder.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    fun setRecordFolder(uri: String?) = viewModelScope.launch { prefs.setRecordFolder(uri) }
+    init { viewModelScope.launch { graph.db.recordings().finishStale() } }
+
+    /** Records [channel] from [startEpoch] to [stopEpoch]; starts at once when the start has passed. */
+    fun scheduleRecording(channel: ChannelEntity, title: String, startEpoch: Long, stopEpoch: Long) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val now = System.currentTimeMillis() / 1000
+        if (stopEpoch <= now) { _toast.value = "That programme has already ended"; return@launch }
+        val id = graph.db.recordings().insert(tv.sloopy.data.db.RecordingEntity(providerId = p.id, channelId = channel.id, channelName = channel.name, title = title, startEpoch = maxOf(startEpoch, now), stopEpoch = stopEpoch, status = "scheduled"))
+        val ctx = getApplication<android.app.Application>()
+        if (startEpoch * 1000 - tv.sloopy.record.Recorder.LEAD_MS <= System.currentTimeMillis()) tv.sloopy.record.Recorder.start(ctx, id)
+        else tv.sloopy.record.Recorder.schedule(ctx, id, startEpoch)
+        _toast.value = if (startEpoch <= now) "Recording $title" else "Will record $title at ${tv.sloopy.ui.common.TimeFmt.hhmm(startEpoch)}"
+    }
+    /** Records what is on [channel] now until it ends, or for two hours when the guide has nothing. */
+    fun recordNow(channel: ChannelEntity) = viewModelScope.launch {
+        val now = System.currentTimeMillis() / 1000
+        val prog = programmesFor(channel, guideWindowStart(now)).firstOrNull { it.startEpoch <= now && it.stopEpoch > now }
+        scheduleRecording(channel, prog?.title ?: channel.name, now, prog?.stopEpoch ?: (now + 7200))
+    }
+    fun stopRecording(r: tv.sloopy.data.db.RecordingEntity) { tv.sloopy.record.Recorder.stop(getApplication(), r.id) }
+    fun deleteRecording(r: tv.sloopy.data.db.RecordingEntity) = viewModelScope.launch {
+        val ctx = getApplication<android.app.Application>()
+        if (r.status == "scheduled") tv.sloopy.record.Recorder.unschedule(ctx, r.id)
+        if (r.status == "recording") tv.sloopy.record.Recorder.stop(ctx, r.id)
+        tv.sloopy.record.Recorder.delete(ctx, r.uri)
+        graph.db.recordings().delete(r.id)
+        graph.db.progress().remove(r.providerId, "recording", r.id)
+    }
+    fun playRecording(r: tv.sloopy.data.db.RecordingEntity) = viewModelScope.launch {
+        val uri = r.uri ?: return@launch
+        val resume = graph.db.progress().get(r.providerId, "recording", r.id)?.positionMs ?: 0L
+        _playing.value = Playing.Vod(r.id, r.title, r.channelName + " · " + tv.sloopy.ui.common.TimeFmt.dateTime(r.startEpoch * 1000), null, "ts", "recording", null)
+        player.play(uri, isLive = false, startPositionMs = resume)
+    }
+
+    // ---- Transfer / sync -----------------------------------------------------------------------
+    private val syncManager = tv.sloopy.sync.SyncManager(graph.db, prefs, providers)
+    val syncCode: StateFlow<String?> = prefs.syncCode.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val syncedAt: StateFlow<Long> = prefs.syncedAt.stateIn(viewModelScope, SharingStarted.Eagerly, 0L)
+    private val _syncStatus = MutableStateFlow<String?>(null)
+    val syncStatus: StateFlow<String?> = _syncStatus
+    private var syncing = false
+    private var lastUploadAt = 0L
+
+    /** Uploads this stick's bundle under its code. Quiet unless [announce]; automatic uploads wait a minute between runs. */
+    fun syncNow(announce: Boolean = false) = viewModelScope.launch {
+        val code = syncCode.value ?: return@launch
+        if (syncing) return@launch
+        syncing = true
+        try {
+            if (!announce) { val wait = 60_000 - (System.currentTimeMillis() - lastUploadAt); if (wait > 0) delay(wait) }
+            lastUploadAt = System.currentTimeMillis()
+            val bundle = syncManager.build()
+            val at = tv.sloopy.sync.SyncClient.upload(codeServer.value, code, syncManager.encode(bundle))
+            prefs.setSyncedAt(at)
+            if (announce) _syncStatus.value = "Uploaded: ${bundle.summary}."
+        } catch (e: Exception) {
+            _syncStatus.value = "Upload failed: ${TLog.userMessage(e)}"
+            TLog.w { "sync upload: ${TLog.userMessage(e)}" }
+        } finally { syncing = false }
+    }
+    fun enableSync() = viewModelScope.launch { prefs.setSyncCode(tv.sloopy.sync.SyncClient.newCode()); _syncStatus.value = null; syncNow(announce = true) }
+    fun disableSync() = viewModelScope.launch { prefs.setSyncCode(null); prefs.setSyncedAt(0); _syncStatus.value = "Sync is off. The last backup stays on the server under the old code until it is replaced." }
+    /** Pulls the bundle behind [code] onto this stick and joins that code. */
+    suspend fun restoreFromCode(code: String): String {
+        val bytes = tv.sloopy.sync.SyncClient.download(codeServer.value, code)
+        val bundle = syncManager.decode(bytes)
+        syncManager.apply(bundle)
+        prefs.setSyncCode(tv.sloopy.sync.SyncClient.normalise(code))
+        prefs.setSyncedAt(bundle.at)
+        active.value?.let { refresh(it) }
+        return bundle.summary
+    }
+    init {
+        // Re-upload a few seconds after anything in the bundle changes.
+        viewModelScope.launch {
+            val progressTick = active.flatMapLatest { p -> if (p == null) flowOf(emptyList()) else graph.db.progress().recent(p.id, 1) }
+            kotlinx.coroutines.flow.merge(
+                favouriteIds, favouriteVodIds, favouriteSeriesIds, groupOrder, lockedGroups, providerList, progressTick,
+                prefs.theme, prefs.clock12, prefs.frameRateMatch, prefs.introEnabled, prefs.osdSeconds, prefs.searchHistory, prefs.license,
+            ).map { }.drop(1).debounce(8_000).collect { if (syncCode.value != null) syncNow() }
+        }
     }
 
     val introEnabled: StateFlow<Boolean> = prefs.introEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
@@ -421,6 +545,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun playVod(id: Long, title: String, subtitle: String?, image: String?, container: String, kind: String, parentId: Long?, resumeMs: Long) {
         val p = active.value ?: return
+        if (kind == "recording") { viewModelScope.launch { graph.db.recordings().get(id)?.let { playRecording(it) } }; return }
         val url = if (kind == "episode") catalog.episodeUrl(p, id, container) else catalog.vodUrl(p, id, container)
         _playing.value = Playing.Vod(id, title, subtitle, image, container, kind, parentId)
         player.play(url, isLive = false, startPositionMs = resumeMs)

@@ -24,9 +24,14 @@ export default {
     try {
       if (request.method === "GET" && (path === "/" || path === "/admin")) return html(ADMIN_PAGE);
       if (request.method === "POST" && path === "/redeem") return redeem(request, env);
+      if (request.method === "POST" && path === "/sync/put") return syncPut(request, env);
+      if (request.method === "GET" && path === "/sync/get") return syncGet(request, env, url);
+      if (request.method === "GET" && path === "/config") return json({ ok: true, ...((await env.CODES.get("config", "json")) || {}) });
       if (path.startsWith("/admin/")) {
         if (!(await authed(request, env))) return json({ ok: false, error: "Wrong password" }, 401);
         if (request.method === "POST" && path === "/admin/mint") return mint(request, env);
+        if (request.method === "POST" && path === "/admin/config") return setConfig(request, env);
+        if (request.method === "GET" && path === "/admin/config") return json({ ok: true, ...((await env.CODES.get("config", "json")) || {}) });
         if (request.method === "GET" && path === "/admin/list") return list(env);
         if (request.method === "DELETE" && path.startsWith("/admin/code/")) return del(path.slice("/admin/code/".length), env);
       }
@@ -144,6 +149,55 @@ async function redeem(request, env) {
   return json({ ok: true, salt: r.salt, iv: r.iv, ct: r.ct, kdf: "pbkdf2-sha256-100000", cipher: "aes-256-gcm" });
 }
 
+// ---- sync (transfer between sticks) --------------------------------------------------------
+// The app encrypts its settings with a key derived from a code it never sends; the server
+// only ever holds the scrambled blob under an id derived from that code. Kept until replaced.
+
+const SYNC_MAX_CT = 1_200_000;    // base64 chars, ~900 KB
+const SYNC_RATE_MAX = 200;        // requests per IP per window
+const SYNC_RATE_WINDOW = 600;
+
+async function syncLimited(request, env) {
+  const ip = request.headers.get("cf-connecting-ip") || "unknown";
+  const k = "srl:" + ip;
+  const n = parseInt((await env.CODES.get(k)) || "0", 10);
+  if (n >= SYNC_RATE_MAX) return true;
+  await env.CODES.put(k, String(n + 1), { expirationTtl: SYNC_RATE_WINDOW });
+  return false;
+}
+
+async function syncPut(request, env) {
+  if (await syncLimited(request, env)) return json({ ok: false, error: "Too many requests. Wait ten minutes." }, 429);
+  const body = await request.json().catch(() => null);
+  const id = String(body?.id || "");
+  if (!/^[0-9a-f]{24}$/.test(id)) return json({ ok: false, error: "Bad id" }, 400);
+  const { salt, iv, ct } = body || {};
+  if (typeof salt !== "string" || typeof iv !== "string" || typeof ct !== "string" || ct.length > SYNC_MAX_CT || salt.length > 64 || iv.length > 64) return json({ ok: false, error: "Bad backup" }, 400);
+  await env.CODES.put("s:" + id, JSON.stringify({ salt, iv, ct, at: Date.now() }));
+  return json({ ok: true, at: Date.now() });
+}
+
+async function syncGet(request, env, url) {
+  if (await syncLimited(request, env)) return json({ ok: false, error: "Too many requests. Wait ten minutes." }, 429);
+  const id = url.searchParams.get("id") || "";
+  if (!/^[0-9a-f]{24}$/.test(id)) return json({ ok: false, error: "Bad id" }, 400);
+  const r = await env.CODES.get("s:" + id, "json");
+  if (!r) return json({ ok: false, error: "No backup with that code" }, 404);
+  return json({ ok: true, salt: r.salt, iv: r.iv, ct: r.ct, at: r.at });
+}
+
+async function setConfig(request, env) {
+  const body = await request.json().catch(() => null);
+  const cfg = {
+    gumroadProduct: String(body?.gumroadProduct || "").trim().slice(0, 120),
+    buyUrl: String(body?.buyUrl || "").trim().slice(0, 300),
+    price: String(body?.price || "").trim().slice(0, 40),
+  };
+  if (cfg.buyUrl && !/^https:\/\//i.test(cfg.buyUrl)) return json({ ok: false, error: "Buy link must start with https://" }, 400);
+  await env.CODES.put("config", JSON.stringify(cfg));
+  return json({ ok: true, ...cfg });
+}
+
 // ---- admin page -----------------------------------------------------------------------------
 
 const ADMIN_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -183,6 +237,13 @@ th{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;letter
   <div class="msg" id="msg"></div>
   <p class="k" style="margin-top:12px">Codes work once and die after 24 hours. The login is stored scrambled; only the code unlocks it.</p>
   <table><thead><tr><th>Code</th><th>Note</th><th>Status</th><th>Made</th><th></th></tr></thead><tbody id="rows"></tbody></table>
+  <h1 style="margin-top:48px">Paywall</h1>
+  <p class="k">Leave the product blank and the app is free. Fill it in and the app asks for a Gumroad license key before it opens.</p>
+  <label><span class="k">Gumroad product id (from the product's page, "Product ID")</span><input id="gp" class="mono"></label>
+  <label><span class="k">Buy link shown on the TV</span><input id="gu" class="mono" placeholder="https://yourname.gumroad.com/l/sloopytv"></label>
+  <label><span class="k">Price shown on the TV</span><input id="gpr" placeholder="$2"></label>
+  <button class="pri" id="cfg">Save paywall</button>
+  <div class="msg" id="cmsg"></div>
 </div></main>
 <script>
 var pw = sessionStorage.getItem("pw") || "";
@@ -194,5 +255,8 @@ function show(ok){$("login").style.display=ok?"none":"block";$("app").style.disp
 $("go").onclick=function(){pw=$("pw").value;sessionStorage.setItem("pw",pw);api("GET","/admin/list").then(function(j){if(j.ok)show(true);else $("lmsg").textContent=j.error||"Wrong password"})}
 $("mint").onclick=function(){$("code").textContent="";$("msg").textContent="";api("POST","/admin/mint",{url:$("url").value,user:$("user").value,pass:$("pass").value,name:$("name").value,note:$("note").value}).then(function(j){if(j.ok){$("code").textContent=j.code;$("msg").textContent="Send this code. It works once, until "+fmt(j.expiresAt)+".";$("user").value="";$("pass").value="";$("note").value="";refresh()}else $("msg").textContent=j.error})}
 $("rows").onclick=function(e){var c=e.target.getAttribute("data-c");if(c&&confirm("Delete code "+c+"?"))api("DELETE","/admin/code/"+c).then(refresh)}
+$("cfg").onclick=function(){api("POST","/admin/config",{gumroadProduct:$("gp").value,buyUrl:$("gu").value,price:$("gpr").value}).then(function(j){$("cmsg").textContent=j.ok?(j.gumroadProduct?"Paywall on.":"Paywall off, the app is free."):j.error})}
+function loadCfg(){api("GET","/admin/config").then(function(j){if(j.ok){$("gp").value=j.gumroadProduct||"";$("gu").value=j.buyUrl||"";$("gpr").value=j.price||""}})}
+var _show=show;show=function(ok){_show(ok);if(ok)loadCfg()}
 if(pw)api("GET","/admin/list").then(function(j){show(!!j.ok)})
 </script></body></html>`;

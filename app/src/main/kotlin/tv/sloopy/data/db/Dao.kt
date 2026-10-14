@@ -245,3 +245,25 @@ interface MetaDao {
     @Query("DELETE FROM meta WHERE providerId = :p")
     suspend fun deleteAll(p: String)
 }
+
+@Dao
+interface RecordingDao {
+    @Query("SELECT * FROM recordings WHERE providerId = :p ORDER BY startEpoch DESC")
+    fun all(p: String): Flow<List<RecordingEntity>>
+
+    @Query("SELECT * FROM recordings WHERE id = :id")
+    suspend fun get(id: Long): RecordingEntity?
+
+    @Insert
+    suspend fun insert(r: RecordingEntity): Long
+
+    @Upsert
+    suspend fun upsert(r: RecordingEntity)
+
+    @Query("DELETE FROM recordings WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    /** Rows left as "recording" by a process that died. */
+    @Query("UPDATE recordings SET status = CASE WHEN bytes > 0 THEN 'done' ELSE 'failed' END, error = CASE WHEN bytes > 0 THEN error ELSE 'Interrupted' END WHERE status = 'recording'")
+    suspend fun finishStale()
+}

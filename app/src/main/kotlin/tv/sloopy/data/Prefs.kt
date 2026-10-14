@@ -59,6 +59,25 @@ class Prefs(private val context: Context) {
     fun channelSort(providerId: String, group: String): Flow<String> = ds.data.map { it[sortKey(providerId, group)] ?: "provider" }
     suspend fun setChannelSort(providerId: String, group: String, v: String) = ds.edit { it[sortKey(providerId, group)] = v }
 
+    /** The transfer code this stick syncs under, if sync is on. */
+    val syncCode: Flow<String?> = ds.data.map { it[stringPreferencesKey("sync_code")] }
+    suspend fun setSyncCode(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("sync_code")) else it[stringPreferencesKey("sync_code")] = v }
+    val syncedAt: Flow<Long> = ds.data.map { it[longPreferencesKey("synced_at")] ?: 0L }
+    suspend fun setSyncedAt(v: Long) = ds.edit { it[longPreferencesKey("synced_at")] = v }
+
+    /** A document-tree URI the viewer picked for recordings; null means the app's own storage. */
+    val recordFolder: Flow<String?> = ds.data.map { it[stringPreferencesKey("record_folder")] }
+    suspend fun setRecordFolder(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("record_folder")) else it[stringPreferencesKey("record_folder")] = v }
+
+    val license: Flow<String?> = ds.data.map { it[stringPreferencesKey("license")] }
+    suspend fun setLicense(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("license")) else it[stringPreferencesKey("license")] = v.trim() }
+    val licenseCheckedAt: Flow<Long> = ds.data.map { it[longPreferencesKey("license_checked_at")] ?: 0L }
+    suspend fun setLicenseCheckedAt(v: Long) = ds.edit { it[longPreferencesKey("license_checked_at")] = v }
+
+    suspend fun allChannelSorts(): Map<String, String> = ds.data.first().asMap()
+        .filterKeys { it.name.startsWith("channel_sort_") }.map { (k, v) -> k.name.removePrefix("channel_sort_") to v.toString() }.toMap()
+    suspend fun restoreChannelSorts(m: Map<String, String>) = ds.edit { p -> m.forEach { (k, v) -> p[stringPreferencesKey("channel_sort_$k")] = v } }
+
     val searchHistory: Flow<List<String>> = ds.data.map { p -> p[stringPreferencesKey("search_history")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
     suspend fun pushSearch(q: String) = ds.edit { p ->
         val cur = p[stringPreferencesKey("search_history")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList()

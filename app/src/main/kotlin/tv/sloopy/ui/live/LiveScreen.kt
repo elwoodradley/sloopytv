@@ -135,7 +135,7 @@ fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     ) {
         PlayerSurface(vm)
 
-        if (pstate.error != null) {
+        if (pstate.error != null && overlay != Overlay.INFO) {
             Column(Modifier.align(Alignment.BottomStart).padding(start = 72.dp, bottom = 56.dp)) {
                 Text("CAN'T PLAY", style = Sloopy.meta)
                 Spacer(Modifier.height(6.dp))
