@@ -163,6 +163,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     /** Which rail row Movies and Series were last on, so Back and forth lands in the same place. */
     val librarySelection = java.util.concurrent.ConcurrentHashMap<String, String>()
     @Volatile var settingsSection = "providers"
+    /** The last search text, so Back from a result lands on the same results. */
+    @Volatile var lastSearch = ""
     fun takeGuideOpensAtSections(): Boolean = guideOpensAtSections.also { guideOpensAtSections = false }
 
     private val _toast = MutableStateFlow<String?>(null)
@@ -229,14 +231,16 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     init { viewModelScope.launch { graph.db.recordings().finishStale() } }
 
     /** Records [channel] from [startEpoch] to [stopEpoch]; starts at once when the start has passed. */
-    fun scheduleRecording(channel: ChannelEntity, title: String, startEpoch: Long, stopEpoch: Long) = viewModelScope.launch {
+    /** Starts a minute early and runs [padAfterSec] past the end, so late-running shows are not cut. */
+    fun scheduleRecording(channel: ChannelEntity, title: String, startEpoch: Long, stopEpoch: Long, padAfterSec: Long = 120) = viewModelScope.launch {
         val p = active.value ?: return@launch
         val now = System.currentTimeMillis() / 1000
         if (stopEpoch <= now) { _toast.value = "That programme has already ended"; return@launch }
-        val id = graph.db.recordings().insert(tv.sloopy.data.db.RecordingEntity(providerId = p.id, channelId = channel.id, channelName = channel.name, title = title, startEpoch = maxOf(startEpoch, now), stopEpoch = stopEpoch, status = "scheduled"))
+        val start = maxOf(startEpoch - 60, now)
+        val id = graph.db.recordings().insert(tv.sloopy.data.db.RecordingEntity(providerId = p.id, channelId = channel.id, channelName = channel.name, title = title, startEpoch = start, stopEpoch = stopEpoch + padAfterSec, status = "scheduled"))
         val ctx = getApplication<android.app.Application>()
-        if (startEpoch * 1000 - tv.sloopy.record.Recorder.LEAD_MS <= System.currentTimeMillis()) tv.sloopy.record.Recorder.start(ctx, id)
-        else tv.sloopy.record.Recorder.schedule(ctx, id, startEpoch)
+        if (start * 1000 - tv.sloopy.record.Recorder.LEAD_MS <= System.currentTimeMillis()) tv.sloopy.record.Recorder.start(ctx, id)
+        else tv.sloopy.record.Recorder.schedule(ctx, id, start)
         _toast.value = if (startEpoch <= now) "Recording $title" else "Will record $title at ${tv.sloopy.ui.common.TimeFmt.hhmm(startEpoch)}"
     }
     /** Records what is on [channel] now until it ends, or for two hours when the guide has nothing. */

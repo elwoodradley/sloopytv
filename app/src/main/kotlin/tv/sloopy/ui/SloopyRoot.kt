@@ -96,7 +96,10 @@ private fun SloopyNav(vm: SloopyViewModel, startAtProviders: Boolean, onQuit: ()
         enterTransition = { androidx.compose.animation.EnterTransition.None }, exitTransition = { androidx.compose.animation.ExitTransition.None },
         popEnterTransition = { androidx.compose.animation.EnterTransition.None }, popExitTransition = { androidx.compose.animation.ExitTransition.None },
     ) {
-        composable("live") { LiveScreen(vm, go = go, onQuit = onQuit) }
+        composable("live") {
+            // Opened from search: Back returns to the results. Otherwise Back opens the guide.
+            LiveScreen(vm, go = go, onQuit = onQuit, onBack = { if (nav.previousBackStackEntry?.destination?.route == "search") nav.popBackStack() else go("guide") })
+        }
         composable("guide") { GuideScreen(vm, go = go, onQuit = onQuit) }
         composable("recordings") { tv.sloopy.ui.record.RecordingsScreen(vm, onBack = { vm.guideOpensAtSections = true; go("guide") }, onPlay = { nav.navigate("vodplayer") }) }
         composable("history") { HistoryScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onPlay = { nav.navigate("vodplayer") }) }
@@ -106,7 +109,7 @@ private fun SloopyNav(vm: SloopyViewModel, startAtProviders: Boolean, onQuit: ()
             DetailsScreen(vm, kind = e.arguments!!.getString("kind")!!, id = e.arguments!!.getLong("id"), onBack = { nav.popBackStack() }, onPlay = { nav.navigate("vodplayer") })
         }
         composable("vodplayer") { VodPlayerScreen(vm, onBack = { nav.popBackStack() }) }
-        composable("search") { SearchScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onOpen = { kind, id -> nav.navigate("details/$kind/$id") }) }
+        composable("search") { SearchScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onOpen = { kind, id -> nav.navigate("details/$kind/$id") }, onWatch = { nav.navigate("live") { launchSingleTop = true } }) }
         composable("settings") { SettingsScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onEditProvider = { id -> nav.navigate("provider/$id") }) }
         composable("provider/{id}", arguments = listOf(navArgument("id") { type = NavType.StringType })) { e ->
             val id = e.arguments!!.getString("id")!!

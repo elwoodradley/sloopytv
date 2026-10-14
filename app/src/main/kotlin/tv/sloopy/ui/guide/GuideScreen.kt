@@ -151,7 +151,9 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     var dropOnUp by remember { mutableStateOf(false) }
     // Menu on the remote: quick sort for the groups (on the rail) or the channels (in the grid).
     var sortMenu by remember { mutableStateOf<String?>(null) }
-    var recordAsk by remember { mutableStateOf<Pair<ChannelEntity, ProgrammeEntity>?>(null) }
+    // Hold OK on a cell (or OK on a programme that has not started): watch, record, favourite.
+    var cellMenu by remember { mutableStateOf<Pair<ChannelEntity, ProgrammeEntity?>?>(null) }
+    val favIds by vm.favouriteIds.collectAsState()
     val channelSort by vm.channelSort.collectAsState()
 
     val dpPerSec: Float = SLOT.value / 1800f
@@ -248,7 +250,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     Column(
         Modifier.fillMaxSize().background(Sloopy.ground)
             .onPreviewKeyEvent { ev ->
-                if (quit || sortMenu != null || recordAsk != null) return@onPreviewKeyEvent false
+                if (quit || sortMenu != null || cellMenu != null) return@onPreviewKeyEvent false
                 // Taken here on key-up: something below the grid cells swallows Back's key-down and
                 // drops focus instead, so the system BackHandler never saw every other press.
                 if (grabbed != null) {
@@ -348,7 +350,8 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                         winStart = winStart, winEnd = winEnd, nowEpoch = nowEpoch, dpPerSec = dpPerSec,
                         hScroll = hScroll, requesters = requesters,
                         onFocused = { p -> focusedRow = i; focused = Focused(c, p); cellFocused(p) },
-                        onSelect = { p -> if (p != null && p.startEpoch > System.currentTimeMillis() / 1000) recordAsk = c to p else onSelect(vm, c, p, go) },
+                        onSelect = { p -> if (p != null && p.startEpoch > System.currentTimeMillis() / 1000) cellMenu = c to p else onSelect(vm, c, p, go) },
+                        onHold = { p -> cellMenu = c to p },
                         onProgs = { list -> rowProgs[c.id] = list },
                         register = { key, fr -> if (fr == null) cellRequesters.remove(key) else cellRequesters[key] = fr },
                         onTimelineWidth = { timelinePx = it },
@@ -363,10 +366,28 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
         "groups" -> ChoicePrompt("SORT GROUPS", listOf("az" to "A to Z", "provider" to "Provider order"), onPick = { vm.sortGroups(it); sortMenu = null }, onCancel = { sortMenu = null })
         "channels" -> ChoicePrompt("SORT THIS GROUP", listOf("provider" to "Provider order", "number" to "By number", "name" to "By name"), current = channelSort, onPick = { vm.setChannelSort(it); sortMenu = null }, onCancel = { sortMenu = null })
     }
-    recordAsk?.let { (c, p) ->
-        ChoicePrompt("RECORD?", listOf("record" to "Record ${p.title.take(30)} · ${hhmm(p.startEpoch)}", "no" to "Not now"), onCancel = { recordAsk = null }, onPick = { if (it == "record") vm.scheduleRecording(c, p.title, p.startEpoch, p.stopEpoch); recordAsk = null })
+    cellMenu?.let { (c, p) ->
+        val now = System.currentTimeMillis() / 1000
+        val live = p == null || (p.startEpoch <= now && p.stopEpoch > now)
+        val past = p != null && p.stopEpoch <= now
+        val options = buildList {
+            if (live) add("watch" to "Watch now")
+            if (past && c.archive) add("catchup" to "Play from the start (catch-up)")
+            if (!past) addAll(tv.sloopy.ui.record.RecordOptions.choices)
+            add("fav" to (if (c.id in favIds) "Remove ${c.name.take(24)} from favourites" else "Add ${c.name.take(24)} to favourites"))
+            add("no" to "Not now")
+        }
+        ChoicePrompt((p?.title ?: c.name).uppercase().take(28), options, onCancel = { cellMenu = null }, onPick = { k ->
+            when (k) {
+                "watch" -> { vm.tune(c); go("live") }
+                "catchup" -> { vm.playCatchup(c, p!!.title, p.startEpoch, p.stopEpoch); go("live") }
+                "fav" -> vm.toggleFavourite(c)
+                else -> tv.sloopy.ui.record.RecordOptions.handle(vm, k, c, p)
+            }
+            cellMenu = null
+        })
     }
-    LaunchedEffect(sortMenu, recordAsk) { if (sortMenu == null && recordAsk == null) { if (rail == Rail.NONE) focusGrid() else focusRail() } }
+    LaunchedEffect(sortMenu, cellMenu) { if (sortMenu == null && cellMenu == null) { if (rail == Rail.NONE) focusGrid() else focusRail() } }
     }
 }
 
@@ -437,6 +458,7 @@ private fun GuideRow(
     requesters: List<FocusRequester>,
     onFocused: (ProgrammeEntity?) -> Unit,
     onSelect: (ProgrammeEntity?) -> Unit,
+    onHold: (ProgrammeEntity?) -> Unit,
     onProgs: (List<ProgrammeEntity>) -> Unit,
     register: (String, FocusRequester?) -> Unit,
     onTimelineWidth: (Int) -> Unit,
@@ -481,7 +503,7 @@ private fun GuideRow(
                     Cell(
                         title = "No guide data", time = "", x = (x0 * dpPerSec).dp, w = (((winEnd - winStart - x0) * dpPerSec).dp), past = true, isNow = false, archive = false,
                         requesters = requesters, cellKey = "${channel.id}|nodata", register = register,
-                        onFocus = { onFocused(null) }, onClick = { onSelect(null) },
+                        onFocus = { onFocused(null) }, onClick = { onSelect(null) }, onHold = { onHold(null) },
                     )
                 } else {
                     for (p in list) {
@@ -498,7 +520,7 @@ private fun GuideRow(
                             requesters = if (isNow) requesters else emptyList(),
                             cellKey = "${channel.id}|${p.startEpoch}", register = register,
                             onFocus = { onFocused(p) },
-                            onClick = { onSelect(p) },
+                            onClick = { onSelect(p) }, onHold = { onHold(p) },
                         )
                     }
                 }
@@ -518,13 +540,14 @@ private fun Cell(
     past: Boolean, isNow: Boolean, archive: Boolean,
     requesters: List<FocusRequester>,
     cellKey: String, register: (String, FocusRequester?) -> Unit,
-    onFocus: () -> Unit, onClick: () -> Unit,
+    onFocus: () -> Unit, onClick: () -> Unit, onHold: () -> Unit,
 ) {
     var focused by remember { mutableStateOf(false) }
     val own = remember { FocusRequester() }
     DisposableEffect(cellKey) { register(cellKey, own); onDispose { register(cellKey, null) } }
     Surface(
         onClick = onClick,
+        onLongClick = onHold,
         shape = ClickableSurfaceDefaults.shape(RectangleShape),
         colors = ClickableSurfaceDefaults.colors(
             containerColor = if (past) Color(0xFF0E0E10) else if (isNow) Color(0xFF151518) else Sloopy.surface,

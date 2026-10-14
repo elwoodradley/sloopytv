@@ -41,6 +41,7 @@ import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.unit.dp
 import androidx.media3.common.util.UnstableApi
 import androidx.tv.material3.Text
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import tv.sloopy.TLog
 import tv.sloopy.core.model.Account
@@ -81,7 +82,11 @@ fun ProviderScreen(vm: SloopyViewModel, providerId: String?, onDone: () -> Unit,
     val toCode = Modifier.focusProperties { right = if (codeServer.isNotBlank() && existing == null) codeFocus else FocusRequester.Default }
     val hasProviders = providerList.isNotEmpty()
 
-    LaunchedEffect(Unit) { runCatching { firstField.requestFocus() } }
+    // Nothing set up yet: a window over the form, cursor on the code field, so a friend with a
+    // code is in within seconds. The other ways in sit under it.
+    var welcome by remember { mutableStateOf(!hasProviders && existing == null) }
+    val welcomeCode = remember { FocusRequester() }
+    var welcomeEntry by remember { mutableStateOf("") }
     BackHandler { onBack() }
 
     fun build(): ProviderRecord? {
@@ -126,6 +131,18 @@ fun ProviderScreen(vm: SloopyViewModel, providerId: String?, onDone: () -> Unit,
         }
     }
 
+    fun redeem(code: String) {
+        error = null; result = null; testing = true
+        scope.launch {
+            runCatching { tv.sloopy.pair.CodeClient.redeem(codeServer, code) }
+                .onSuccess { testing = false; applyPayload(it) }
+                .onFailure { testing = false; error = TLog.userMessage(it) }
+        }
+    }
+    LaunchedEffect(welcome) { delay(80); runCatching { if (welcome) welcomeCode.requestFocus() else firstField.requestFocus() } }
+    BackHandler(enabled = welcome) { welcome = false }
+
+    Box(Modifier.fillMaxSize()) {
     Row(Modifier.fillMaxSize().background(Sloopy.ground).padding(horizontal = 72.dp, vertical = 40.dp)) {
         Column(Modifier.width(600.dp).verticalScroll(rememberScrollState())) {
             Label("Settings · Providers · " + if (existing == null) "New" else "Edit")
@@ -213,18 +230,43 @@ fun ProviderScreen(vm: SloopyViewModel, providerId: String?, onDone: () -> Unit,
             if (existing == null) {
                 // Code entry first: it sits level with the buttons on the left, so a Right press
                 // from them lands on it. The QR panel follows.
-                if (codeServer.isNotBlank()) CodePanel(busy = testing, focusRequester = codeFocus, onRedeem = { code ->
-                    error = null; result = null; testing = true
-                    scope.launch {
-                        runCatching { tv.sloopy.pair.CodeClient.redeem(codeServer, code) }
-                            .onSuccess { testing = false; applyPayload(it) }
-                            .onFailure { testing = false; error = TLog.userMessage(it) }
-                    }
-                })
+                if (codeServer.isNotBlank()) CodePanel(busy = testing, focusRequester = codeFocus, onRedeem = ::redeem)
                 PairPanel(onReceived = ::applyPayload)
             }
             if (result != null) ResultPanel(result!!, plainHttp = url.trim().startsWith("http://", true))
         }
+    }
+
+    if (welcome) {
+        Box(Modifier.fillMaxSize().background(Color(0xB3000000)), contentAlignment = Alignment.Center) {
+            Column(Modifier.width(760.dp).background(Sloopy.ground).padding(40.dp)) {
+                Label("Welcome")
+                Text("ADD YOUR SERVICE", style = Sloopy.titleBig)
+                if (codeServer.isNotBlank()) {
+                    Text("Got a six-digit code from whoever set you up? Type it and you are in.", style = Sloopy.body, modifier = Modifier.padding(top = 14.dp))
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Box(Modifier.width(260.dp)) { Field("Code", welcomeEntry, { welcomeEntry = it.filter { ch -> ch.isDigit() }.take(6) }, modifier = Modifier.focusRequester(welcomeCode), mono = true, placeholder = "000000", keyboard = KeyboardType.Number) }
+                        Spacer(Modifier.width(16.dp))
+                        SloopyButton(if (testing) "Hang on…" else "Use code", primary = true, enabled = !testing && welcomeEntry.length == 6, onClick = { redeem(welcomeEntry) }, modifier = Modifier.padding(bottom = 2.dp))
+                    }
+                    if (error != null) Text(error!!, style = Sloopy.body.copy(color = Sloopy.amber), modifier = Modifier.padding(top = 10.dp))
+                    Hairline(color = Sloopy.hair2, modifier = Modifier.padding(top = 24.dp, bottom = 18.dp))
+                } else Spacer(Modifier.height(18.dp))
+                Label("No code? Other ways in")
+                Row(Modifier.padding(top = 10.dp)) {
+                    SloopyButton("Xtream codes", onClick = { kind = ProviderKind.XTREAM; transfer = false; welcome = false }, modifier = if (codeServer.isBlank()) Modifier.focusRequester(welcomeCode) else Modifier)
+                    Spacer(Modifier.width(8.dp))
+                    SloopyButton("M3U playlist", onClick = { kind = ProviderKind.M3U; transfer = false; welcome = false })
+                    if (codeServer.isNotBlank()) { Spacer(Modifier.width(8.dp)); SloopyButton("Transfer from another stick", onClick = { transfer = true; welcome = false }) }
+                }
+                Row(Modifier.padding(top = 10.dp)) {
+                    SloopyButton("Sign in from my phone", onClick = { welcome = false })
+                    Spacer(Modifier.width(8.dp))
+                    SloopyButton("Try the demo", onClick = { vm.addDemo(); onDone() })
+                }
+            }
+        }
+    }
     }
 }
 

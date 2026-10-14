@@ -69,6 +69,11 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   the alarm receiver, folder handling (SAF tree or the app's own storage). Xtream channels are
   forced to TS; HLS-only URLs refuse with a message. Recordings play through the VOD player as
   `Playing.Vod(kind = "recording")`; the player's data source is DefaultDataSource over OkHttp.
+- Hold OK on a guide cell or a search result = menu (watch, record with 2/15/60 min padding,
+  favourite). Recordings start a minute early. Live opened from search keeps search on the back
+  stack so Back returns to the results; the query lives in `vm.lastSearch`.
+- First run with no providers: `ProviderScreen` shows the "Add your service" popup with the code
+  field focused; Back dismisses it to the plain form.
 - Remote Menu key in the guide = quick sort (groups A–Z / provider order; channels by number / name).
 - Local code server for tests: `cd codes && npx wrangler@4 dev --local --port 8787 >| /tmp/wrangler.log`
   (zsh noclobber: use `>|`), `adb reverse tcp:8787 tcp:8787`, Settings › Providers › code server

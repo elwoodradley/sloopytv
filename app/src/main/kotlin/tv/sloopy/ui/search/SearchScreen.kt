@@ -46,6 +46,7 @@ import tv.sloopy.data.db.ChannelEntity
 import tv.sloopy.data.db.ProgrammeEntity
 import tv.sloopy.ui.SloopyViewModel
 import tv.sloopy.ui.common.ChannelLogo
+import tv.sloopy.ui.common.ChoicePrompt
 import tv.sloopy.ui.common.Hairline
 import tv.sloopy.ui.common.Label
 import tv.sloopy.ui.common.ScreenHeader
@@ -63,12 +64,17 @@ private sealed class Hit {
 
 @UnstableApi
 @Composable
-fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, onOpen: (String, Long) -> Unit) {
+fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, onOpen: (String, Long) -> Unit, onWatch: () -> Unit) {
     val provider by vm.active.collectAsState()
     val channels by vm.channels.collectAsState()
     val history by vm.prefs.searchHistory.collectAsState(initial = emptyList())
+    val favChannels by vm.favouriteIds.collectAsState()
+    val favVod by vm.favouriteVodIds.collectAsState()
+    val favSeries by vm.favouriteSeriesIds.collectAsState()
+    var recordAsk by remember { mutableStateOf<Pair<ChannelEntity, ProgrammeEntity>?>(null) }
     val scope = rememberCoroutineScope()
-    var q by remember { mutableStateOf("") }
+    var q by remember { mutableStateOf(vm.lastSearch) }
+    LaunchedEffect(q) { vm.lastSearch = q }
     var hits by remember { mutableStateOf<List<Hit>>(emptyList()) }
     val field = remember { FocusRequester() }
     BackHandler { onBack() }
@@ -109,6 +115,8 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
         hits = out
     }
     fun remember(hit: Hit) { scope.launch { vm.prefs.pushSearch(q) } }
+    // Typed or spoken, a search that found something is remembered once it has sat for a moment.
+    LaunchedEffect(q, hits.isNotEmpty()) { if (q.trim().length >= 3 && hits.isNotEmpty()) { delay(2500); vm.prefs.pushSearch(q.trim()) } }
 
     Column(Modifier.fillMaxSize().background(Sloopy.ground)) {
         ScreenHeader("Search")
@@ -123,6 +131,7 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
             }
             Spacer(Modifier.height(20.dp))
             if (q.trim().length >= 2 && hits.isEmpty()) Text("Nothing on.", style = Sloopy.bodyBig)
+            if (hits.isNotEmpty()) Text("Hold OK on a channel, movie or series to add it to favourites and keep going. Hold OK on a programme to record it.", style = Sloopy.label.copy(color = Sloopy.dim), modifier = Modifier.padding(bottom = 8.dp))
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 40.dp)) {
                 if (q.trim().length < 2) {
                     if (history.isNotEmpty()) {
@@ -130,26 +139,36 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
                         items(history) { h -> ResultRow(h, "", logo = null, kicker = "AGAIN") { q = h } }
                     } else item { Text("Recent searches will show here.", style = Sloopy.body.copy(color = Sloopy.dim)) }
                 } else {
+                    // Movies and series first: a town name matches hundreds of channels and listings.
                     val groups = listOf(
-                        "Channels" to hits.filterIsInstance<Hit.Chan>(),
-                        "On the guide" to hits.filterIsInstance<Hit.Prog>(),
                         "Movies" to hits.filter { it is Hit.Item && it.kind == "vod" },
                         "Series" to hits.filter { it is Hit.Item && it.kind == "series" },
+                        "Channels" to hits.filterIsInstance<Hit.Chan>(),
+                        "On the guide" to hits.filterIsInstance<Hit.Prog>(),
                     ).filter { it.second.isNotEmpty() }
                     groups.forEach { (name, list) ->
-                        item(key = "h-$name") { Label("$name · ${list.size}", modifier = Modifier.padding(top = 14.dp, bottom = 6.dp)) }
+                        item(key = "h-$name") { Divider("$name · ${list.size}") }
                         items(list) { h ->
                             when (h) {
-                                is Hit.Chan -> ResultRow(h.c.name, "Channel ${h.c.number}", logo = h.c.logo, kicker = "LIVE") { remember(h); vm.tune(h.c); go("live") }
-                                is Hit.Prog -> ResultRow(h.p.title, (h.c?.name ?: h.p.epgId) + " · " + startLabel(h.p), logo = h.c?.logo, kicker = "GUIDE") {
+                                is Hit.Chan -> ResultRow(h.c.name, "Channel ${h.c.number}" + if (h.c.id in favChannels) "  ·  Favourite" else "", logo = h.c.logo, kicker = "LIVE",
+                                    onLongClick = { vm.toggleFavourite(h.c); vm.toast(if (h.c.id in favChannels) "Removed from favourites: ${h.c.name}" else "Added to favourites: ${h.c.name}") },
+                                ) { remember(h); vm.tune(h.c); onWatch() }
+                                is Hit.Prog -> ResultRow(h.p.title, (h.c?.name ?: h.p.epgId) + " · " + startLabel(h.p), logo = h.c?.logo, kicker = "GUIDE",
+                                    onLongClick = { h.c?.let { c -> recordAsk = c to h.p } },
+                                ) {
                                     remember(h)
                                     val c = h.c ?: return@ResultRow
                                     val now = System.currentTimeMillis() / 1000
-                                    if (h.p.startEpoch <= now && h.p.stopEpoch > now) { vm.tune(c); go("live") }
-                                    else if (h.p.stopEpoch <= now && c.archive) { vm.playCatchup(c, h.p.title, h.p.startEpoch, h.p.stopEpoch); go("live") }
-                                    else go("guide")
+                                    if (h.p.startEpoch <= now && h.p.stopEpoch > now) { vm.tune(c); onWatch() }
+                                    else if (h.p.stopEpoch <= now && c.archive) { vm.playCatchup(c, h.p.title, h.p.startEpoch, h.p.stopEpoch); onWatch() }
+                                    else recordAsk = c to h.p
                                 }
-                                is Hit.Item -> ResultRow(h.title, h.sub ?: "", logo = null, kicker = if (h.kind == "vod") "MOVIE" else "SERIES") { remember(h); onOpen(h.kind, h.id) }
+                                is Hit.Item -> {
+                                    val fav = if (h.kind == "vod") h.id in favVod else h.id in favSeries
+                                    ResultRow(h.title, (h.sub ?: "") + if (fav) "  ·  My list" else "", logo = null, kicker = if (h.kind == "vod") "MOVIE" else "SERIES",
+                                        onLongClick = { vm.toggleItemFavourite(h.kind, h.id); vm.toast(if (fav) "Removed from My list: ${h.title}" else "Added to My list: ${h.title}") },
+                                    ) { remember(h); onOpen(h.kind, h.id) }
+                                }
                             }
                         }
                     }
@@ -157,12 +176,24 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
             }
         }
     }
+    recordAsk?.let { (c, p) ->
+        ChoicePrompt(p.title.uppercase().take(28), tv.sloopy.ui.record.RecordOptions.choices + ("no" to "Not now"), onCancel = { recordAsk = null },
+            onPick = { k -> tv.sloopy.ui.record.RecordOptions.handle(vm, k, c, p); recordAsk = null; runCatching { field.requestFocus() } })
+    }
 }
 
 @Composable
-private fun ResultRow(title: String, sub: String, logo: String?, kicker: String, onClick: () -> Unit) {
+private fun Divider(text: String) {
+    Box(Modifier.width(900.dp).padding(top = 14.dp, bottom = 4.dp).background(Sloopy.surface2).padding(horizontal = 14.dp, vertical = 8.dp)) {
+        Text(text.uppercase(), style = Sloopy.labelBright)
+    }
+}
+
+@Composable
+private fun ResultRow(title: String, sub: String, logo: String?, kicker: String, onLongClick: (() -> Unit)? = null, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
+        onLongClick = onLongClick,
         shape = ClickableSurfaceDefaults.shape(RectangleShape),
         colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Sloopy.surface2, contentColor = Sloopy.text, focusedContentColor = Color.White),
         border = ClickableSurfaceDefaults.border(focusedBorder = androidx.tv.material3.Border(androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.55f)), shape = RectangleShape)),

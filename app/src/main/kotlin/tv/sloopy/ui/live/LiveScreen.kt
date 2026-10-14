@@ -61,7 +61,7 @@ private enum class Overlay { NONE, OSD, NUMBER, CHANNELS, DECK, QUIT, INFO }
 
 @UnstableApi
 @Composable
-fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
+fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit, onBack: () -> Unit = { go("guide") }) {
     val playing by vm.playing.collectAsState()
     val pstate by vm.player.state.collectAsState()
     val current by vm.currentChannel.collectAsState()
@@ -103,7 +103,7 @@ fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     // Holding Back anywhere comes back here with everything closed (see MainActivity).
     BackHandler {
         digits = ""
-        if (overlay == Overlay.NONE) go("guide") else overlay = Overlay.NONE
+        if (overlay == Overlay.NONE) onBack() else overlay = Overlay.NONE
     }
     LaunchedEffect(Unit) { vm.homeEvents.collect { overlay = Overlay.NONE; digits = "" } }
 
