@@ -76,6 +76,9 @@ interface ProgrammeDao {
     @Query("SELECT * FROM programmes WHERE providerId = :p AND gen = :gen AND epgId = :epgId AND stopEpoch > :from AND startEpoch < :to ORDER BY startEpoch")
     suspend fun window(p: String, gen: Int, epgId: String, from: Long, to: Long): List<ProgrammeEntity>
 
+    @Query("SELECT * FROM programmes WHERE providerId = :p AND gen = :gen AND epgId IN (:ids) AND stopEpoch > :from AND startEpoch < :to ORDER BY startEpoch")
+    suspend fun windowMany(p: String, gen: Int, ids: List<String>, from: Long, to: Long): List<ProgrammeEntity>
+
     @Query("SELECT * FROM programmes WHERE providerId = :p AND gen = :gen AND epgId IN (:ids) AND stopEpoch > :now ORDER BY startEpoch")
     suspend fun fromNow(p: String, gen: Int, ids: List<String>, now: Long): List<ProgrammeEntity>
 

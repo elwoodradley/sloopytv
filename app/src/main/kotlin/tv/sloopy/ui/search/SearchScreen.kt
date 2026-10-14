@@ -39,7 +39,7 @@ import tv.sloopy.ui.SloopyViewModel
 import tv.sloopy.ui.common.ChannelLogo
 import tv.sloopy.ui.common.Hairline
 import tv.sloopy.ui.common.Label
-import tv.sloopy.ui.common.TopNav
+import tv.sloopy.ui.common.ScreenHeader
 import tv.sloopy.ui.settings.Field
 import tv.sloopy.ui.theme.Sloopy
 import java.time.Instant
@@ -81,7 +81,7 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
     }
 
     Column(Modifier.fillMaxSize().background(Sloopy.ground)) {
-        TopNav(current = "search", onSelect = go, modifier = Modifier.padding(top = 10.dp))
+        ScreenHeader("Search")
         Column(Modifier.fillMaxSize().padding(horizontal = 72.dp)) {
             Box(Modifier.width(720.dp)) {
                 Field("Search channels, programmes, movies and series", q, { q = it }, modifier = Modifier.focusRequester(field), placeholder = "Type to search", backLeaves = true)

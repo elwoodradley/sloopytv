@@ -229,6 +229,9 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
     suspend fun programmes(p: String, epgId: String, from: Long, to: Long): List<ProgrammeEntity> =
         db.programmes().window(p, epgGen(p), epgId, from, to)
 
+    suspend fun programmesMany(p: String, epgIds: List<String>, from: Long, to: Long): List<ProgrammeEntity> =
+        if (epgIds.isEmpty()) emptyList() else db.programmes().windowMany(p, epgGen(p), epgIds, from, to)
+
     suspend fun nowPlaying(p: String, epgIds: List<String>, now: Long): Map<String, NowNext> {
         if (epgIds.isEmpty()) return emptyMap()
         val gen = epgGen(p)

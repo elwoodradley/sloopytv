@@ -42,9 +42,16 @@ rail back in; Left off the grid's edge opens the groups. Hold Back anywhere retu
 (`MainActivity.dispatchKeyEvent` → `vm.goHome()`). Other screens' Back returns to the guide with the
 sections out (`vm.guideOpensAtSections`). OK on the picture opens `InfoOverlay` (badge, ten recent
 channels, action bar). NavHost transitions are all `None`: hard cuts only.
+Movies, Series and Settings use the same shape (`ui/common/Rail.kt`): categories or sections down
+the left, content on the right; highlighting a rail row shows it, Right or OK goes in, Left off the
+first column or Back comes out, Back on the rail leaves. No top navigation row anywhere (the user
+found it unintuitive). Hold OK on a group in the guide rail picks it up; Up/Down move it; OK drops.
+Guide programmes come from `vm.programmesFor` (cache in the view model, warmed around the current
+channel while watching) so the grid is full on its first frame after Back.
 Gotcha: something under the guide cells swallows Back's key-down and drops focus, so the guide takes
 Back itself in `onPreviewKeyEvent` (on key-up) and parks focus on a hidden node while the rail is
-rebuilt. Overlays that cancel on Back must consume both key-down and key-up (`QuitPrompt`).
+rebuilt. Overlays that cancel on Back must consume both key-down and key-up (`QuitPrompt`). A
+long press's own key-up must not count as the OK that drops a grabbed group.
 
 ## TV input conventions
 - Text fields (`Field` in `ProviderScreen.kt`) are two-stage: the row takes D-pad focus, OK opens the keyboard.

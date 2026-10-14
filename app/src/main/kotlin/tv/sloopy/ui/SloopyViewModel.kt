@@ -33,6 +33,9 @@ import tv.sloopy.player.PlayerHolder
 import java.time.ZoneId
 
 /** Pseudo groups shown above the provider's categories. */
+const val GUIDE_HOURS_BACK = 2L
+const val GUIDE_HOURS_FWD = 24L
+
 object Groups {
     const val ALL = "\u0000all"
     const val FAV = "\u0000fav"
@@ -140,6 +143,9 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     fun goHome() { homeEvents.tryEmit(Unit) }
     /** Set before navigating to the guide so it opens with the sections panel (the "menu") out. */
     @Volatile var guideOpensAtSections = false
+    /** Which rail row Movies and Series were last on, so Back and forth lands in the same place. */
+    val librarySelection = java.util.concurrent.ConcurrentHashMap<String, String>()
+    @Volatile var settingsSection = "providers"
     fun takeGuideOpensAtSections(): Boolean = guideOpensAtSections.also { guideOpensAtSections = false }
 
     private val _toast = MutableStateFlow<String?>(null)
@@ -287,6 +293,37 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     fun nextEpisodeAfter(episodeId: Long): tv.sloopy.core.model.Episode? {
         val i = episodeQueue.indexOfFirst { it.id == episodeId }
         return if (i >= 0 && i + 1 < episodeQueue.size) episodeQueue[i + 1] else null
+    }
+
+    // ---- Guide programme cache ---------------------------------------------------------------
+    // Keyed by window start and epgId. Warmed around the current channel while the picture is on,
+    // so the grid is full on its first frame after Back. Cleared when listings are refreshed.
+    private val epgCache = java.util.concurrent.ConcurrentHashMap<String, List<tv.sloopy.data.db.ProgrammeEntity>>()
+    private fun epgKey(epgId: String, winStart: Long) = "$winStart|$epgId"
+    fun guideWindowStart(now: Long = System.currentTimeMillis() / 1000): Long = (now / 1800) * 1800 - GUIDE_HOURS_BACK * 3600
+    fun cachedProgrammes(epgId: String, winStart: Long): List<tv.sloopy.data.db.ProgrammeEntity>? = epgCache[epgKey(epgId, winStart)]
+    suspend fun programmesFor(epgId: String, winStart: Long): List<tv.sloopy.data.db.ProgrammeEntity> {
+        cachedProgrammes(epgId, winStart)?.let { return it }
+        val p = active.value ?: return emptyList()
+        return runCatching { catalog.programmes(p.id, epgId, winStart, winStart + (GUIDE_HOURS_BACK + GUIDE_HOURS_FWD) * 3600) }
+            .getOrDefault(emptyList()).also { epgCache[epgKey(epgId, winStart)] = it }
+    }
+    fun prefetchGuide() = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val list = visibleChannels.value
+        if (list.isEmpty()) return@launch
+        if (epgCache.size > 4000) epgCache.clear()
+        val i = list.indexOfFirst { it.id == currentChannel.value?.id }.coerceAtLeast(0)
+        val ws = guideWindowStart()
+        val ids = list.subList((i - 20).coerceAtLeast(0), (i + 25).coerceAtMost(list.size))
+            .mapNotNull { it.epgId }.distinct().filter { cachedProgrammes(it, ws) == null }
+        if (ids.isEmpty()) return@launch
+        val rows = runCatching { catalog.programmesMany(p.id, ids, ws, ws + (GUIDE_HOURS_BACK + GUIDE_HOURS_FWD) * 3600) }.getOrDefault(emptyList()).groupBy { it.epgId }
+        ids.forEach { epgCache[epgKey(it, ws)] = rows[it] ?: emptyList() }
+    }
+    init {
+        viewModelScope.launch { combine(currentChannel, visibleChannels) { c, l -> c?.id to l.size }.collect { prefetchGuide() } }
+        viewModelScope.launch { catalog.refresh.collect { if (it is tv.sloopy.data.RefreshState.Done) { epgCache.clear(); prefetchGuide() } } }
     }
 
     fun forgetProgress(r: tv.sloopy.data.db.ProgressEntity) = viewModelScope.launch { graph.db.progress().remove(r.providerId, r.kind, r.itemId) }

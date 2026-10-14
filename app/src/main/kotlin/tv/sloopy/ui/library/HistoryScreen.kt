@@ -34,7 +34,7 @@ import tv.sloopy.ui.SloopyViewModel
 import tv.sloopy.ui.common.Hairline
 import tv.sloopy.ui.common.Label
 import tv.sloopy.ui.common.ProgressHairline
-import tv.sloopy.ui.common.TopNav
+import tv.sloopy.ui.common.ScreenHeader
 import tv.sloopy.ui.theme.Sloopy
 import java.time.Instant
 import java.time.ZoneId
@@ -53,7 +53,7 @@ fun HistoryScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit,
     val fmt = DateTimeFormatter.ofPattern("EEE d MMM · HH:mm")
 
     Column(Modifier.fillMaxSize().background(Sloopy.ground)) {
-        TopNav(current = "history", onSelect = go, modifier = Modifier.padding(top = 10.dp))
+        ScreenHeader("History")
         Column(Modifier.fillMaxSize().padding(horizontal = 72.dp, vertical = 16.dp)) {
             Label("History · ${rows.size}")
             Text("WHERE YOU LEFT OFF", style = Sloopy.titleHuge, modifier = Modifier.padding(top = 8.dp, bottom = 18.dp))
