@@ -5,6 +5,8 @@ import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.viewModels
+import androidx.lifecycle.lifecycleScope
+import kotlinx.coroutines.launch
 import androidx.media3.common.util.UnstableApi
 import tv.sloopy.ui.SloopyRoot
 import tv.sloopy.ui.SloopyViewModel
@@ -23,6 +25,10 @@ class MainActivity : ComponentActivity() {
             SloopyTheme {
                 SloopyRoot(vm = vm, onQuit = { finishAndRemoveTask() })
             }
+        }
+        // The updater's system screens are started from here, the foreground Activity.
+        lifecycleScope.launch {
+            vm.updater.launches.collect { runCatching { startActivity(it) }.onFailure { e -> TLog.w { "could not open the system screen: ${TLog.userMessage(e)}" } } }
         }
     }
 

@@ -165,7 +165,9 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     }
     fun installUpdate() = viewModelScope.launch {
         val s = updateState.value
-        val info = (s as? tv.sloopy.update.UpdateState.Available)?.info ?: (s as? tv.sloopy.update.UpdateState.NeedsPermission)?.info ?: return@launch
+        if (s is tv.sloopy.update.UpdateState.Ready && updater.relaunch()) return@launch
+        val info = (s as? tv.sloopy.update.UpdateState.Available)?.info ?: (s as? tv.sloopy.update.UpdateState.NeedsPermission)?.info
+            ?: (s as? tv.sloopy.update.UpdateState.Ready)?.info ?: return@launch
         updater.install(info)
     }
 
@@ -227,12 +229,20 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         graph.db.meta().deleteAll(id)
     }
 
+    /** Why the last guide download failed, shown on the guide so a viewer can report it. */
+    private val _epgError = MutableStateFlow<String?>(null)
+    val epgError: StateFlow<String?> = _epgError
+    fun refreshEpgNow() = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        runCatching { catalog.refreshEpg(p) }
+            .onSuccess { _epgError.value = null }
+            .onFailure { _epgError.value = TLog.userMessage(it); TLog.w { "epg refresh: ${TLog.userMessage(it)}" } }
+    }
+
     private suspend fun ensureFresh(p: ProviderRecord) {
         val count = graph.db.channels().count(p.id)
         val age = System.currentTimeMillis() - prefs.refreshedAt(p.id, "channels")
-        if (count == 0 || age > 24L * 3600 * 1000) refresh(p) else viewModelScope.launch {
-            runCatching { catalog.refreshEpg(p) }.onFailure { TLog.w { "epg refresh: ${TLog.userMessage(it)}" } }
-        }
+        if (count == 0 || age > 24L * 3600 * 1000) refresh(p) else refreshEpgNow()
     }
 
     fun refresh(p: ProviderRecord? = active.value, force: Boolean = false) = viewModelScope.launch {

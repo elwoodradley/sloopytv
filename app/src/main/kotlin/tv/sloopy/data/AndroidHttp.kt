@@ -21,7 +21,9 @@ import java.util.concurrent.TimeUnit
  *  - Modest timeouts so a dead provider fails fast on the UI.
  */
 object AndroidHttp {
-    const val USER_AGENT = "Sloopy/1.0 (Android TV)"
+    // The platform's own agent string, as every stock Android app sends. Some panels refuse
+    // anything they do not recognise (one answered HTTP 451 to "Sloopy/1.0").
+    val USER_AGENT: String = System.getProperty("http.agent")?.takeIf { it.isNotBlank() } ?: "Dalvik/2.1.0 (Linux; U; Android 9)"
 
     val client: OkHttpClient by lazy {
         OkHttpClient.Builder()

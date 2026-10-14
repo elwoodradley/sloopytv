@@ -168,6 +168,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     }
     suspend fun focusRail() { repeat(40) { delay(50); if (runCatching { railFocus.requestFocus() }.getOrDefault(false)) return } }
 
+    LaunchedEffect(Unit) { if (vm.epgError.value != null) vm.refreshEpgNow() }
     LaunchedEffect(rail, quit) { if (!quit) { if (rail == Rail.NONE) focusGrid() else focusRail(); parking = false } }
     // A new group's channels arrive a moment after the selection; land on them when they do.
     LaunchedEffect(channels) { if (pendingGroup) { pendingGroup = false; focused = null; focusGrid() } }
@@ -227,7 +228,10 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                     .onFocusChanged { if (it.isFocused && !parking) scope.launch { if (rail == Rail.NONE) focusGrid() else focusRail() } }
                     .focusable()
             )
-            Label("Guide  ·  " + dayLabel(nowEpoch), bright = true); Spacer(Modifier.weight(1f)); Clock()
+            Label("Guide  ·  " + dayLabel(nowEpoch), bright = true)
+            val epgError by vm.epgError.collectAsState()
+            if (epgError != null) { Spacer(Modifier.width(28.dp)); Text("Guide feed failed: $epgError", style = Sloopy.label.copy(color = Sloopy.amber), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            Spacer(Modifier.weight(1f)); Clock()
         }
 
         DetailPanel(vm, focused, current, nowEpoch)

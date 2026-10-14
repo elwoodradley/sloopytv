@@ -96,13 +96,27 @@ class Updater(private val context: Context) {
     /** Android 8+ asks each app to be allowed as an install source once. Open that page if needed. */
     fun canInstall(): Boolean = Build.VERSION.SDK_INT < 26 || context.packageManager.canRequestPackageInstalls()
 
+    /**
+     * System screens (the install prompt, the "allow from this source" page) are started by the
+     * foreground Activity, which collects this. Fire OS would not always show them when started
+     * from the application context on a worker thread.
+     */
+    val launches = kotlinx.coroutines.flow.MutableSharedFlow<Intent>(extraBufferCapacity = 2)
+    private fun launch(intent: Intent) {
+        if (launches.subscriptionCount.value > 0) launches.tryEmit(intent)
+        else runCatching { context.startActivity(Intent(intent).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
+    }
+
     fun openInstallPermission() {
         if (Build.VERSION.SDK_INT < 26) return
-        val intent = Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:" + context.packageName))
-            .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-        runCatching { context.startActivity(intent) }.onFailure {
-            runCatching { context.startActivity(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) }
-        }
+        launch(Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, android.net.Uri.parse("package:" + context.packageName)))
+    }
+
+    /** Shows the install prompt again for an update already downloaded and verified. */
+    fun relaunch(): Boolean {
+        val r = _state.value as? UpdateState.Ready ?: return false
+        if (!r.file.exists()) return false
+        launchInstaller(r.file); return true
     }
 
     /** Downloads, verifies and hands the APK to the system installer. */
@@ -181,8 +195,8 @@ class Updater(private val context: Context) {
         val uri = FileProvider.getUriForFile(context, context.packageName + ".files", file)
         val intent = Intent(Intent.ACTION_VIEW)
             .setDataAndType(uri, "application/vnd.android.package-archive")
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-        context.startActivity(intent)
+            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        launch(intent)
     }
 
     /** True when [candidate] is a higher semantic version than [current] (0.1.10 > 0.1.9). */

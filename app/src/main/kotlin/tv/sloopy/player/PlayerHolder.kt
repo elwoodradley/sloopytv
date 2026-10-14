@@ -181,7 +181,10 @@ class PlayerHolder(context: Context) {
     private fun friendly(e: PlaybackException): String = when (e.errorCode) {
         PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED,
         PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT -> "No connection to the stream"
-        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> "The provider refused this stream (HTTP error). Often means the connection limit is reached."
+        PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS -> {
+            val code = (e.cause as? androidx.media3.datasource.HttpDataSource.InvalidResponseCodeException)?.responseCode
+            "The provider refused this stream" + (if (code != null) " (HTTP $code)" else "") + ". Often the connection limit, or the account."
+        }
         PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND -> "Stream not found on the provider"
         PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED,
         PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED -> "The stream is not in a format this box can play"
