@@ -127,8 +127,8 @@ fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit, on
                     ev.isKey(Key.DirectionUp, Key.ChannelUp) -> { vm.step(-1); true }
                     ev.isKey(Key.DirectionDown, Key.ChannelDown) -> { vm.step(1); true }
                     // Catch-up: Left/Right skip 30 s, rewind/fast-forward skip 2 min; the badge shows where you are.
-                    catchup && ev.isKey(Key.DirectionLeft, Key.MediaRewind) -> { vm.seekBy(if (ev.isKey(Key.DirectionLeft)) -30_000 else -120_000); overlay = Overlay.OSD; osdTick++; true }
-                    catchup && ev.isKey(Key.DirectionRight, Key.MediaFastForward) -> { vm.seekBy(if (ev.isKey(Key.DirectionRight)) 30_000 else 120_000); overlay = Overlay.OSD; osdTick++; true }
+                    catchup && ev.isKey(Key.DirectionLeft, Key.MediaRewind) -> { val d = if (ev.isKey(Key.DirectionLeft)) -30_000L else -120_000L; vm.seekBy(d); vm.noteSeek(d); overlay = Overlay.OSD; osdTick++; true }
+                    catchup && ev.isKey(Key.DirectionRight, Key.MediaFastForward) -> { val d = if (ev.isKey(Key.DirectionRight)) 30_000L else 120_000L; vm.seekBy(d); vm.noteSeek(d); overlay = Overlay.OSD; osdTick++; true }
                     ev.isKey(Key.DirectionLeft) -> { overlay = Overlay.CHANNELS; true }
                     ev.isKey(Key.DirectionRight, Key.Menu) -> { overlay = Overlay.DECK; true }
                     ev.isKey(Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause) -> {
@@ -202,9 +202,25 @@ internal fun Osd(vm: SloopyViewModel, channel: ChannelEntity, playing: Playing?,
         Column(Modifier.align(Alignment.TopStart).padding(start = 72.dp, top = 54.dp)) {
             Text(channel.number.toString(), style = Sloopy.mono16.copy(color = Color.White.copy(alpha = 0.72f), letterSpacing = androidx.compose.ui.unit.TextUnit(0.12f, androidx.compose.ui.unit.TextUnitType.Em)))
             Text(channel.name.uppercase(), style = Sloopy.osdName, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp).width(900.dp))
-            if (cur != null) {
+            if (cur != null && playing is Playing.Catchup) {
+                // Catch-up: a position bar that follows the player, with the last skip shown beside it.
+                val seek by vm.lastSeek.collectAsState()
+                var posMs by remember { mutableStateOf(vm.player.position()) }
+                LaunchedEffect(Unit) { while (true) { posMs = vm.player.position(); delay(500) } }
+                val lenMs = (cur.stopEpoch - cur.startEpoch) * 1000L
+                Text("CATCH-UP · " + cur.title + " · " + fmt(cur.startEpoch) + " – " + fmt(cur.stopEpoch), style = Sloopy.bodyBig.copy(color = Color.White.copy(alpha = 0.8f)), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp).width(900.dp))
+                Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Text(fmtMs(posMs), style = Sloopy.mono16.copy(color = Color.White))
+                    Spacer(Modifier.width(14.dp))
+                    ProgressHairline(fraction = posMs.toFloat() / lenMs.coerceAtLeast(1), modifier = Modifier.width(520.dp), thickness = 4.dp, fill = Sloopy.amber)
+                    Spacer(Modifier.width(14.dp))
+                    Text(fmtMs(lenMs), style = Sloopy.mono16.copy(color = Color.White.copy(alpha = 0.6f)))
+                    if (seek != null) { Spacer(Modifier.width(18.dp)); Text((if (seek!! > 0) "+" else "−") + (kotlin.math.abs(seek!!) / 1000) + " s", style = Sloopy.labelBright.copy(color = Sloopy.amber)) }
+                }
+                Text("Left / Right 30 s · Rewind / Fast-forward 2 min", style = Sloopy.label.copy(color = Color.White.copy(alpha = 0.45f)), modifier = Modifier.padding(top = 8.dp))
+            } else if (cur != null) {
                 Text(
-                    (if (playing is Playing.Catchup) "CATCH-UP · at " + fmt(cur.startEpoch + vm.player.position() / 1000) + " · " else "") + cur.title + " · " + fmt(cur.startEpoch) + " – " + fmt(cur.stopEpoch),
+                    cur.title + " · " + fmt(cur.startEpoch) + " – " + fmt(cur.stopEpoch),
                     style = Sloopy.bodyBig.copy(color = Color.White.copy(alpha = 0.8f)), maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 10.dp).width(900.dp),
                 )
@@ -248,3 +264,8 @@ private fun Deck(go: (String) -> Unit, onClose: () -> Unit) {
 }
 
 internal fun fmt(epoch: Long): String = tv.sloopy.ui.common.TimeFmt.hhmm(epoch)
+
+private fun fmtMs(ms: Long): String {
+    val t = (ms / 1000).coerceAtLeast(0); val h = t / 3600; val m = (t % 3600) / 60; val sec = t % 60
+    return if (h > 0) "%d:%02d:%02d".format(h, m, sec) else "%d:%02d".format(m, sec)
+}

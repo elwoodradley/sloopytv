@@ -625,6 +625,14 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         tune(list[next])
     }
 
+    private val _lastSeek = MutableStateFlow<Long?>(null)
+    val lastSeek: StateFlow<Long?> = _lastSeek
+    private var seekClear: kotlinx.coroutines.Job? = null
+    /** Accumulates quick presses ("+90 s") and clears two seconds after the last one. */
+    fun noteSeek(ms: Long) {
+        _lastSeek.value = (if ((_lastSeek.value ?: 0L) * ms > 0) _lastSeek.value!! else 0L) + ms
+        seekClear?.cancel(); seekClear = viewModelScope.launch { delay(2000); _lastSeek.value = null }
+    }
     fun seekBy(ms: Long) { val p = player.player; p.seekTo((p.currentPosition + ms).coerceIn(0, maxOf(0, p.duration))) }
 
     fun playCatchup(c: ChannelEntity, title: String, startEpoch: Long, stopEpoch: Long) {

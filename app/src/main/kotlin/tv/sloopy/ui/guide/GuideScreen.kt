@@ -564,6 +564,7 @@ private fun GuideRow(
                             past = p.stopEpoch <= nowEpoch, isNow = isNow, archive = channel.archive,
                             requesters = if (isNow) requesters else emptyList(),
                             cellKey = "${channel.id}|${p.startEpoch}", register = register,
+                            hiddenLeftPx = { val xs = ((a - winStart) * dpPerSec * density).toInt(); (hScroll.value - xs).coerceAtMost((((b - a) * dpPerSec * density) - 120 * density).toInt()) },
                             onFocus = { onFocused(p) },
                             onClick = { onSelect(p) }, onHold = { onHold(p) },
                         )
@@ -586,6 +587,8 @@ private fun Cell(
     requesters: List<FocusRequester>,
     cellKey: String, register: (String, FocusRequester?) -> Unit,
     onFocus: () -> Unit, onClick: () -> Unit, onHold: () -> Unit,
+    /** Pixels of this cell hidden off the left edge of the view, so a long programme's text stays visible. */
+    hiddenLeftPx: () -> Int = { 0 },
 ) {
     var focused by remember { mutableStateOf(false) }
     val own = remember { FocusRequester() }
@@ -611,7 +614,9 @@ private fun Cell(
             .then(requesters.fold(Modifier as Modifier) { m, r -> m.focusRequester(r) })
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() },
     ) {
-        Column(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center) {
+        val density = androidx.compose.ui.platform.LocalDensity.current
+        val inset by remember { derivedStateOf { with(density) { hiddenLeftPx().coerceAtLeast(0).toDp() } } }
+        Column(Modifier.fillMaxSize().padding(start = 12.dp + inset, end = 12.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center) {
             Text(title, style = Sloopy.cellTitle.copy(fontSize = 19.sp, color = Color.Unspecified, fontWeight = if (past) androidx.compose.ui.text.font.FontWeight.Normal else androidx.compose.ui.text.font.FontWeight.Medium), maxLines = 1, overflow = TextOverflow.Ellipsis)
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (past && archive) { Text("↺", style = Sloopy.mono14.copy(color = if (focused) Sloopy.textSoft else Sloopy.muted)); Spacer(Modifier.width(6.dp)) }
