@@ -107,11 +107,11 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
         val now = System.currentTimeMillis() / 1000
         val hidden = vm.hiddenGroups.value
         val hiddenCh = vm.hiddenChannels.value
-        val shown = channels.filter { it.categoryId !in hidden && it.id !in hiddenCh }
+        val shown = vm.collapse(channels.filter { it.categoryId !in hidden && it.id !in hiddenCh })
         val byEpg = shown.filter { it.epgId != null }.associateBy { it.epgId!! }
         val out = ArrayList<Hit>()
         runCatching {
-            vm.graph.db.channels().search(p.id, text, 40).filter { it.categoryId !in hidden && it.id !in hiddenCh }.take(30).forEach { out.add(Hit.Chan(it)) }
+            vm.graph.db.channels().search(p.id, text, 40).filter { it.categoryId !in hidden && it.id !in hiddenCh }.let { vm.collapse(it) }.take(30).forEach { out.add(Hit.Chan(it)) }
             vm.catalog.searchProgrammes(p.id, text, now).filter { byEpg[it.epgId] != null }.take(40).forEach { out.add(Hit.Prog(it, byEpg[it.epgId])) }
             vm.graph.db.vod().search(p.id, text, 30).forEach { out.add(Hit.Item("vod", it.id, it.name, "Movie" + (it.year?.let { y -> " · $y" } ?: ""))) }
             vm.graph.db.series().search(p.id, text, 30).forEach { out.add(Hit.Item("series", it.id, it.name, "Series" + (it.releaseDate?.take(4)?.let { y -> " · $y" } ?: ""))) }

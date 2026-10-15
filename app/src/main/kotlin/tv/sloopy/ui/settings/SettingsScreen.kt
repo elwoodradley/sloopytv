@@ -171,6 +171,34 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                         val epgH by vm.epgIntervalHours.collectAsState()
                         Spacer(Modifier.height(16.dp))
                         SettingRow("Guide refreshes every", "$epgH H") { scope.launch { vm.prefs.setEpgIntervalHours(when (epgH) { 1 -> 2; 2 -> 3; 3 -> 6; 6 -> 12; 12 -> 24; else -> 1 }) } }
+                        val collapse by vm.collapseDupes.collectAsState()
+                        SettingRow("Collapse duplicate channels", if (collapse) "ON" else "OFF") { scope.launch { vm.prefs.setCollapseDupes(!collapse) } }
+                        Text("Copies of a channel (HD, FHD, 4K, backup) show as one row. Only names that match exactly once the tags are stripped are treated as copies; hold OK on a channel to pick a copy or split them.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 4.dp, bottom = 10.dp).width(760.dp))
+                        val dupes by vm.dupes.collectAsState()
+                        if (dupes.possible.isNotEmpty()) {
+                            Section("Possible duplicates · ${dupes.possible.size}")
+                            Text("Same guide listing, different names. Nothing is merged until you say so.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(bottom = 6.dp))
+                            dupes.possible.take(20).forEach { (a, b) ->
+                                Column {
+                                    Row(Modifier.fillMaxWidth().height(50.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(tv.sloopy.core.model.Names.clean(a.name) + "   ↔   " + tv.sloopy.core.model.Names.clean(b.name), style = Sloopy.listName, modifier = Modifier.width(620.dp), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                        SloopyButton("Same channel", onClick = { vm.mergePossible(a, b, true) })
+                                        Spacer(Modifier.width(8.dp))
+                                        SloopyButton("Different", onClick = { vm.mergePossible(a, b, false) })
+                                    }
+                                    Hairline(color = Sloopy.hair2)
+                                }
+                            }
+                        }
+                        val split by vm.dupSplit.collectAsState()
+                        if (split.isNotEmpty()) {
+                            Section("Shown as separate channels")
+                            val allCh by vm.channels.collectAsState()
+                            split.forEach { k ->
+                                val names = allCh.filter { tv.sloopy.core.model.Dupes.key(it.name) == k }.joinToString("  ·  ") { tv.sloopy.core.model.Names.clean(it.name) }
+                                SettingRow(names.ifBlank { k }.take(60), "MERGE AGAIN") { vm.unsplitCluster(k) }
+                            }
+                        }
                         Text("To reorder or hide channel groups: open the guide, press Back for the groups, hold OK on a group.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 24.dp).width(760.dp))
                         val hidden by vm.hiddenGroups.collectAsState()
                         val hiddenCats = categories.filter { it.id in hidden }

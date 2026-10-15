@@ -185,18 +185,97 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         prefs.setGroupOrder(p.id, if (mode == "az") rawLiveCategories.value.sortedBy { it.name.lowercase() }.map { it.id } else emptyList())
     }
 
+    // ---- Duplicate channels ----------------------------------------------------------------------
+    /** One cluster per real channel: every copy the provider carries, and the one shown for it. */
+    data class Cluster(val key: String, val members: List<ChannelEntity>, val primary: ChannelEntity)
+    data class Dupes(val byChannel: Map<Long, Cluster>, val possible: List<Pair<ChannelEntity, ChannelEntity>>)
+
+    val collapseDupes: StateFlow<Boolean> = prefs.collapseDupes.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    private fun <T> perProvider(f: (String) -> kotlinx.coroutines.flow.Flow<T>, empty: T): StateFlow<T> =
+        active.flatMapLatest { p -> if (p == null) flowOf(empty) else f(p.id) }.stateIn(viewModelScope, SharingStarted.Eagerly, empty)
+    val dupSplit: StateFlow<Set<String>> = perProvider({ prefs.dupSplit(it) }, emptySet())
+    val dupMerged: StateFlow<Set<String>> = perProvider({ prefs.dupMerged(it) }, emptySet())
+    val dupDismissed: StateFlow<Set<String>> = perProvider({ prefs.dupDismissed(it) }, emptySet())
+    val dupPreferred: StateFlow<Map<String, Long>> = perProvider({ prefs.dupPreferred(it) }, emptyMap())
+
+    val dupes: StateFlow<Dupes> = combine(channels, dupSplit, dupMerged, dupDismissed, dupPreferred) { all, split, merged, dismissed, preferred ->
+        // Strong signal: identical stripped names. Confirmed pairs join their partner's cluster.
+        val keyOf = HashMap<Long, String>(all.size * 2)
+        for (c in all) keyOf[c.id] = tv.sloopy.core.model.Dupes.key(c.name).ifEmpty { "#${c.id}" }
+        for (pair in merged) {
+            val (a, b) = pair.split(':').mapNotNull { it.toLongOrNull() }.let { if (it.size == 2) it[0] to it[1] else continue }
+            val ka = keyOf[a] ?: continue; val kb = keyOf[b] ?: continue
+            if (ka != kb) for ((id, k) in keyOf) if (k == kb) keyOf[id] = ka
+        }
+        val groups = all.groupBy { keyOf[it.id]!! }
+        val byChannel = HashMap<Long, Cluster>(all.size * 2)
+        for ((k, members) in groups) {
+            if (members.size < 2 || k in split) { members.forEach { byChannel[it.id] = Cluster(k, listOf(it), it) }; continue }
+            val primary = members.firstOrNull { it.id == preferred[k] }
+                ?: members.maxWithOrNull(compareBy({ tv.sloopy.core.model.Dupes.quality(it.name) }, { -it.sortKey }))
+                ?: members.first()
+            val cl = Cluster(k, members, primary)
+            members.forEach { byChannel[it.id] = cl }
+        }
+        // Weaker signal, offered rather than acted on: same guide id, different names.
+        val possible = ArrayList<Pair<ChannelEntity, ChannelEntity>>()
+        val byEpg = all.filter { it.epgId != null }.groupBy { it.epgId!! }
+        for ((_, same) in byEpg) {
+            if (same.size < 2) continue
+            val reps = same.distinctBy { keyOf[it.id] }
+            for (i in reps.indices) for (j in i + 1 until reps.size) {
+                val a = reps[i]; val b = reps[j]
+                val tag = "${minOf(a.id, b.id)}:${maxOf(a.id, b.id)}"
+                if (tag !in dismissed && tag !in merged) possible.add(a to b)
+            }
+        }
+        Dupes(byChannel, possible.take(60))
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, Dupes(emptyMap(), emptyList()))
+
+    fun copiesOf(c: ChannelEntity): List<ChannelEntity> = dupes.value.byChannel[c.id]?.members ?: listOf(c)
+    fun clusterOf(c: ChannelEntity): Cluster? = dupes.value.byChannel[c.id]?.takeIf { it.members.size > 1 }
+    fun preferCopy(c: ChannelEntity) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val cl = dupes.value.byChannel[c.id] ?: return@launch
+        prefs.setDupPreferred(p.id, dupPreferred.value + (cl.key to c.id))
+        if (currentChannel.value?.let { dupes.value.byChannel[it.id]?.key } == cl.key) tune(c)
+    }
+    fun splitCluster(c: ChannelEntity) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val cl = dupes.value.byChannel[c.id] ?: return@launch
+        prefs.setDupSplit(p.id, dupSplit.value + cl.key)
+    }
+    fun unsplitCluster(key: String) = viewModelScope.launch { active.value?.let { prefs.setDupSplit(it.id, dupSplit.value - key) } }
+    fun mergePossible(a: ChannelEntity, b: ChannelEntity, same: Boolean) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val tag = "${minOf(a.id, b.id)}:${maxOf(a.id, b.id)}"
+        if (same) prefs.setDupMerged(p.id, dupMerged.value + tag) else prefs.setDupDismissed(p.id, dupDismissed.value + tag)
+    }
+    /** The list with every cluster reduced to the copy shown for it. */
+    fun collapse(list: List<ChannelEntity>): List<ChannelEntity> {
+        if (!collapseDupes.value) return list
+        val d = dupes.value.byChannel
+        val seen = HashSet<String>()
+        return list.mapNotNull { c -> val cl = d[c.id]; if (cl == null || cl.members.size < 2) c else if (seen.add(cl.key)) cl.primary else null }
+    }
+
     /** Channels in the selected group, locked groups hidden until unlocked for this session. */
     private val visibleBase: StateFlow<List<ChannelEntity>> =
-        combine(channels, _group, favouriteIds, lockedGroups, unlockedSession) { all, g, favs, locked, unlocked ->
+        combine(channels, _group, favouriteIds, lockedGroups, unlockedSession, dupes) { args ->
+            @Suppress("UNCHECKED_CAST")
+            val all = args[0] as List<ChannelEntity>; val g = args[1] as String; val favs = args[2] as Set<Long>
+            val locked = args[3] as Set<String>; val unlocked = args[4] as Boolean; val d = args[5] as Dupes
+            // A favourite on any copy counts for the whole cluster.
+            val favKeys = favs.mapNotNull { d.byChannel[it]?.key }.toSet()
             val base = when (g) {
                 Groups.ALL -> all
-                Groups.FAV -> all.filter { it.id in favs }
+                Groups.FAV -> all.filter { it.id in favs || (d.byChannel[it.id]?.key in favKeys) }
                 else -> all.filter { it.categoryId == g }
             }
             if (unlocked) base else base.filter { it.categoryId !in locked }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val visibleChannels: StateFlow<List<ChannelEntity>> = combine(visibleBase, channelSort, hiddenGroups, hiddenChannels) { base, mode, hidden, hiddenCh ->
-        val list = base.filter { (hidden.isEmpty() || it.categoryId !in hidden) && it.id !in hiddenCh }
+    val visibleChannels: StateFlow<List<ChannelEntity>> = combine(visibleBase, channelSort, hiddenGroups, hiddenChannels, collapseDupes) { base, mode, hidden, hiddenCh, _ ->
+        val list = collapse(base.filter { (hidden.isEmpty() || it.categoryId !in hidden) && it.id !in hiddenCh })
         when (mode) { "number" -> list.sortedBy { it.number }; "name" -> list.sortedBy { it.name.lowercase() }; else -> list }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -397,7 +476,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val progressTick = active.flatMapLatest { p -> if (p == null) flowOf(emptyList()) else graph.db.progress().recent(p.id, 1) }
             kotlinx.coroutines.flow.merge(
-                favouriteIds, favouriteVodIds, favouriteSeriesIds, groupOrder, lockedGroups, hiddenGroups, hiddenChannels, providerList, progressTick,
+                favouriteIds, favouriteVodIds, favouriteSeriesIds, groupOrder, lockedGroups, hiddenGroups, hiddenChannels, providerList, progressTick, prefs.collapseDupes, dupSplit, dupMerged, dupDismissed, dupPreferred,
                 prefs.theme, prefs.clock12, prefs.frameRateMatch, prefs.introEnabled, prefs.osdSeconds, prefs.searchHistory, prefs.license,
             ).map { }.drop(1).debounce(8_000).collect { if (syncCode.value != null) syncNow() }
         }

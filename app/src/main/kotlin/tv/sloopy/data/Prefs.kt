@@ -130,6 +130,22 @@ class Prefs(private val context: Context) {
     fun hiddenChannels(providerId: String): Flow<Set<Long>> = ds.data.map { p -> p[hiddenChanKey(providerId)]?.split(',')?.mapNotNull { it.toLongOrNull() }?.toSet() ?: emptySet() }
     suspend fun setHiddenChannels(providerId: String, ids: Set<Long>) = ds.edit { it[hiddenChanKey(providerId)] = ids.joinToString(",") }
 
+    // Duplicate channels: one row per channel unless the viewer splits a cluster; confirmed and
+    // dismissed "possible" pairs; the copy the viewer prefers per cluster.
+    val collapseDupes: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("collapse_dupes")] ?: true }
+    suspend fun setCollapseDupes(v: Boolean) = ds.edit { it[booleanPreferencesKey("collapse_dupes")] = v }
+    private fun dupKey(providerId: String, what: String) = stringPreferencesKey("dup_${what}_$providerId")
+    fun dupSplit(providerId: String): Flow<Set<String>> = ds.data.map { p -> p[dupKey(providerId, "split")]?.split('\u0001')?.filter { it.isNotEmpty() }?.toSet() ?: emptySet() }
+    suspend fun setDupSplit(providerId: String, keys: Set<String>) = ds.edit { it[dupKey(providerId, "split")] = keys.joinToString("\u0001") }
+    /** Pairs "a:b" of channel ids the viewer confirmed are the same channel. */
+    fun dupMerged(providerId: String): Flow<Set<String>> = ds.data.map { p -> p[dupKey(providerId, "merged")]?.split('\u0001')?.filter { it.isNotEmpty() }?.toSet() ?: emptySet() }
+    suspend fun setDupMerged(providerId: String, pairs: Set<String>) = ds.edit { it[dupKey(providerId, "merged")] = pairs.joinToString("\u0001") }
+    fun dupDismissed(providerId: String): Flow<Set<String>> = ds.data.map { p -> p[dupKey(providerId, "dismissed")]?.split('\u0001')?.filter { it.isNotEmpty() }?.toSet() ?: emptySet() }
+    suspend fun setDupDismissed(providerId: String, pairs: Set<String>) = ds.edit { it[dupKey(providerId, "dismissed")] = pairs.joinToString("\u0001") }
+    /** cluster key -> channel id. */
+    fun dupPreferred(providerId: String): Flow<Map<String, Long>> = ds.data.map { p -> p[dupKey(providerId, "preferred")]?.split('\u0001')?.mapNotNull { e -> val i = e.lastIndexOf('='); if (i < 0) null else e.substring(i + 1).toLongOrNull()?.let { e.substring(0, i) to it } }?.toMap() ?: emptyMap() }
+    suspend fun setDupPreferred(providerId: String, m: Map<String, Long>) = ds.edit { it[dupKey(providerId, "preferred")] = m.entries.joinToString("\u0001") { "${it.key}=${it.value}" } }
+
     private fun lockedKey(providerId: String) = stringPreferencesKey("locked_groups_$providerId")
     fun lockedGroups(providerId: String): Flow<Set<String>> = ds.data.map { p -> p[lockedKey(providerId)]?.split('\u0001')?.filter { it.isNotEmpty() }?.toSet() ?: emptySet() }
     suspend fun setLockedGroups(providerId: String, groups: Set<String>) = ds.edit { it[lockedKey(providerId)] = groups.joinToString("\u0001") }

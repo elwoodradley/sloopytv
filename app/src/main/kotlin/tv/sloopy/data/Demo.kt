@@ -28,6 +28,9 @@ object Demo {
         Stream(4, "Sintel", "https://bitmovin-a.akamaihd.net/content/sintel/hls/playlist.m3u8", "Open films", "Blender Foundation, Creative Commons"),
         Stream(5, "Akamai live test", "https://cph-p2p-msl.akamaized.net/hls/live/2000341/test/master.m3u8", "Test streams", "A live test loop"),
         Stream(6, "Apple advanced HLS", "https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8", "Test streams", "fMP4 segments, several bitrates"),
+        // A second copy of the same stream, as providers carry them, so duplicate collapsing and
+        // self-healing can be tried without a real account.
+        Stream(7, "Big Buck Bunny FHD", "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8", "Open films", "Blender Foundation, Creative Commons"),
     )
 
     fun categories(): List<CategoryEntity> = streams.map { it.group }.distinct().mapIndexed { i, g ->

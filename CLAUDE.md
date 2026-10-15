@@ -69,6 +69,13 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   the alarm receiver, folder handling (SAF tree or the app's own storage). Xtream channels are
   forced to TS; HLS-only URLs refuse with a message. Recordings play through the VOD player as
   `Playing.Vod(kind = "recording")`; the player's data source is DefaultDataSource over OkHttp.
+- 0.4.2 (2026-10-15): duplicate engine. `core/model/Dupes.kt` (tested) gives a cluster key from
+  the stripped name; identical keys = copies, never "starts with". `vm.dupes` clusters the
+  channel list (viewer merges join clusters, splits break them, a preferred copy wins, else best
+  quality tag); `vm.collapse()` reduces any list to one row per cluster and is applied in
+  visibleChannels and search. "Possible duplicates" (same EPG id, different key) are offered in
+  Settings › Listings, never auto-merged. Hold OK on a channel → Copies picker / split. All
+  choices ride in the sync bundle. The demo carries "Big Buck Bunny FHD" as a second copy.
 - 0.4.0 (2026-10-15): Stone Toad branding. The wordmark is `drawable-nodpi/stone_toad_mark.png`,
   cut from the user's artwork as white-on-transparent (`ui/common/StoneToad.kt` tints it); never
   redraw it by hand, the user rejected that. It rides the power-on (`SloopyRoot`, fades after

@@ -28,6 +28,11 @@ data class SyncBundle(
     val lockedGroups: Map<String, List<String>>,
     val hiddenGroups: Map<String, List<String>> = emptyMap(),
     val hiddenChannels: Map<String, List<Long>> = emptyMap(),
+    val dupSplit: Map<String, List<String>> = emptyMap(),
+    val dupMerged: Map<String, List<String>> = emptyMap(),
+    val dupDismissed: Map<String, List<String>> = emptyMap(),
+    val dupPreferred: Map<String, Map<String, Long>> = emptyMap(),
+    val collapseDupes: Boolean = true,
     val channelSorts: Map<String, String>,
     val lastChannel: Map<String, Long>,
     val lastGroup: Map<String, String>,
@@ -56,6 +61,11 @@ class SyncManager(private val db: SloopyDb, private val prefs: Prefs, private va
             lockedGroups = ids.associateWith { prefs.lockedGroups(it).first().toList() },
             hiddenGroups = ids.associateWith { prefs.hiddenGroups(it).first().toList() },
             hiddenChannels = ids.associateWith { prefs.hiddenChannels(it).first().toList() },
+            dupSplit = ids.associateWith { prefs.dupSplit(it).first().toList() },
+            dupMerged = ids.associateWith { prefs.dupMerged(it).first().toList() },
+            dupDismissed = ids.associateWith { prefs.dupDismissed(it).first().toList() },
+            dupPreferred = ids.associateWith { prefs.dupPreferred(it).first() },
+            collapseDupes = prefs.collapseDupes.first(),
             channelSorts = prefs.allChannelSorts(),
             lastChannel = ids.mapNotNull { p -> prefs.lastChannel(p)?.let { p to it } }.toMap(),
             lastGroup = ids.mapNotNull { p -> prefs.lastGroup(p)?.let { p to it } }.toMap(),
@@ -83,6 +93,11 @@ class SyncManager(private val db: SloopyDb, private val prefs: Prefs, private va
         b.lockedGroups.forEach { (p, l) -> prefs.setLockedGroups(p, l.toSet()) }
         b.hiddenGroups.forEach { (p, l) -> prefs.setHiddenGroups(p, l.toSet()) }
         b.hiddenChannels.forEach { (p, l) -> prefs.setHiddenChannels(p, l.toSet()) }
+        b.dupSplit.forEach { (p, l) -> prefs.setDupSplit(p, l.toSet()) }
+        b.dupMerged.forEach { (p, l) -> prefs.setDupMerged(p, l.toSet()) }
+        b.dupDismissed.forEach { (p, l) -> prefs.setDupDismissed(p, l.toSet()) }
+        b.dupPreferred.forEach { (p, m) -> prefs.setDupPreferred(p, m) }
+        prefs.setCollapseDupes(b.collapseDupes)
         prefs.restoreChannelSorts(b.channelSorts)
         b.lastChannel.forEach { (p, c) -> prefs.setLastChannel(p, c) }
         b.lastGroup.forEach { (p, g) -> prefs.setLastGroup(p, g) }

@@ -160,6 +160,8 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     var cellMenu by remember { mutableStateOf<Pair<ChannelEntity, ProgrammeEntity?>?>(null) }
     val favIds by vm.favouriteIds.collectAsState()
     val reportsOn by vm.reportsEnabled.collectAsState()
+    val dupesNow by vm.dupes.collectAsState()
+    var copiesFor by remember { mutableStateOf<ChannelEntity?>(null) }
     val channelSort by vm.channelSort.collectAsState()
 
     val dpPerSec: Float = SLOT.value / 1800f
@@ -276,9 +278,9 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     Column(
         Modifier.fillMaxSize().background(Sloopy.ground)
             .onPreviewKeyEvent { ev ->
-                if (sortMenu != null || cellMenu != null || groupMenu != null) {
+                if (sortMenu != null || cellMenu != null || groupMenu != null || copiesFor != null) {
                     // A menu is up. Back closes it whatever has focus; other keys stay inside it.
-                    if (ev.inKeys(BACK_KEYS)) { if (!ev.isDown) { sortMenu = null; cellMenu = null; groupMenu = null }; return@onPreviewKeyEvent true }
+                    if (ev.inKeys(BACK_KEYS)) { if (!ev.isDown) { sortMenu = null; cellMenu = null; groupMenu = null; copiesFor = null }; return@onPreviewKeyEvent true }
                     return@onPreviewKeyEvent false
                 }
                 if (quit) return@onPreviewKeyEvent false
@@ -376,7 +378,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                         if (i == channels.lastIndex) add(lastRowFocus)
                     }
                     GuideRow(
-                        vm = vm, channel = c, isCurrent = c.id == current?.id,
+                        vm = vm, channel = c, isCurrent = c.id == current?.id, copies = dupesNow.byChannel[c.id]?.members?.size ?: 1,
                         winStart = winStart, winEnd = winEnd, nowEpoch = nowEpoch, dpPerSec = dpPerSec,
                         hScroll = hScroll, requesters = requesters,
                         onFocused = { p -> focusedRow = i; if (pendingRow == i) pendingRow = -1; focused = Focused(c, p); cellFocused(p) },
@@ -427,6 +429,8 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             if (!past) addAll(tv.sloopy.ui.record.RecordOptions.choices)
             if (live && vm.vlcInstalled()) add("vlc" to "Open in VLC")
             add("fav" to (if (c.id in favIds) "Remove ${c.name.take(24)} from favourites" else "Add ${c.name.take(24)} to favourites"))
+            val cl = vm.clusterOf(c)
+            if (cl != null) add("copies" to "Copies · ${cl.members.size} · using ${tv.sloopy.core.model.Dupes.tags(cl.primary.name).ifBlank { "plain" }}")
             add("hidechan" to "Hide ${c.name.take(24)}")
             if (reportsOn) add("report" to "Report this channel as broken")
             add("no" to "Not now")
@@ -440,6 +444,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                 "remind" -> vm.addReminder(c, p!!.title, p.startEpoch, p.stopEpoch)
                 "unremind" -> vm.removeReminder(c, p!!.startEpoch)
                 "report" -> vm.reportChannel(c, null)
+                "copies" -> copiesFor = c
                 "hidechan" -> {
                     val i = channels.indexOfFirst { it.id == c.id }
                     vm.setChannelHidden(c.id, true); vm.toast("Hidden: ${c.name}. Settings › Listings brings it back.")
@@ -450,7 +455,21 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             cellMenu = null
         })
     }
-    LaunchedEffect(sortMenu, cellMenu, groupMenu) { if (sortMenu == null && cellMenu == null && groupMenu == null) { if (rail == Rail.NONE) focusGrid() else focusRail() } }
+    copiesFor?.let { c ->
+        val cl = vm.clusterOf(c)
+        if (cl == null) copiesFor = null else {
+            val options = cl.members.map { m -> "use:${m.id}" to ("Use " + tv.sloopy.core.model.Names.clean(m.name).take(30)) } +
+                ("split" to "These are different channels, show them all") + ("no" to "Not now")
+            ChoicePrompt("COPIES OF " + tv.sloopy.core.model.Names.clean(cl.primary.name).uppercase().take(20), options, current = "use:${cl.primary.id}", onCancel = { copiesFor = null }, onPick = { k ->
+                when {
+                    k.startsWith("use:") -> cl.members.firstOrNull { it.id == k.removePrefix("use:").toLongOrNull() }?.let { vm.preferCopy(it) }
+                    k == "split" -> vm.splitCluster(c)
+                }
+                copiesFor = null
+            })
+        }
+    }
+    LaunchedEffect(sortMenu, cellMenu, groupMenu, copiesFor) { if (sortMenu == null && cellMenu == null && groupMenu == null && copiesFor == null) { if (rail == Rail.NONE) focusGrid() else focusRail() } }
     }
 }
 
@@ -509,6 +528,7 @@ private fun GuideRow(
     vm: SloopyViewModel,
     channel: ChannelEntity,
     isCurrent: Boolean,
+    copies: Int,
     winStart: Long, winEnd: Long, nowEpoch: Long, dpPerSec: Float,
     hScroll: androidx.compose.foundation.ScrollState,
     requesters: List<FocusRequester>,
@@ -536,6 +556,7 @@ private fun GuideRow(
                 ChannelLogo(channel.logo, channel.name, 40.dp)
                 Spacer(Modifier.width(14.dp))
                 Text(tv.sloopy.core.model.Names.clean(channel.name), style = Sloopy.listName.copy(fontSize = 21.sp), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                if (copies > 1) Text("+${copies - 1}", style = Sloopy.mono14.copy(color = Sloopy.dim), modifier = Modifier.padding(end = 8.dp))
                 if (isCurrent) LiveDot()
             }
             Box(Modifier.weight(1f).fillMaxHeight().onSizeChanged { onTimelineWidth(it.width) }) {
