@@ -341,6 +341,14 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                             Spacer(Modifier.width(16.dp))
                             Text(note, style = Sloopy.body.copy(color = if (update is UpdateState.Failed || update is UpdateState.NeedsPermission) Sloopy.amber else Sloopy.textSoft), modifier = Modifier.width(700.dp))
                         }
+                        val context = androidx.compose.ui.platform.LocalContext.current
+                        var crash by remember { mutableStateOf(tv.sloopy.CrashLog.read(context)) }
+                        if (crash != null) {
+                            Section("Last crash")
+                            Text("The app closed by itself. Read this to whoever looks after SloopyTV.", style = Sloopy.body.copy(color = Sloopy.amber))
+                            Text(crash!!.lineSequence().take(14).joinToString("\n"), style = Sloopy.mono14.copy(color = Sloopy.textSoft), modifier = Modifier.padding(top = 10.dp).width(900.dp))
+                            Row(Modifier.padding(top = 12.dp)) { SloopyButton("Clear", onClick = { tv.sloopy.CrashLog.clear(context); crash = null }) }
+                        }
                         Text("SloopyTV ${BuildConfig.VERSION_NAME}. A player only: it ships with no channels and no providers. Credentials stay in this device's keystore. No analytics, no telemetry.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 20.dp).width(760.dp))
                     }
                 }

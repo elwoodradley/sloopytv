@@ -215,12 +215,25 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             val below = target > (vis.lastOrNull()?.index ?: 0)
             listState.scrollToItem(if (below) (target - 8).coerceAtLeast(0) else target)
         }
-        repeat(25) {
+        repeat(40) {
             val fr = cellRequesters[pickKey(c, rowProgs[c.id] ?: emptyList())]
             if (fr != null && runCatching { fr.requestFocus() }.getOrDefault(false)) return
             delay(40)
         }
+        // The cell under the cursor time never appeared (a wrap to the far end of a long list can
+        // outrun it). Any cell of that row will do; failing that, the current channel's row.
+        val any = cellRequesters.entries.firstOrNull { it.key.startsWith("${c.id}|") }?.value
+        if (any != null && runCatching { any.requestFocus() }.getOrDefault(false)) return
         verticalMove = false
+        focusGrid()
+    }
+    // Focus watchdog: if the grid is the active area and nothing in it has focus for a moment
+    // (a focused cell scrolled out and was disposed), put the cursor back rather than lose it.
+    var gridHasFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(gridHasFocus, rail, quit) {
+        if (gridHasFocus || rail != Rail.NONE || quit) return@LaunchedEffect
+        delay(400)
+        if (!gridHasFocus && rail == Rail.NONE && !quit && sortMenu == null && cellMenu == null && groupMenu == null) focusGrid()
     }
     /** After a horizontal move: the cursor follows the cell and the timeline scrolls only as far as needed. */
     fun cellFocused(p: ProgrammeEntity?) {
@@ -324,7 +337,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
         }
         Spacer(Modifier.width(24.dp))
         // While the rail is out the grid cannot take focus, so a rail rebuild never drops focus into a cell.
-        Column(Modifier.fillMaxSize().clipToBounds().focusProperties { canFocus = rail == Rail.NONE }) {
+        Column(Modifier.fillMaxSize().clipToBounds().focusProperties { canFocus = rail == Rail.NONE }.onFocusChanged { gridHasFocus = it.hasFocus }) {
             Row(Modifier.fillMaxWidth().height(HEADER_H)) {
                 Box(Modifier.width(CHANNEL_COL).fillMaxHeight(), contentAlignment = Alignment.CenterStart) {
                     Label(groups.firstOrNull { it.first == groupNow }?.second ?: "All channels", modifier = Modifier.padding(end = 12.dp))

@@ -28,6 +28,7 @@ class SloopyApp : Application(), SingletonImageLoader.Factory {
 
     override fun onCreate() {
         super.onCreate()
+        CrashLog.install(this)
         graph = Graph(this)
     }
 

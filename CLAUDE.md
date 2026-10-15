@@ -69,6 +69,11 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   the alarm receiver, folder handling (SAF tree or the app's own storage). Xtream channels are
   forced to TS; HLS-only URLs refuse with a message. Recordings play through the VOD player as
   `Playing.Vod(kind = "recording")`; the player's data source is DefaultDataSource over OkHttp.
+- 0.3.9: `CrashLog` keeps the last uncaught exception (scrubbed) in files/last_crash.txt and
+  Settings › About shows it under "Last crash" with a Clear button. When a friend reports being
+  "kicked out", ask them to read that section. Guide focus: `focusRow` falls back to any cell of
+  the target row, then `focusGrid()`; a 400 ms watchdog re-focuses the grid if nothing in it has
+  focus while it is the active area.
 - 0.3.7: reminders table (`reminders`, DB v4); `vm.dueReminder` is polled every 15 s and
   `SloopyRoot` shows a prompt over any screen (Watch tunes + goHome). Hidden channels live in
   Prefs like hidden groups. Guide window is 48 h back (catch-up within `archiveDays`); rows only
