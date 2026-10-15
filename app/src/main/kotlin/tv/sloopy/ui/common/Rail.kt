@@ -108,8 +108,8 @@ fun RailItem(
 // ---- The icon strip ---------------------------------------------------------------------------
 
 val STRIP_ITEMS = listOf(
-    "guide" to "Guide", "movies" to "Movies", "series" to "Series", "history" to "History",
-    "recordings" to "Recordings", "search" to "Search", "settings" to "Settings",
+    "guide" to "Guide", "tonight" to "Tonight", "scores" to "Scores", "movies" to "Movies", "series" to "Series",
+    "history" to "History", "recordings" to "Recordings", "search" to "Search", "settings" to "Settings",
 )
 val STRIP_W = 56.dp
 
@@ -201,6 +201,19 @@ fun NavIcon(route: String, color: Color, size: androidx.compose.ui.unit.Dp = 22.
             "recordings" -> {
                 drawCircle(color, radius = w / 2 - sw / 2, style = st)
                 drawCircle(color, radius = w * 0.2f)
+            }
+            "tonight" -> {
+                // A crescent: the circle with a smaller circle cleared from one side.
+                drawCircle(color, radius = w / 2 - sw / 2, style = st)
+                drawLine(color, Offset(w * 0.5f, h * 0.2f), Offset(w * 0.5f, h * 0.8f), sw)
+                drawLine(color, Offset(w * 0.5f, h * 0.5f), Offset(w * 0.78f, h * 0.5f), sw)
+            }
+            "scores" -> {
+                // Two score bars.
+                drawRect(color, Offset(sw / 2, h * 0.18f), Size(w - sw, h * 0.26f), style = st)
+                drawRect(color, Offset(sw / 2, h * 0.56f), Size(w - sw, h * 0.26f), style = st)
+                drawRect(color, Offset(sw / 2, h * 0.18f), Size(w * 0.62f, h * 0.26f))
+                drawRect(color, Offset(sw / 2, h * 0.56f), Size(w * 0.38f, h * 0.26f))
             }
             "search" -> {
                 drawCircle(color, radius = w * 0.3f, center = Offset(w * 0.42f, h * 0.42f), style = st)

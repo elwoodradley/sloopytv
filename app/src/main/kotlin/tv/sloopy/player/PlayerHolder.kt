@@ -50,6 +50,8 @@ class PlayerHolder(context: Context) {
 
     private var retries = 0
     private var currentUrl: String? = null
+    /** Called once the retries are spent: the view model may switch to a copy or diagnose. */
+    var onFailed: ((PlaybackException) -> Unit)? = null
 
     private val appContext = context.applicationContext
     private var bufferMode = "large"
@@ -79,7 +81,7 @@ class PlayerHolder(context: Context) {
             DefaultMediaSourceFactory(appContext)
                 .setDataSourceFactory(
                     // http(s) through OkHttp; content:// and file:// (recordings) through the platform sources.
-                    androidx.media3.datasource.DefaultDataSource.Factory(appContext, OkHttpDataSource.Factory(AndroidHttp.client).setUserAgent(AndroidHttp.USER_AGENT))
+                    RecordTee.Factory(androidx.media3.datasource.DefaultDataSource.Factory(appContext, OkHttpDataSource.Factory(AndroidHttp.client).setUserAgent(AndroidHttp.USER_AGENT)))
                 )
         )
         .setLoadControl(
@@ -134,6 +136,7 @@ class PlayerHolder(context: Context) {
                         return
                     }
                     _state.value = _state.value.copy(error = friendly(error), isPlaying = false, isBuffering = false, reconnecting = false)
+                    onFailed?.invoke(error)
                 }
             })
         }
@@ -184,6 +187,7 @@ class PlayerHolder(context: Context) {
     fun play(url: String, isLive: Boolean, startPositionMs: Long = 0) {
         _state.value = _state.value.copy(frameRate = 0f)
         currentUrl = url
+        RecordTee.playingUrl = if (isLive) url else null
         retries = 0
         _state.value = PlayerState(isLive = isLive, isBuffering = true)
         val item = MediaItem.Builder().setUri(url).apply {

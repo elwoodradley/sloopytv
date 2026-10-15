@@ -28,6 +28,11 @@ export default {
       if (request.method === "GET" && path === "/sync/get") return syncGet(request, env, url);
       if (request.method === "GET" && path === "/config") return json({ ok: true, ...publicConfig((await env.CODES.get("config", "json")) || {}) });
       if (request.method === "POST" && path === "/report") return report(request, env);
+      if (request.method === "GET" && path === "/poster") return poster(request, env, url);
+      if (request.method === "POST" && path === "/friends/me") return friendMe(request, env);
+      if (request.method === "GET" && path === "/friends/list") return friendList(env, url);
+      if (request.method === "POST" && path === "/friends/send") return friendSend(request, env);
+      if (request.method === "GET" && path === "/friends/inbox") return friendInbox(env, url);
       if (path.startsWith("/admin/")) {
         if (!(await authed(request, env))) return json({ ok: false, error: "Wrong password" }, 401);
         if (request.method === "POST" && path === "/admin/mint") return mint(request, env);
@@ -287,6 +292,71 @@ async function listReports(env) {
   } while (cursor);
   out.sort((a, b) => b.at - a.at);
   return json({ ok: true, reports: out.slice(0, 200) });
+}
+
+// ---- posters (one TMDB key for every stick, cached) ------------------------------------------
+
+async function poster(request, env, url) {
+  if (!env.TMDB_TOKEN) return json({ ok: true, url: null });
+  if (await syncLimited(request, env)) return json({ ok: false, error: "Too many requests" }, 429);
+  const title = (url.searchParams.get("title") || "").trim().slice(0, 120);
+  const year = (url.searchParams.get("year") || "").trim().slice(0, 4);
+  const kind = url.searchParams.get("kind") === "movie" ? "movie" : "tv";
+  if (!title) return json({ ok: true, url: null });
+  const key = "p:" + kind + ":" + title.toLowerCase() + ":" + year;
+  const cached = await env.CODES.get(key);
+  if (cached !== null) return json({ ok: true, url: cached || null });
+  const q = new URLSearchParams({ query: title, include_adult: "false", language: "en-US" });
+  if (year) q.set(kind === "movie" ? "year" : "first_air_date_year", year);
+  let found = "";
+  try {
+    const r = await fetch(`https://api.themoviedb.org/3/search/${kind}?` + q.toString(), { headers: { authorization: "Bearer " + env.TMDB_TOKEN, accept: "application/json" } });
+    const j = await r.json();
+    const hit = (j.results || []).find((x) => x.poster_path);
+    if (hit) found = "https://image.tmdb.org/t/p/w342" + hit.poster_path;
+  } catch (e) {}
+  await env.CODES.put(key, found, { expirationTtl: 30 * 24 * 3600 });
+  return json({ ok: true, url: found || null });
+}
+
+// ---- friends: opt-in presence and send-to-TV --------------------------------------------------
+// A friend code identifies a stick. Presence lives three minutes; a sent channel waits a day.
+
+const FRIEND_RE = /^[A-Z2-9]{8}$/;
+
+async function friendMe(request, env) {
+  if (await syncLimited(request, env)) return json({ ok: false }, 429);
+  const b = await request.json().catch(() => null);
+  const id = String(b?.id || "");
+  if (!FRIEND_RE.test(id)) return json({ ok: false, error: "Bad code" }, 400);
+  await env.CODES.put("f:" + id, JSON.stringify({ nick: String(b?.nick || "").slice(0, 24), channel: String(b?.channel || "").slice(0, 60), at: Math.floor(Date.now() / 1000) }), { expirationTtl: 180 });
+  return json({ ok: true });
+}
+
+async function friendList(env, url) {
+  const ids = (url.searchParams.get("ids") || "").split(",").filter((x) => FRIEND_RE.test(x)).slice(0, 50);
+  const out = [];
+  for (const id of ids) { const r = await env.CODES.get("f:" + id, "json"); out.push({ id, nick: r?.nick || "", channel: r?.channel || "", at: r?.at || 0 }); }
+  return json({ ok: true, friends: out });
+}
+
+async function friendSend(request, env) {
+  if (await syncLimited(request, env)) return json({ ok: false }, 429);
+  const b = await request.json().catch(() => null);
+  const to = String(b?.to || ""), from = String(b?.from || "");
+  if (!FRIEND_RE.test(to) || !FRIEND_RE.test(from)) return json({ ok: false, error: "Bad code" }, 400);
+  const msg = { from, nick: String(b?.nick || "").slice(0, 24), channel: String(b?.channel || "").slice(0, 60), key: String(b?.key || "").slice(0, 80), at: Date.now() };
+  await env.CODES.put("m:" + to + ":" + msg.at, JSON.stringify(msg), { expirationTtl: 86400 });
+  return json({ ok: true });
+}
+
+async function friendInbox(env, url) {
+  const id = url.searchParams.get("id") || "";
+  if (!FRIEND_RE.test(id)) return json({ ok: false, error: "Bad code" }, 400);
+  const page = await env.CODES.list({ prefix: "m:" + id + ":" });
+  const out = [];
+  for (const k of page.keys.slice(0, 5)) { const m = await env.CODES.get(k.name, "json"); if (m) out.push(m); await env.CODES.delete(k.name); }
+  return json({ ok: true, messages: out });
 }
 
 // ---- admin page -----------------------------------------------------------------------------

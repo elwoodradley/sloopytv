@@ -19,7 +19,9 @@ import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.serialization.json.contentOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import tv.sloopy.TLog
@@ -87,9 +89,20 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     /** Provider's groups in the viewer's order; groups the order does not mention keep the provider's order after it. */
-    val liveCategories: StateFlow<List<CategoryEntity>> = combine(rawLiveCategories, groupOrder) { cats, order ->
+    @kotlinx.serialization.Serializable
+    data class Profile(val id: String, val name: String, val groups: List<String> = emptyList(), val vodCats: List<String> = emptyList(), val seriesCats: List<String> = emptyList())
+    private val profileJson = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+    val profiles: StateFlow<List<Profile>> = prefs.profiles.map { runCatching { profileJson.decodeFromString(kotlinx.serialization.builtins.ListSerializer(Profile.serializer()), it) }.getOrDefault(emptyList()) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    val activeProfile: StateFlow<Profile?> = combine(profiles, prefs.activeProfile) { list, id -> list.firstOrNull { it.id == id } }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val allLiveCategories: StateFlow<List<CategoryEntity>> = combine(rawLiveCategories, groupOrder) { cats, order ->
         val rank = order.withIndex().associate { (i, id) -> id to i }
         cats.sortedWith(compareBy({ rank[it.id] ?: Int.MAX_VALUE }, { it.sortKey }))
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    /** The groups this profile may see (all of them when no profile is active). */
+    val liveCategories: StateFlow<List<CategoryEntity>> = combine(allLiveCategories, prefs.activeProfile, prefs.profiles) { cats, id, json ->
+        val pr = runCatching { kotlinx.serialization.json.Json { ignoreUnknownKeys = true }.decodeFromString(kotlinx.serialization.builtins.ListSerializer(Profile.serializer()), json) }.getOrDefault(emptyList()).firstOrNull { it.id == id }
+        if (pr == null) cats else cats.filter { it.id in pr.groups }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
     fun moveGroup(id: String, delta: Int) = viewModelScope.launch {
@@ -273,7 +286,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 else -> all.filter { it.categoryId == g }
             }
             if (unlocked) base else base.filter { it.categoryId !in locked }
-        }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+        }.combine(activeProfile) { list, pr -> if (pr == null) list else list.filter { it.categoryId in pr.groups } }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val visibleChannels: StateFlow<List<ChannelEntity>> = combine(visibleBase, channelSort, hiddenGroups, hiddenChannels, collapseDupes) { base, mode, hidden, hiddenCh, _ ->
         val list = collapse(base.filter { (hidden.isEmpty() || it.categoryId !in hidden) && it.id !in hiddenCh })
         when (mode) { "number" -> list.sortedBy { it.number }; "name" -> list.sortedBy { it.name.lowercase() }; else -> list }
@@ -389,6 +403,338 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             }.getOrDefault(false)
         }
         _toast.value = if (ok) "Reported ${tv.sloopy.core.model.Names.clean(c.name)}. Thanks." else "Could not send the report"
+    }
+
+    // ---- Self-healing and diagnosis -------------------------------------------------------------
+    /** Copies already tried for the channel the viewer picked, so a dead cluster does not loop. */
+    private var healTried = HashSet<Long>()
+    private var healTarget: Long? = null
+    private val _diagnosis = MutableStateFlow<tv.sloopy.data.Verdict?>(null)
+    val diagnosis: StateFlow<tv.sloopy.data.Verdict?> = _diagnosis
+    private val _healedFrom = MutableStateFlow<ChannelEntity?>(null)
+    /** The copy that failed, when the one playing is a stand-in for it. */
+    val healedFrom: StateFlow<ChannelEntity?> = _healedFrom
+    init {
+        player.onFailed = { _ -> onStreamFailed() }
+        viewModelScope.launch { currentChannel.collect { c -> if (c != null && c.id != healTarget && dupes.value.byChannel[c.id]?.key != healTarget?.let { dupes.value.byChannel[it]?.key }) { healTried.clear(); healTarget = c.id; _healedFrom.value = null; _diagnosis.value = null } } }
+    }
+    private fun onStreamFailed() {
+        val p = active.value ?: return
+        val c = (playing.value as? Playing.Live)?.channel ?: return
+        healTried.add(c.id)
+        // Strong signal only: a copy in the same cluster (identical stripped name). Never a lookalike.
+        val next = dupes.value.byChannel[c.id]?.members?.firstOrNull { it.id !in healTried }
+        if (next != null) {
+            _healedFrom.value = _healedFrom.value ?: c
+            _toast.value = "Switched to ${tv.sloopy.core.model.Names.clean(next.name)} (backup copy). Hold OK › Copies to change."
+            _playing.value = Playing.Live(next)
+            runCatching { player.play(catalog.liveUrl(p, next), isLive = true) }
+            return
+        }
+        // Nothing to switch to: find out whether it is you or them.
+        viewModelScope.launch {
+            _diagnosis.value = tv.sloopy.data.Verdict("Checking…", "Testing the connection, the provider and two other channels.")
+            val others = visibleChannels.value.ifEmpty { channels.value }
+            _diagnosis.value = runCatching { tv.sloopy.data.Diagnosis.run(p, codeServer.value, c, others) { ch -> runCatching { catalog.liveUrl(p, ch) }.getOrNull() } }
+                .getOrElse { tv.sloopy.data.Verdict("Unclear", TLog.userMessage(it)) }
+        }
+    }
+    fun undoHeal() { val from = _healedFrom.value ?: return; healTried.clear(); _healedFrom.value = null; tune(from) }
+
+    // ---- Phone remote (keyboard + tap to tune) --------------------------------------------------
+    private var remote: tv.sloopy.pair.RemoteServer? = null
+    private val _remoteAddress = MutableStateFlow<String?>(null)
+    val remoteAddress: StateFlow<String?> = _remoteAddress
+    val remoteText = MutableSharedFlow<Pair<String, Boolean>>(extraBufferCapacity = 8)
+    fun ensureRemote() {
+        if (remote != null) return
+        val s = tv.sloopy.pair.RemoteServer.start(getApplication(),
+            channelsJson = {
+                val list = visibleChannels.value.ifEmpty { collapse(channels.value) }
+                buildString { append("{\"channels\":["); list.forEachIndexed { i, c -> if (i > 0) append(','); append("{\"id\":${c.id},\"number\":${c.number},\"name\":${kotlinx.serialization.json.JsonPrimitive(tv.sloopy.core.model.Names.clean(c.name))}}") }; append("]}") }
+            },
+            stateJson = { val c = currentChannel.value; "{\"id\":${c?.id ?: 0},\"now\":${kotlinx.serialization.json.JsonPrimitive(c?.let { tv.sloopy.core.model.Names.clean(it.name) } ?: "")}}" },
+        ) ?: return
+        remote = s; _remoteAddress.value = s.address
+        viewModelScope.launch {
+            s.events.collect { ev ->
+                when (ev) {
+                    is tv.sloopy.pair.RemoteEvent.Type -> remoteText.tryEmit(ev.text to ev.submit)
+                    is tv.sloopy.pair.RemoteEvent.Tune -> channels.value.firstOrNull { it.id == ev.channelId }?.let { tune(it); goHome() }
+                }
+            }
+        }
+    }
+
+    // ---- Season passes ---------------------------------------------------------------------------
+    val seasonPasses: StateFlow<List<String>> = perProvider({ prefs.seasonPasses(it) }, emptyList())
+    val passUnsure: StateFlow<List<String>> = perProvider({ prefs.passUnsure(it) }, emptyList())
+    private val scores = tv.sloopy.core.sports.Scores(tv.sloopy.data.AndroidHttp.core)
+    fun addSeasonPass(team: String) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val t = team.trim(); if (t.isBlank()) return@launch
+        prefs.setSeasonPasses(p.id, (seasonPasses.value + t).distinctBy { it.lowercase() })
+        scanSeasonPasses(); _toast.value = "Season pass: $t. Games are booked as the guide fills in."
+    }
+    fun removeSeasonPass(team: String) = viewModelScope.launch { active.value?.let { prefs.setSeasonPasses(it.id, seasonPasses.value - team) } }
+    fun resolveUnsure(entry: String, book: Boolean) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        prefs.setPassUnsure(p.id, passUnsure.value - entry)
+        if (!book) return@launch
+        val parts = entry.split('|'); if (parts.size < 4) return@launch
+        val c = channels.value.firstOrNull { it.id == parts[0].toLongOrNull() } ?: return@launch
+        scheduleRecording(c, parts[3], parts[1].toLong(), parts[2].toLong())
+    }
+    private val SPORT = Regex("\\b(NFL|FOOTBALL|NCAA|COLLEGE|GAME|VS\\.?|V\\.?|AT|@|BASKETBALL|NBA|HOCKEY|NHL|MLB|BASEBALL)\\b", RegexOption.IGNORE_CASE)
+    /** Books every upcoming game of each pass team the guide and ESPN's schedule agree on. */
+    fun scanSeasonPasses() = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val teams = seasonPasses.value; if (teams.isEmpty()) return@launch
+        val now = System.currentTimeMillis() / 1000
+        val booked = prefs.passBooked(p.id).first().toMutableSet()
+        val unsure = passUnsure.value.toMutableList()
+        val hiddenCh = hiddenChannels.value; val hiddenG = hiddenGroups.value
+        val visible = channels.value.filter { it.id !in hiddenCh && it.categoryId !in hiddenG }
+        val byEpg = visible.filter { it.epgId != null }.groupBy { it.epgId!! }
+        val counts = prefs.watchCounts(p.id).first()
+        for (team in teams) {
+            val progs = runCatching { catalog.searchProgrammes(p.id, team, now) }.getOrDefault(emptyList())
+                .filter { it.startEpoch > now && it.startEpoch < now + 8 * 86_400 && SPORT.containsMatchIn(it.title) }
+            // One booking per kickoff: the copy the viewer watches most, else the best quality.
+            for ((slot, group) in progs.groupBy { it.startEpoch / 900 }) {
+                val key = "$team|$slot"; if (key in booked) continue
+                val cands = group.flatMap { pr -> (byEpg[pr.epgId] ?: emptyList()).map { pr to it } }
+                val (pr, ch) = cands.maxByOrNull { (_, c) -> (counts[c.id] ?: 0) * 10 + tv.sloopy.core.model.Dupes.quality(c.name) } ?: continue
+                val confirmed = runCatching { scheduleAgrees(team, pr.startEpoch) }.getOrNull()
+                val entry = "${ch.id}|${pr.startEpoch}|${pr.stopEpoch}|${pr.title}"
+                when (confirmed) {
+                    true -> { scheduleRecording(ch, pr.title, pr.startEpoch, pr.stopEpoch); booked.add(key) }
+                    else -> if (unsure.none { it == entry }) unsure.add(entry)
+                }
+            }
+        }
+        prefs.setPassBooked(p.id, booked.filter { (it.substringAfterLast('|').toLongOrNull() ?: 0) * 900 > now - 86_400 }.toSet())
+        prefs.setPassUnsure(p.id, unsure.filter { (it.split('|').getOrNull(1)?.toLongOrNull() ?: 0) > now }.take(40))
+    }
+    /** ESPN lists a game for this team starting within half an hour of the guide's time. Null when unreachable. */
+    private suspend fun scheduleAgrees(team: String, startEpoch: Long): Boolean? {
+        val day = java.time.Instant.ofEpochSecond(startEpoch).atZone(java.time.ZoneId.systemDefault()).toLocalDate()
+        val ymd = day.format(java.time.format.DateTimeFormatter.BASIC_ISO_DATE)
+        var any = false
+        for (league in listOf("nfl", "college-football")) {
+            val games = runCatching { scores.games(league, ymd) }.getOrNull() ?: continue
+            any = true
+            val t = team.lowercase()
+            if (games.any { g -> (g.home.lowercase().contains(t) || g.away.lowercase().contains(t) || t.contains(g.homeShort.lowercase()) && t.length <= 4) && kotlin.math.abs(g.startEpoch - startEpoch) < 1800 }) return true
+        }
+        return if (any) false else null
+    }
+    init {
+        viewModelScope.launch { catalog.refresh.collect { if (it is tv.sloopy.data.RefreshState.Done) scanSeasonPasses() } }
+        viewModelScope.launch { while (true) { delay(6 * 3600_000L); scanSeasonPasses() } }
+    }
+
+    // ---- Tonight ---------------------------------------------------------------------------------
+    data class TonightItem(val kind: String, val title: String, val sub: String, val channel: ChannelEntity?, val prog: tv.sloopy.data.db.ProgrammeEntity?, val vodId: Long?, val vodKind: String?, val image: String?, val year: String?, val score: Int)
+    private val _tonight = MutableStateFlow<List<TonightItem>>(emptyList())
+    val tonight: StateFlow<List<TonightItem>> = _tonight
+    val tonightSportsAnywhere: StateFlow<Boolean> = prefs.tonightSportsAnywhere.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val tonightNewOnDemand: StateFlow<Boolean> = prefs.tonightNewOnDemand.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    fun notInterested(title: String) = viewModelScope.launch { prefs.addTonightNotInterested(title); buildTonight() }
+    fun buildTonight() = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val now = System.currentTimeMillis() / 1000
+        val zone = java.time.ZoneId.systemDefault()
+        val today = java.time.Instant.ofEpochSecond(now).atZone(zone).toLocalDate()
+        val from = maxOf(now, today.atTime(18, 0).atZone(zone).toEpochSecond())
+        val to = today.plusDays(1).atTime(0, 30).atZone(zone).toEpochSecond()
+        val no = prefs.tonightNotInterested.first()
+        val counts = prefs.watchCounts(p.id).first()
+        val favs = favouriteIds.value
+        val hiddenCh = hiddenChannels.value; val hiddenG = hiddenGroups.value
+        val all = channels.value.filter { it.id !in hiddenCh && it.categoryId !in hiddenG }
+        // The pool: channels actually watched, favourites, and (optionally) any channel carrying sport.
+        val pool = all.filter { (counts[it.id] ?: 0) > 0 || it.id in favs }.distinctBy { dupes.value.byChannel[it.id]?.key ?: "#${it.id}" }.take(40)
+        val items = ArrayList<TonightItem>()
+        val winStart = guideWindowStart(now)
+        for (c in pool) {
+            val progs = programmesFor(c, winStart).filter { it.stopEpoch > from && it.startEpoch < to && it.startEpoch >= from - 1800 }
+            for (pr in progs.take(3)) {
+                if (pr.title.lowercase() in no) continue
+                val sport = SPORT.containsMatchIn(pr.title) && pr.stopEpoch - pr.startEpoch >= 5400
+                val score = (counts[c.id] ?: 0) * 10 + (if (c.id in favs) 5 else 0) + (if (sport) 8 else 0) + (if (pr.stopEpoch - pr.startEpoch >= 5400) 3 else 0)
+                items.add(TonightItem("live", pr.title, tv.sloopy.core.model.Names.clean(c.name) + " · " + tv.sloopy.ui.common.TimeFmt.hhmm(pr.startEpoch), c, pr, null, null, null, null, score))
+            }
+        }
+        if (tonightSportsAnywhere.value) {
+            val seen = items.map { it.title.lowercase() }.toMutableSet()
+            for (word in listOf("NFL", "College Football", "NBA", "NHL")) {
+                runCatching { catalog.searchProgrammes(p.id, word, now) }.getOrDefault(emptyList()).filter { it.startEpoch in from..to && it.title.lowercase() !in no }.take(6).forEach { pr ->
+                    val c = all.firstOrNull { it.epgId == pr.epgId } ?: return@forEach
+                    if (seen.add(pr.title.lowercase())) items.add(TonightItem("live", pr.title, tv.sloopy.core.model.Names.clean(c.name) + " · " + tv.sloopy.ui.common.TimeFmt.hhmm(pr.startEpoch), c, pr, null, null, null, null, 6))
+                }
+            }
+        }
+        for (r in reminders.value.filter { it.startEpoch in from..to }) items.add(TonightItem("reminder", r.title, "Reminder · " + r.channelName + " · " + tv.sloopy.ui.common.TimeFmt.hhmm(r.startEpoch), all.firstOrNull { it.id == r.channelId }, null, null, null, null, null, 100))
+        if (tonightNewOnDemand.value) {
+            val cutoff = now - 2 * 86_400
+            val mine = favouriteSeriesIds.value
+            runCatching { graph.db.series().recent(p.id, 60) }.getOrDefault(emptyList()).filter { it.id in mine && (it.lastModifiedEpoch ?: 0) > cutoff }.take(4)
+                .forEach { items.add(TonightItem("series", it.name, "New episode · My list", null, null, it.id, "series", it.cover, it.releaseDate?.take(4), 20)) }
+        }
+        _tonight.value = items.sortedByDescending { it.score }.distinctBy { it.kind + it.title.lowercase() }.take(12)
+    }
+    /** Poster art through the code server (one TMDB key, shared cache). Null when none. */
+    private val posterCache = java.util.concurrent.ConcurrentHashMap<String, String>()
+    suspend fun poster(title: String, year: String?, kind: String): String? {
+        val k = "$kind|$title|$year"
+        posterCache[k]?.let { return it.ifEmpty { null } }
+        val server = codeServer.value; if (!server.startsWith("http")) return null
+        val url = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val q = server.trimEnd('/') + "/poster?kind=" + kind + "&title=" + java.net.URLEncoder.encode(title, "UTF-8") + (if (year.isNullOrBlank()) "" else "&year=$year")
+                tv.sloopy.data.AndroidHttp.client.newCall(okhttp3.Request.Builder().url(q).get().build()).execute().use { r ->
+                    val root = kotlinx.serialization.json.Json.parseToJsonElement(r.body?.string() ?: "") as? kotlinx.serialization.json.JsonObject
+                    (root?.get("url") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+                }
+            }.getOrNull()
+        }
+        posterCache[k] = url ?: ""
+        return url
+    }
+
+    // ---- Friends ---------------------------------------------------------------------------------
+    data class Presence(val code: String, val name: String, val channel: String?, val at: Long)
+    val friendCode: StateFlow<String?> = prefs.friendCode.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    val friendNick: StateFlow<String> = prefs.friendNick.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val shareWatching: StateFlow<Boolean> = prefs.shareWatching.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val friends: StateFlow<List<Pair<String, String>>> = prefs.friends.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    private val _presence = MutableStateFlow<List<Presence>>(emptyList())
+    val presence: StateFlow<List<Presence>> = _presence
+    private val _incoming = MutableStateFlow<kotlinx.serialization.json.JsonObject?>(null)
+    val incoming: StateFlow<kotlinx.serialization.json.JsonObject?> = _incoming
+    private suspend fun friendsCall(path: String, body: String?): kotlinx.serialization.json.JsonObject? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+        val server = codeServer.value; if (!server.startsWith("http")) return@withContext null
+        runCatching {
+            val b = okhttp3.Request.Builder().url(server.trimEnd('/') + path)
+            if (body != null) b.post(okhttp3.RequestBody.create("application/json".toMediaTypeOrNull(), body)) else b.get()
+            tv.sloopy.data.AndroidHttp.client.newCall(b.build()).execute().use { r -> kotlinx.serialization.json.Json.parseToJsonElement(r.body?.string() ?: "") as? kotlinx.serialization.json.JsonObject }
+        }.getOrNull()
+    }
+    fun ensureFriendCode() = viewModelScope.launch { if (friendCode.value == null) prefs.setFriendCode(tv.sloopy.sync.SyncClient.newCode()) }
+    fun addFriend(code: String, name: String) = viewModelScope.launch {
+        val c = tv.sloopy.sync.SyncClient.normalise(code); if (c.length != 8) { _toast.value = "A friend code is eight letters and numbers"; return@launch }
+        prefs.setFriends((friends.value.filter { it.first != c } + (c to name.trim().ifBlank { c })))
+        refreshPresence()
+    }
+    fun removeFriend(code: String) = viewModelScope.launch { prefs.setFriends(friends.value.filter { it.first != code }) }
+    fun refreshPresence() = viewModelScope.launch {
+        val list = friends.value; if (list.isEmpty()) { _presence.value = emptyList(); return@launch }
+        val root = friendsCall("/friends/list?ids=" + list.joinToString(",") { it.first }, null) ?: return@launch
+        val arr = root["friends"] as? kotlinx.serialization.json.JsonArray ?: return@launch
+        _presence.value = list.map { (code, name) ->
+            val o = arr.firstOrNull { (it as? kotlinx.serialization.json.JsonObject)?.get("id")?.let { id -> (id as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull } == code } as? kotlinx.serialization.json.JsonObject
+            Presence(code, name, (o?.get("channel") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }, (o?.get("at") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0L)
+        }
+    }
+    fun sendToFriend(code: String, c: ChannelEntity) = viewModelScope.launch {
+        val me = friendCode.value ?: return@launch
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("to", kotlinx.serialization.json.JsonPrimitive(code)); put("from", kotlinx.serialization.json.JsonPrimitive(me)); put("nick", kotlinx.serialization.json.JsonPrimitive(friendNick.value))
+            put("channel", kotlinx.serialization.json.JsonPrimitive(tv.sloopy.core.model.Names.clean(c.name))); put("key", kotlinx.serialization.json.JsonPrimitive(tv.sloopy.core.model.Dupes.key(c.name)))
+        }.toString()
+        _toast.value = if (friendsCall("/friends/send", body)?.get("ok")?.let { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull } == "true") "Sent to ${friends.value.firstOrNull { it.first == code }?.second ?: code}" else "Could not send"
+    }
+    fun joinFriend(p: Presence) {
+        val name = p.channel ?: return
+        val key = tv.sloopy.core.model.Dupes.key(name)
+        val c = channels.value.firstOrNull { tv.sloopy.core.model.Dupes.key(it.name) == key } ?: run { _toast.value = "You do not have $name"; return }
+        tune(dupes.value.byChannel[c.id]?.primary ?: c); goHome()
+    }
+    fun acceptIncoming(watch: Boolean) {
+        val m = _incoming.value; _incoming.value = null
+        if (!watch || m == null) return
+        val key = (m["key"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: return
+        val c = channels.value.firstOrNull { tv.sloopy.core.model.Dupes.key(it.name) == key } ?: run { _toast.value = "You do not have that channel"; return }
+        tune(dupes.value.byChannel[c.id]?.primary ?: c); goHome()
+    }
+    init {
+        viewModelScope.launch {
+            while (true) {
+                delay(45_000)
+                val me = friendCode.value
+                if (me != null && shareWatching.value) {
+                    val c = currentChannel.value?.let { tv.sloopy.core.model.Names.clean(it.name) } ?: ""
+                    friendsCall("/friends/me", kotlinx.serialization.json.buildJsonObject { put("id", kotlinx.serialization.json.JsonPrimitive(me)); put("nick", kotlinx.serialization.json.JsonPrimitive(friendNick.value)); put("channel", kotlinx.serialization.json.JsonPrimitive(c)) }.toString())
+                }
+                if (me != null && friends.value.isNotEmpty()) {
+                    val inbox = friendsCall("/friends/inbox?id=$me", null)
+                    val first = (inbox?.get("messages") as? kotlinx.serialization.json.JsonArray)?.firstOrNull() as? kotlinx.serialization.json.JsonObject
+                    if (first != null && _incoming.value == null) _incoming.value = first
+                    if (friends.value.isNotEmpty()) refreshPresence()
+                }
+            }
+        }
+    }
+
+    // ---- Profiles --------------------------------------------------------------------------------
+    fun saveProfile(pr: Profile) = viewModelScope.launch {
+        val list = profiles.value.filter { it.id != pr.id } + pr
+        prefs.setProfiles(profileJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(Profile.serializer()), list))
+    }
+    fun deleteProfile(id: String) = viewModelScope.launch {
+        prefs.setProfiles(profileJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(Profile.serializer()), profiles.value.filter { it.id != id }))
+        if (prefs.activeProfile.first() == id) prefs.setActiveProfile("")
+    }
+    fun switchProfile(id: String) = viewModelScope.launch { prefs.setActiveProfile(id); selectGroup(Groups.ALL); goHome() }
+    /** Category ids a profile allows for a library kind; null = everything. */
+    fun allowedCats(kind: String): List<String>? = activeProfile.value?.let { if (kind == "vod") it.vodCats else it.seriesCats }
+
+    // ---- Scores ----------------------------------------------------------------------------------
+    data class GameRow(val game: tv.sloopy.core.sports.Game, val channel: ChannelEntity?, val via: String)
+    private val _games = MutableStateFlow<List<GameRow>>(emptyList())
+    val games: StateFlow<List<GameRow>> = _games
+    val networkMap: StateFlow<Map<String, Long>> = perProvider({ prefs.networkMap(it) }, emptyMap())
+    private val gameChannelCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long?, Long>>()
+    fun setNetworkChannel(network: String, c: ChannelEntity?) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val m = networkMap.value.toMutableMap(); if (c == null) m.remove(network) else m[network] = c.id
+        prefs.setNetworkMap(p.id, m); gameChannelCache.clear(); refreshScores()
+    }
+    /** Channels whose name carries the network's word: the picker's candidates. */
+    fun channelsForNetwork(network: String): List<ChannelEntity> {
+        val words = tv.sloopy.core.sports.Scores.NETWORK_WORDS[network] ?: listOf(network)
+        return collapse(channels.value.filter { c -> val k = tv.sloopy.core.model.Dupes.key(c.name); words.any { w -> k == w || k.startsWith("$w ") || k.endsWith(" $w") || k.contains(" $w ") } }).take(30)
+    }
+    fun refreshScores() = viewModelScope.launch {
+        val p = active.value
+        val all = ArrayList<tv.sloopy.core.sports.Game>()
+        for (league in listOf("nfl", "college-football", "nba", "nhl", "mlb")) runCatching { scores.games(league) }.getOrNull()?.let { all.addAll(it) }
+        val now = System.currentTimeMillis() / 1000
+        val visible = all.filter { it.state == "in" || (it.state == "pre" && it.startEpoch < now + 12 * 3600) || (it.state == "post" && it.startEpoch > now - 4 * 3600) }
+            .sortedWith(compareBy({ when (it.state) { "in" -> 0; "pre" -> 1; else -> 2 } }, { !it.redZone }, { it.startEpoch }))
+        val rows = visible.map { g -> val (ch, via) = if (p == null) null to "" else resolveGameChannel(p, g, now); GameRow(g, ch, via) }
+        _games.value = rows
+    }
+    private suspend fun resolveGameChannel(p: tv.sloopy.data.ProviderRecord, g: tv.sloopy.core.sports.Game, now: Long): Pair<ChannelEntity?, String> {
+        gameChannelCache[g.id]?.let { (id, at) -> if (now - at < 600) return channels.value.firstOrNull { it.id == id } to "cached" }
+        val hiddenCh = hiddenChannels.value; val hiddenG = hiddenGroups.value
+        val live = channels.value.filter { it.id !in hiddenCh && it.categoryId !in hiddenG }
+        val byEpg = live.filter { it.epgId != null }.groupBy { it.epgId!! }
+        fun last(n: String) = n.trim().substringAfterLast(' ').lowercase()
+        // 1. The guide names the game on a channel airing now.
+        val hits = runCatching { catalog.searchProgrammes(p.id, last(g.home), now - 4 * 3600) }.getOrDefault(emptyList())
+            .filter { pr -> val t = pr.title.lowercase(); t.contains(last(g.away)) && kotlin.math.abs(pr.startEpoch - g.startEpoch) < 5400 }
+        val fromGuide = hits.flatMap { byEpg[it.epgId] ?: emptyList() }.maxByOrNull { tv.sloopy.core.model.Dupes.quality(it.name) }
+        if (fromGuide != null) { gameChannelCache[g.id] = fromGuide.id to now; return (dupes.value.byChannel[fromGuide.id]?.primary ?: fromGuide) to "guide" }
+        // 2. The viewer's network map, else a confident guess from the channel names.
+        for (net in g.networks) {
+            networkMap.value[net]?.let { id -> live.firstOrNull { it.id == id }?.let { gameChannelCache[g.id] = it.id to now; return it to net } }
+            val guess = channelsForNetwork(net).let { c -> c.firstOrNull { it.categoryId?.let { g -> liveCategories.value.firstOrNull { it.id == g }?.name?.uppercase()?.contains("US") == true } == true } ?: c.firstOrNull() }
+            if (guess != null) { gameChannelCache[g.id] = guess.id to now; return guess to "$net?" }
+        }
+        gameChannelCache[g.id] = null to now
+        return null to ""
     }
 
     // ---- Recordings ------------------------------------------------------------------------------
@@ -713,7 +1059,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun tune(c: ChannelEntity) {
         val p = active.value ?: return
-        viewModelScope.launch { prefs.setLastChannel(p.id, c.id); prefs.pushRecent(p.id, c.id) }
+        viewModelScope.launch { prefs.setLastChannel(p.id, c.id); prefs.pushRecent(p.id, c.id); prefs.bumpWatch(p.id, c.id) }
         if (useVlc() && runCatching { openInVlc(catalog.liveUrl(p, c), c.name) }.getOrDefault(false)) return
         _playing.value = Playing.Live(c)
         try {
@@ -830,6 +1176,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     fun relock() { unlockedSessionState.value = false }
 
     override fun onCleared() {
+        runCatching { remote?.stop() }
         player.release()
     }
 

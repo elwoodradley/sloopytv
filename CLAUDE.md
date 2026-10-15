@@ -69,6 +69,24 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   the alarm receiver, folder handling (SAF tree or the app's own storage). Xtream channels are
   forced to TS; HLS-only URLs refuse with a message. Recordings play through the VOD player as
   `Playing.Vod(kind = "recording")`; the player's data source is DefaultDataSource over OkHttp.
+- 0.5.0 (2026-10-15), the big batch. Self-healing: `PlayerHolder.onFailed` → `vm.onStreamFailed`
+  switches to the next untried copy in the same Dupes cluster only (toast + "BACKUP COPY" line,
+  undo via overlay "Original copy"); when none, `data/Diagnosis.run` tests internet, the Xtream
+  login (status, active vs max connections → "streaming on another device"), and two other
+  channels, and the live banner shows the verdict. Recording the watched channel tees the
+  player's own stream (`player/RecordTee`, a DataSource.Factory wrapper); the service falls back
+  to a direct download if the viewer tunes away. Season passes: `scanSeasonPasses` books guide
+  matches only when ESPN's scoreboard (`core/sports/Scores`, tested) agrees on kickoff, else
+  "Needs a look" in Settings › Recordings. Phone remote: `pair/RemoteServer` (ports 8781+, token
+  in the QR fragment, started by `vm.ensureRemote()` at root) types into Search and taps to
+  tune. Profiles: allow-list of live groups in Prefs JSON, PIN to leave, Settings collapses to
+  the Profile page while one is active (movie/series category allow-lists not wired yet).
+  Tonight: `buildTonight` from watch counts + favourites + reminders (+ optional sport anywhere,
+  new episodes), cap 12, hold → Not interested; posters via the code server `/poster` (TMDB
+  token is a Worker secret `TMDB_TOKEN`). Friends: opt-in presence (`/friends/me`, 3-minute
+  TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
+  Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
+  viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
 - 0.4.2 (2026-10-15): duplicate engine. `core/model/Dupes.kt` (tested) gives a cluster key from
   the stripped name; identical keys = copies, never "starts with". `vm.dupes` clusters the
   channel list (viewer merges join clusters, splits break them, a preferred copy wins, else best

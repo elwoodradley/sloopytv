@@ -62,7 +62,9 @@ fun InfoOverlay(
     onClose: () -> Unit,
     go: (String) -> Unit,
     openChannels: () -> Unit,
+    openCopies: () -> Unit = {},
 ) {
+    var sendTo by remember { mutableStateOf(false) }
     val recents by vm.recentChannels.collectAsState()
     val favourites by vm.favouriteIds.collectAsState()
     val strip = remember(recents, channel.id) { recents.filter { it.id != channel.id }.take(10) }
@@ -113,6 +115,10 @@ fun InfoOverlay(
                     }
                 }
             }
+            if (sendTo) {
+                val fl by vm.friends.collectAsState()
+                tv.sloopy.ui.common.ChoicePrompt("SEND TO", fl.map { it.first to it.second } + ("no" to "Not now"), onCancel = { sendTo = false }, onPick = { k -> if (k != "no") vm.sendToFriend(k, channel); sendTo = false })
+            }
             Row(Modifier.padding(start = 72.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
                 val fav = channel.id in favourites
                 SloopyButton(if (fav) "Remove favourite" else "Add favourite", onClick = { vm.toggleFavourite(channel); idle++ }, modifier = if (strip.isEmpty()) Modifier.focusRequester(first) else Modifier)
@@ -123,6 +129,11 @@ fun InfoOverlay(
                 Spacer(Modifier.width(8.dp))
                 SloopyButton("Channels", onClick = { onClose(); openChannels() })
                 Spacer(Modifier.width(8.dp))
+                val friends by vm.friends.collectAsState()
+                val healed by vm.healedFrom.collectAsState()
+                if (healed != null) { SloopyButton("Original copy", onClick = { vm.undoHeal(); onClose() }); Spacer(Modifier.width(8.dp)) }
+                if (vm.clusterOf(channel) != null) { SloopyButton("Copies", onClick = { onClose(); openCopies() }); Spacer(Modifier.width(8.dp)) }
+                if (friends.isNotEmpty()) { SloopyButton("Send to friend", onClick = { sendTo = true }); Spacer(Modifier.width(8.dp)) }
                 SloopyButton("Guide", onClick = { onClose(); go("guide") })
                 Spacer(Modifier.width(8.dp))
                 SloopyButton("Menu", onClick = { onClose(); vm.guideOpensAtSections = true; go("guide") })

@@ -97,7 +97,8 @@ fun LibraryScreen(vm: SloopyViewModel, kind: String, go: (String) -> Unit, onBac
 
     val categories by produceState<List<CategoryEntity>>(emptyList(), provider?.id, kind) {
         val p = provider ?: return@produceState
-        value = vm.graph.db.categories().byKindOnce(p.id, kind)
+        val allowed = vm.allowedCats(kind)
+        value = vm.graph.db.categories().byKindOnce(p.id, kind).let { list -> if (allowed == null) list else list.filter { it.id in allowed } }
     }
     val progress by produceState<List<ProgressEntity>>(emptyList(), provider?.id) {
         val p = provider ?: return@produceState

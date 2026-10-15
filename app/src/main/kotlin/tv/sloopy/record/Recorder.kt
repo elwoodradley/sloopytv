@@ -156,7 +156,20 @@ class RecordService : Service() {
             uri = u
             dao.upsert(r.copy(status = "recording", uri = u.toString()))
             out.use { sink ->
-                AndroidHttp.client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
+                // Watching this channel already? Ride the player's stream instead of opening a second
+                // connection (one-stream accounts). Falls through to a direct download if the viewer
+                // tunes away before the end.
+                if (tv.sloopy.player.RecordTee.playingUrl == url && !tv.sloopy.player.RecordTee.active) {
+                    tv.sloopy.player.RecordTee.attach(id, sink, r.stopEpoch)
+                    try {
+                        while (System.currentTimeMillis() / 1000 < r.stopEpoch && tv.sloopy.player.RecordTee.playingUrl == url) {
+                            kotlinx.coroutines.delay(5_000)
+                            bytes = tv.sloopy.player.RecordTee.bytes
+                            dao.upsert(r.copy(status = "recording", uri = u.toString(), bytes = bytes))
+                        }
+                    } finally { bytes = tv.sloopy.player.RecordTee.detach() }
+                }
+                if (System.currentTimeMillis() / 1000 < r.stopEpoch) AndroidHttp.client.newCall(Request.Builder().url(url).build()).execute().use { resp ->
                     if (!resp.isSuccessful) throw java.io.IOException("The provider answered HTTP ${resp.code}")
                     val input = resp.body?.byteStream() ?: throw java.io.IOException("Empty stream")
                     val buf = ByteArray(256 * 1024)

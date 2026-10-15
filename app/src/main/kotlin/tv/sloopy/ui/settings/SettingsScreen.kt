@@ -103,9 +103,12 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
             Spacer(Modifier.width(16.dp))
             Column(Modifier.width(RAIL_W).fillMaxHeight().onFocusChanged { if (it.hasFocus) inRail = true }) {
                 RailHeader("Settings")
-                SECTIONS.forEachIndexed { i, (key, name) ->
+                val activeProfile by vm.activeProfile.collectAsState()
+                val sections = if (activeProfile != null) KID_SECTIONS else SECTIONS
+                LaunchedEffect(activeProfile) { if (activeProfile != null) section = "parental" }
+                sections.forEachIndexed { i, (key, name) ->
                     Box(Modifier.onFocusChanged { if (it.isFocused) section = key }) {
-                        RailItem(name, selected = key == section, requester = if (key == section) railFocus else null, first = i == 0, last = i == SECTIONS.lastIndex, leftTarget = stripFocus) { scope.launch { focusContent() } }
+                        RailItem(name, selected = key == section, requester = if (key == section) railFocus else null, first = i == 0, last = i == sections.lastIndex, leftTarget = stripFocus) { scope.launch { focusContent() } }
                     }
                 }
             }
@@ -238,6 +241,10 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                         SettingRow("Match the TV's refresh rate to the stream", if (frm) "ON" else "OFF") { scope.launch { vm.prefs.setFrameRateMatch(!frm) } }
                         Text("Stops the judder on 50 fps channels when the TV runs at 60. The picture goes black for a moment when the rate changes.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 4.dp, bottom = 10.dp).width(760.dp))
                         SettingRow("Tube power-on at launch", if (intro) "ON" else "OFF") { scope.launch { vm.prefs.setIntroEnabled(!intro) } }
+                        val tSport by vm.tonightSportsAnywhere.collectAsState()
+                        val tVod by vm.tonightNewOnDemand.collectAsState()
+                        SettingRow("Tonight: include sport on any channel", if (tSport) "ON" else "OFF") { scope.launch { vm.prefs.setTonightSportsAnywhere(!tSport) } }
+                        SettingRow("Tonight: include new episodes on demand", if (tVod) "ON" else "OFF") { scope.launch { vm.prefs.setTonightNewOnDemand(!tVod) } }
                         SettingRow("Channel badge stays for", "$osd S") { scope.launch { vm.prefs.setOsdSeconds(if (osd >= 8) 2 else osd + 1) } }
                     }
                     "recordings" -> {
@@ -255,9 +262,127 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                             SloopyButton("Choose a folder or USB drive", primary = true, onClick = { runCatching { pick.launch(null) }.onFailure { vm.toast("This box has no folder picker") } })
                             if (folder != null) { Spacer(Modifier.width(8.dp)); SloopyButton("Use this stick's storage", onClick = { vm.setRecordFolder(null) }) }
                         }
-                        Text("A recording uses one of your provider's connections while it runs, the same as watching. Recordings are plain .ts files; any player opens them.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 16.dp).width(760.dp))
+                        Text("Recording the channel you are watching rides the same stream, so it costs no second connection. Recording another channel while you watch needs a second connection on your account.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 16.dp).width(760.dp))
+                        Section("Season passes")
+                        val passes by vm.seasonPasses.collectAsState()
+                        val unsure by vm.passUnsure.collectAsState()
+                        var team by remember { mutableStateOf("") }
+                        Text("Every game of a team, booked from the guide only when ESPN's schedule agrees on the kickoff. Anything it is not sure about waits below for you.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.width(760.dp))
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Box(Modifier.width(420.dp)) { Field("Team", team, { team = it }, placeholder = "Bengals") }
+                            Spacer(Modifier.width(12.dp))
+                            SloopyButton("Add season pass", primary = true, enabled = team.isNotBlank(), modifier = Modifier.padding(bottom = 2.dp), onClick = { vm.addSeasonPass(team); team = "" })
+                        }
+                        passes.forEach { t -> SettingRow(t, "REMOVE") { vm.removeSeasonPass(t) } }
+                        if (unsure.isNotEmpty()) {
+                            Section("Needs a look · ${unsure.size}")
+                            unsure.take(12).forEach { e ->
+                                val parts = e.split('|')
+                                Column {
+                                    Row(Modifier.fillMaxWidth().height(50.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text((parts.getOrNull(3) ?: e) + "  ·  " + (parts.getOrNull(1)?.toLongOrNull()?.let { tv.sloopy.ui.common.TimeFmt.dateTime(it * 1000) } ?: ""), style = Sloopy.listName, modifier = Modifier.width(620.dp), maxLines = 1, overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis)
+                                        SloopyButton("Record", onClick = { vm.resolveUnsure(e, true) })
+                                        Spacer(Modifier.width(8.dp))
+                                        SloopyButton("Skip", onClick = { vm.resolveUnsure(e, false) })
+                                    }
+                                    Hairline(color = Sloopy.hair2)
+                                }
+                            }
+                        }
+                    }
+                    "friends" -> {
+                        Section("Friends")
+                        LaunchedEffect(Unit) { vm.ensureFriendCode(); vm.refreshPresence() }
+                        val code by vm.friendCode.collectAsState()
+                        val nick by vm.friendNick.collectAsState()
+                        val share by vm.shareWatching.collectAsState()
+                        val fl by vm.friends.collectAsState()
+                        val pres by vm.presence.collectAsState()
+                        var nickEdit by remember(nick) { mutableStateOf(nick) }
+                        var addCode by remember { mutableStateOf("") }
+                        var addName by remember { mutableStateOf("") }
+                        Text("Off by default. Turn sharing on and friends who have your code see which channel you are on; OK on a friend joins them. Hold OK on the picture › Send to friend puts a channel on their TV.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.width(760.dp))
+                        Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Label("Your friend code"); Spacer(Modifier.width(16.dp))
+                            Text(code?.let { tv.sloopy.sync.SyncClient.pretty(it) } ?: "…", style = Sloopy.titleRow.copy(fontFamily = Sloopy.mono))
+                        }
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Box(Modifier.width(360.dp)) { Field("Your name, as friends see it", nickEdit, { nickEdit = it }, placeholder = "Luke") }
+                            Spacer(Modifier.width(12.dp))
+                            SloopyButton("Save", modifier = Modifier.padding(bottom = 2.dp), onClick = { scope.launch { vm.prefs.setFriendNick(nickEdit) } })
+                        }
+                        SettingRow("Share what I am watching", if (share) "ON" else "OFF") { scope.launch { vm.prefs.setShareWatching(!share) } }
+                        Section("Add a friend")
+                        Row(verticalAlignment = Alignment.Bottom) {
+                            Box(Modifier.width(260.dp)) { Field("Their code", addCode, { addCode = it.uppercase() }, mono = true, placeholder = "XXXX-XXXX") }
+                            Spacer(Modifier.width(12.dp))
+                            Box(Modifier.width(260.dp)) { Field("Name", addName, { addName = it }, placeholder = "Mike") }
+                            Spacer(Modifier.width(12.dp))
+                            SloopyButton("Add", primary = true, enabled = tv.sloopy.sync.SyncClient.normalise(addCode).length == 8, modifier = Modifier.padding(bottom = 2.dp), onClick = { vm.addFriend(addCode, addName); addCode = ""; addName = "" })
+                        }
+                        if (fl.isNotEmpty()) {
+                            Section("Friends · ${fl.size}")
+                            fl.forEach { (c, n) ->
+                                val p = pres.firstOrNull { it.code == c }
+                                val fresh = p != null && System.currentTimeMillis() / 1000 - p.at < 180 && p.channel != null
+                                Column {
+                                    Row(Modifier.fillMaxWidth().height(56.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Column(Modifier.width(520.dp)) {
+                                            Text(n, style = Sloopy.listName)
+                                            Text(if (fresh) "Watching " + p!!.channel else "Not sharing right now", style = Sloopy.listSub.copy(color = if (fresh) Sloopy.amber else Sloopy.muted))
+                                        }
+                                        if (fresh) { SloopyButton("Join", onClick = { vm.joinFriend(p!!) }); Spacer(Modifier.width(8.dp)) }
+                                        SloopyButton("Remove", onClick = { vm.removeFriend(c) })
+                                    }
+                                    Hairline(color = Sloopy.hair2)
+                                }
+                            }
+                        }
                     }
                     "parental" -> {
+                        Section("Profiles")
+                        val profs by vm.profiles.collectAsState()
+                        val activeP by vm.activeProfile.collectAsState()
+                        val allCats by vm.allLiveCategories.collectAsState()
+                        var editing by remember { mutableStateOf<SloopyViewModel.Profile?>(null) }
+                        var pinAsk by remember { mutableStateOf(false) }
+                        var pinText by remember { mutableStateOf("") }
+                        if (activeP != null) {
+                            Text("On the ${activeP!!.name} profile. Only its groups and categories show anywhere in the app.", style = Sloopy.body, modifier = Modifier.width(760.dp))
+                            Row(Modifier.padding(top = 14.dp)) { SloopyButton("Leave this profile", primary = true, onClick = { if (hasPin) pinAsk = true else vm.switchProfile("") }) }
+                            if (pinAsk) {
+                                Field("PIN", pinText, { pinText = it.filter { ch -> ch.isDigit() }.take(6) }, mono = true, password = true, keyboard = androidx.compose.ui.text.input.KeyboardType.NumberPassword)
+                                Row(Modifier.padding(top = 10.dp)) { SloopyButton("Unlock", primary = true, enabled = pinText.length >= 4, onClick = { scope.launch { if (vm.checkPin(pinText)) { pinAsk = false; pinText = ""; vm.switchProfile("") } else { vm.toast("Wrong PIN"); pinText = "" } } }) }
+                            }
+                        } else {
+                            Text("A profile sees only the groups and categories you tick. Leaving it needs the PIN, so a kids profile stays a kids profile.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.width(760.dp))
+                            if (!hasPin) Text("Set a PIN below first, or anyone can leave the profile.", style = Sloopy.body.copy(color = Sloopy.amber), modifier = Modifier.padding(top = 6.dp))
+                            profs.forEach { pr ->
+                                Column {
+                                    Row(Modifier.fillMaxWidth().height(50.dp), verticalAlignment = Alignment.CenterVertically) {
+                                        Text(pr.name + "  ·  ${pr.groups.size} groups", style = Sloopy.listName, modifier = Modifier.width(520.dp))
+                                        SloopyButton("Switch to", primary = true, onClick = { vm.switchProfile(pr.id) }); Spacer(Modifier.width(8.dp))
+                                        SloopyButton("Edit", onClick = { editing = pr }); Spacer(Modifier.width(8.dp))
+                                        SloopyButton("Delete", onClick = { vm.deleteProfile(pr.id) })
+                                    }
+                                    Hairline(color = Sloopy.hair2)
+                                }
+                            }
+                            Row(Modifier.padding(top = 12.dp)) { SloopyButton("New profile", onClick = { editing = SloopyViewModel.Profile(java.util.UUID.randomUUID().toString().take(8), "Kids") }) }
+                            editing?.let { pr ->
+                                var name by remember(pr.id) { mutableStateOf(pr.name) }
+                                var groups by remember(pr.id) { mutableStateOf(pr.groups.toSet()) }
+                                Section("Editing ${pr.name}")
+                                Box(Modifier.width(420.dp)) { Field("Name", name, { name = it }) }
+                                Label("Groups this profile may watch", modifier = Modifier.padding(top = 16.dp, bottom = 6.dp))
+                                allCats.forEach { c -> SettingRow(tv.sloopy.core.model.Names.clean(c.name), if (c.id in groups) "ALLOWED" else "OFF") { groups = if (c.id in groups) groups - c.id else groups + c.id } }
+                                Row(Modifier.padding(top = 14.dp)) {
+                                    SloopyButton("Save profile", primary = true, enabled = name.isNotBlank() && groups.isNotEmpty(), onClick = { vm.saveProfile(pr.copy(name = name.trim(), groups = groups.toList())); editing = null })
+                                    Spacer(Modifier.width(8.dp)); SloopyButton("Cancel", onClick = { editing = null })
+                                }
+                                Text("Movies and series: this profile sees none until you allow categories in a later update; the guide and channel list follow the groups above.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 10.dp).width(760.dp))
+                            }
+                        }
                         Section("Parental")
                         if (!hasPin) {
                             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -387,7 +512,8 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
     }
 }
 
-private val SECTIONS = listOf("providers" to "Providers", "listings" to "Listings", "picture" to "Picture", "recordings" to "Recordings", "parental" to "Parental", "transfer" to "Transfer", "about" to "About")
+private val SECTIONS = listOf("providers" to "Providers", "listings" to "Listings", "picture" to "Picture", "recordings" to "Recordings", "friends" to "Friends", "parental" to "Parental", "transfer" to "Transfer", "about" to "About")
+private val KID_SECTIONS = listOf("parental" to "Profile")
 
 @Composable
 private fun Section(title: String) {

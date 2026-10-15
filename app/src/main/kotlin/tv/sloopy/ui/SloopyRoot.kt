@@ -51,7 +51,9 @@ fun SloopyRoot(vm: SloopyViewModel, onQuit: () -> Unit) {
     val locked by vm.locked.collectAsState()
     val due by vm.dueReminder.collectAsState()
     val announcement by vm.announcement.collectAsState()
-    LaunchedEffect(announcement, due) { vm.modalUp = announcement != null || due != null }
+    val incoming by vm.incoming.collectAsState()
+    LaunchedEffect(Unit) { vm.ensureRemote() }
+    LaunchedEffect(announcement, due, incoming) { vm.modalUp = announcement != null || due != null || incoming != null }
     val operator by vm.operatorName.collectAsState()
     // The maker's mark rides the power-on and leaves once the picture is up.
     var brand by remember { mutableStateOf(introEnabled) }
@@ -69,6 +71,11 @@ fun SloopyRoot(vm: SloopyViewModel, onQuit: () -> Unit) {
                     listOf("ok" to a.announcementText.take(120)),
                     onCancel = { vm.dismissAnnouncement() }, onPick = { vm.dismissAnnouncement() },
                 )
+            }
+            incoming?.let { m ->
+                val who = (m["nick"] as? kotlinx.serialization.json.JsonPrimitive)?.content?.ifBlank { null } ?: "A friend"
+                val ch = (m["channel"] as? kotlinx.serialization.json.JsonPrimitive)?.content ?: ""
+                tv.sloopy.ui.common.ChoicePrompt("$who SAYS WATCH".uppercase(), listOf("watch" to "Watch ${ch.take(30)}", "no" to "Not now"), onCancel = { vm.acceptIncoming(false) }, onPick = { vm.acceptIncoming(it == "watch") })
             }
             due?.let { r ->
                 tv.sloopy.ui.common.ChoicePrompt(
@@ -124,6 +131,8 @@ private fun SloopyNav(vm: SloopyViewModel, startAtProviders: Boolean, onQuit: ()
             LiveScreen(vm, go = go, onQuit = onQuit, onBack = { if (nav.previousBackStackEntry?.destination?.route == "search") nav.popBackStack() else go("guide") })
         }
         composable("guide") { GuideScreen(vm, go = go, onQuit = onQuit) }
+        composable("tonight") { tv.sloopy.ui.tonight.TonightScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onOpen = { kind, id -> nav.navigate("details/$kind/$id") }) }
+        composable("scores") { tv.sloopy.ui.scores.ScoresScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }) }
         composable("recordings") { tv.sloopy.ui.record.RecordingsScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onPlay = { nav.navigate("vodplayer") }) }
         composable("history") { HistoryScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onPlay = { nav.navigate("vodplayer") }) }
         composable("movies") { LibraryScreen(vm, kind = "vod", go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onOpen = { id -> nav.navigate("details/vod/$id") }) }

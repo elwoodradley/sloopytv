@@ -80,6 +80,8 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
     val field = remember { FocusRequester() }
     BackHandler { onBack() }
     LaunchedEffect(Unit) { runCatching { field.requestFocus() } }
+    val remoteAddress by vm.remoteAddress.collectAsState()
+    LaunchedEffect(Unit) { vm.remoteText.collect { (text, _) -> q = text } }
 
     // The app's own microphone: the TV keyboard's one stops at the first pause. This one waits
     // two and a half seconds of silence, long enough for a whole title.
@@ -136,7 +138,12 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
                 SloopyButton("Speak", onClick = { startSpeaking() }, modifier = Modifier.padding(bottom = 2.dp))
                 if (history.isNotEmpty()) { Spacer(Modifier.width(8.dp)); SloopyButton("Clear recent", onClick = { scope.launch { vm.prefs.clearSearchHistory() } }, modifier = Modifier.padding(bottom = 2.dp)) }
             }
-            Spacer(Modifier.height(20.dp))
+            if (remoteAddress != null) Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                Box(Modifier.background(Color.White).padding(4.dp)) { tv.sloopy.ui.common.QrCode(remoteAddress!!, 64.dp) }
+                Spacer(Modifier.width(12.dp))
+                Text("Type on your phone: scan with the camera. Same Wi-Fi. You can also tap a channel there to tune.", style = Sloopy.label.copy(color = Sloopy.dim), modifier = Modifier.width(520.dp))
+            }
+            Spacer(Modifier.height(12.dp))
             if (q.trim().length >= 2 && hits.isEmpty()) Text("Nothing on.", style = Sloopy.bodyBig)
             if (hits.isNotEmpty()) Text("Hold OK on a channel, movie or series to add it to favourites and keep going. Hold OK on a programme to record it.", style = Sloopy.label.copy(color = Sloopy.dim), modifier = Modifier.padding(bottom = 8.dp))
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 40.dp)) {

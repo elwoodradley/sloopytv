@@ -84,6 +84,53 @@ class Prefs(private val context: Context) {
     val seenAnnouncement: Flow<String> = ds.data.map { it[stringPreferencesKey("seen_announcement")] ?: "" }
     suspend fun setSeenAnnouncement(v: String) = ds.edit { it[stringPreferencesKey("seen_announcement")] = v }
 
+    // Season passes: team names per provider; booked keys and "needs a look" candidates.
+    private fun passKey(providerId: String, what: String) = stringPreferencesKey("pass_${what}_$providerId")
+    fun seasonPasses(providerId: String): Flow<List<String>> = ds.data.map { p -> p[passKey(providerId, "teams")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
+    suspend fun setSeasonPasses(providerId: String, teams: List<String>) = ds.edit { it[passKey(providerId, "teams")] = teams.joinToString("\u0001") }
+    fun passBooked(providerId: String): Flow<Set<String>> = ds.data.map { p -> p[passKey(providerId, "booked")]?.split('\u0001')?.filter { it.isNotBlank() }?.toSet() ?: emptySet() }
+    suspend fun setPassBooked(providerId: String, keys: Set<String>) = ds.edit { it[passKey(providerId, "booked")] = keys.joinToString("\u0001") }
+    /** "channelId|startEpoch|title" entries the scan was unsure about. */
+    fun passUnsure(providerId: String): Flow<List<String>> = ds.data.map { p -> p[passKey(providerId, "unsure")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
+    suspend fun setPassUnsure(providerId: String, items: List<String>) = ds.edit { it[passKey(providerId, "unsure")] = items.joinToString("\u0001") }
+
+    /** channelId -> times tuned, for the Tonight screen's idea of what you actually watch. */
+    private fun watchKey(providerId: String) = stringPreferencesKey("watch_counts_$providerId")
+    fun watchCounts(providerId: String): Flow<Map<Long, Int>> = ds.data.map { p -> p[watchKey(providerId)]?.split(',')?.mapNotNull { e -> val i = e.indexOf('='); if (i < 0) null else e.substring(0, i).toLongOrNull()?.let { id -> e.substring(i + 1).toIntOrNull()?.let { id to it } } }?.toMap() ?: emptyMap() }
+    suspend fun bumpWatch(providerId: String, channelId: Long) = ds.edit { p ->
+        val cur = p[watchKey(providerId)]?.split(',')?.mapNotNull { e -> val i = e.indexOf('='); if (i < 0) null else e.substring(0, i).toLongOrNull()?.let { id -> e.substring(i + 1).toIntOrNull()?.let { id to it } } }?.toMap()?.toMutableMap() ?: mutableMapOf()
+        cur[channelId] = (cur[channelId] ?: 0) + 1
+        p[watchKey(providerId)] = cur.entries.sortedByDescending { it.value }.take(200).joinToString(",") { "${it.key}=${it.value}" }
+    }
+    val tonightNotInterested: Flow<Set<String>> = ds.data.map { p -> p[stringPreferencesKey("tonight_no")]?.split('\u0001')?.filter { it.isNotBlank() }?.toSet() ?: emptySet() }
+    suspend fun addTonightNotInterested(title: String) = ds.edit { p -> val cur = p[stringPreferencesKey("tonight_no")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList(); p[stringPreferencesKey("tonight_no")] = (cur + title.lowercase()).takeLast(300).joinToString("\u0001") }
+    val tonightSportsAnywhere: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("tonight_sports")] ?: false }
+    suspend fun setTonightSportsAnywhere(v: Boolean) = ds.edit { it[booleanPreferencesKey("tonight_sports")] = v }
+    val tonightNewOnDemand: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("tonight_vod")] ?: false }
+    suspend fun setTonightNewOnDemand(v: Boolean) = ds.edit { it[booleanPreferencesKey("tonight_vod")] = v }
+
+    /** Scores: network word (CBS, FOX…) -> channel id the viewer confirmed. */
+    private fun netKey(providerId: String) = stringPreferencesKey("network_map_$providerId")
+    fun networkMap(providerId: String): Flow<Map<String, Long>> = ds.data.map { p -> p[netKey(providerId)]?.split('\u0001')?.mapNotNull { e -> val i = e.lastIndexOf('='); if (i < 0) null else e.substring(i + 1).toLongOrNull()?.let { e.substring(0, i) to it } }?.toMap() ?: emptyMap() }
+    suspend fun setNetworkMap(providerId: String, m: Map<String, Long>) = ds.edit { it[netKey(providerId)] = m.entries.joinToString("\u0001") { "${it.key}=${it.value}" } }
+
+    // Friends: opt-in presence and send-to-TV through the code server.
+    val friendCode: Flow<String?> = ds.data.map { it[stringPreferencesKey("friend_code")] }
+    suspend fun setFriendCode(v: String?) = ds.edit { if (v == null) it.remove(stringPreferencesKey("friend_code")) else it[stringPreferencesKey("friend_code")] = v }
+    val friendNick: Flow<String> = ds.data.map { it[stringPreferencesKey("friend_nick")] ?: "" }
+    suspend fun setFriendNick(v: String) = ds.edit { it[stringPreferencesKey("friend_nick")] = v.trim().take(24) }
+    val shareWatching: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("share_watching")] ?: false }
+    suspend fun setShareWatching(v: Boolean) = ds.edit { it[booleanPreferencesKey("share_watching")] = v }
+    /** "code=name" entries. */
+    val friends: Flow<List<Pair<String, String>>> = ds.data.map { p -> p[stringPreferencesKey("friends")]?.split('\u0001')?.mapNotNull { e -> val i = e.indexOf('='); if (i < 0) null else e.substring(0, i) to e.substring(i + 1) } ?: emptyList() }
+    suspend fun setFriends(list: List<Pair<String, String>>) = ds.edit { it[stringPreferencesKey("friends")] = list.joinToString("\u0001") { "${it.first}=${it.second}" } }
+
+    // Profiles: JSON list; the active one; empty = everything.
+    val profiles: Flow<String> = ds.data.map { it[stringPreferencesKey("profiles")] ?: "[]" }
+    suspend fun setProfiles(json: String) = ds.edit { it[stringPreferencesKey("profiles")] = json }
+    val activeProfile: Flow<String> = ds.data.map { it[stringPreferencesKey("active_profile")] ?: "" }
+    suspend fun setActiveProfile(id: String) = ds.edit { it[stringPreferencesKey("active_profile")] = id }
+
     val license: Flow<String?> = ds.data.map { it[stringPreferencesKey("license")] }
     suspend fun setLicense(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("license")) else it[stringPreferencesKey("license")] = v.trim() }
     val licenseCheckedAt: Flow<Long> = ds.data.map { it[longPreferencesKey("license_checked_at")] ?: 0L }

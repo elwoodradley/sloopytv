@@ -69,6 +69,8 @@ fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit, on
     val channels by vm.channels.collectAsState()
 
     var overlay by remember { mutableStateOf(Overlay.NONE) }
+    var copiesFor by remember { mutableStateOf<tv.sloopy.data.db.ChannelEntity?>(null) }
+    LaunchedEffect(copiesFor) { vm.modalUp = copiesFor != null }
     var digits by remember { mutableStateOf("") }
     var osdTick by remember { mutableStateOf(0) }
     val rootFocus = remember { FocusRequester() }
@@ -141,21 +143,36 @@ fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit, on
     ) {
         PlayerSurface(vm)
 
+        val diag by vm.diagnosis.collectAsState()
+        val healed by vm.healedFrom.collectAsState()
         if (pstate.error != null && overlay != Overlay.INFO) {
             Column(Modifier.align(Alignment.BottomStart).padding(start = 72.dp, bottom = 56.dp)) {
-                Text("CAN'T PLAY", style = Sloopy.meta)
+                Text(diag?.headline?.uppercase()?.let { "CAN'T PLAY · $it" } ?: "CAN'T PLAY", style = Sloopy.meta)
                 Spacer(Modifier.height(6.dp))
-                Text(pstate.error!!, style = Sloopy.bodyBig.copy(color = Sloopy.text))
+                Text(diag?.detail ?: pstate.error!!, style = Sloopy.bodyBig.copy(color = Sloopy.text), modifier = Modifier.width(1000.dp))
+                if (diag != null) Text(pstate.error!!, style = Sloopy.listSub, modifier = Modifier.padding(top = 4.dp))
             }
+        } else if (healed != null && overlay == Overlay.OSD) {
+            Text("BACKUP COPY · ${tv.sloopy.core.model.Names.clean(healed!!.name).uppercase()} FAILED · OK › COPIES TO CHANGE", style = Sloopy.label.copy(color = Sloopy.amber), modifier = Modifier.align(Alignment.BottomEnd).padding(end = 72.dp, bottom = 56.dp))
         } else if (pstate.reconnecting || pstate.isBuffering) {
             Box(Modifier.align(Alignment.BottomEnd).padding(end = 72.dp, bottom = 56.dp)) {
                 Text(if (pstate.reconnecting) "HANG ON SLOOPY" else "HANG ON", style = Sloopy.label)
             }
         }
 
+        copiesFor?.let { c ->
+            val cl = vm.clusterOf(c)
+            if (cl == null) copiesFor = null else {
+                val options = cl.members.map { m -> "use:${m.id}" to ("Use " + tv.sloopy.core.model.Names.clean(m.name).take(30)) } + ("no" to "Not now")
+                tv.sloopy.ui.common.ChoicePrompt("COPIES OF " + tv.sloopy.core.model.Names.clean(cl.primary.name).uppercase().take(20), options, current = "use:${cl.primary.id}", onCancel = { copiesFor = null }, onPick = { k ->
+                    if (k.startsWith("use:")) cl.members.firstOrNull { it.id == k.removePrefix("use:").toLongOrNull() }?.let { vm.preferCopy(it) }
+                    copiesFor = null
+                })
+            }
+        }
         when (overlay) {
             Overlay.OSD -> current?.let { Osd(vm, it, playing, pstate.quality) }
-            Overlay.INFO -> current?.let { InfoOverlay(vm, it, playing, pstate.quality, onClose = { overlay = Overlay.NONE }, go = go, openChannels = { overlay = Overlay.CHANNELS }) }
+            Overlay.INFO -> current?.let { InfoOverlay(vm, it, playing, pstate.quality, onClose = { overlay = Overlay.NONE }, go = go, openChannels = { overlay = Overlay.CHANNELS }, openCopies = { copiesFor = it }) }
             Overlay.NUMBER -> NumberEntry(digits, channels.firstOrNull { it.number == digits.toIntOrNull() })
             Overlay.CHANNELS -> ChannelsOverlay(vm, onClose = { overlay = Overlay.NONE })
             Overlay.DECK -> Deck(go = { overlay = Overlay.NONE; go(it) }, onClose = { overlay = Overlay.NONE })
