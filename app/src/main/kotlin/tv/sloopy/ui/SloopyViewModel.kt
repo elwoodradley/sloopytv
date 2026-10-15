@@ -12,6 +12,7 @@ import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.debounce
 import kotlinx.coroutines.sync.withPermit
@@ -217,6 +218,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     /** Which rail row Movies and Series were last on, so Back and forth lands in the same place. */
     val librarySelection = java.util.concurrent.ConcurrentHashMap<String, String>()
     @Volatile var settingsSection = "providers"
+    /** True while a prompt covers the screen, so screens underneath do not pull focus to themselves. */
+    @Volatile var modalUp = false
     /** The last search text, so Back from a result lands on the same results. */
     @Volatile var lastSearch = ""
     fun takeGuideOpensAtSections(): Boolean = guideOpensAtSections.also { guideOpensAtSections = false }
@@ -275,6 +278,38 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
+    }
+
+    // ---- Operator: announcement, dead-channel reports ---------------------------------------------
+    val operatorName: StateFlow<String> = _payConfig.map { it?.operatorName.orEmpty() }.stateIn(viewModelScope, SharingStarted.Eagerly, "")
+    val reportsEnabled: StateFlow<Boolean> = _payConfig.map { it?.reportsEnabled == true }.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    /** An announcement this stick has not shown yet, or null. */
+    val announcement: StateFlow<tv.sloopy.pay.PayConfig?> = combine(_payConfig, prefs.seenAnnouncement) { c, seen ->
+        if (c != null && c.announcementText.isNotBlank() && c.announcementId != seen) c else null
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    fun dismissAnnouncement() = viewModelScope.launch { _payConfig.value?.let { prefs.setSeenAnnouncement(it.announcementId) } }
+    /** Sends a dead-channel report to the operator. Only reachable when the operator has reports on. */
+    fun reportChannel(c: ChannelEntity, error: String?) = viewModelScope.launch {
+        val server = codeServer.value
+        val group = liveCategories.value.firstOrNull { it.id == c.categoryId }?.name
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("channel", kotlinx.serialization.json.JsonPrimitive(tv.sloopy.core.model.Names.clean(c.name)))
+            put("number", kotlinx.serialization.json.JsonPrimitive(c.number.toString()))
+            put("group", kotlinx.serialization.json.JsonPrimitive(group?.let { tv.sloopy.core.model.Names.clean(it) } ?: ""))
+            put("error", kotlinx.serialization.json.JsonPrimitive(error ?: ""))
+            put("device", kotlinx.serialization.json.JsonPrimitive(android.os.Build.MODEL))
+            put("version", kotlinx.serialization.json.JsonPrimitive(tv.sloopy.BuildConfig.VERSION_NAME))
+            put("nick", kotlinx.serialization.json.JsonPrimitive(syncCode.value?.take(4) ?: ""))
+        }.toString()
+        val ok = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                tv.sloopy.data.AndroidHttp.client.newCall(
+                    okhttp3.Request.Builder().url(server.trimEnd('/') + "/report")
+                        .post(okhttp3.RequestBody.create("application/json".toMediaTypeOrNull(), body)).build()
+                ).execute().use { it.isSuccessful }
+            }.getOrDefault(false)
+        }
+        _toast.value = if (ok) "Reported ${tv.sloopy.core.model.Names.clean(c.name)}. Thanks." else "Could not send the report"
     }
 
     // ---- Recordings ------------------------------------------------------------------------------

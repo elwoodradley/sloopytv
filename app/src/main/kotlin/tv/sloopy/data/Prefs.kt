@@ -81,6 +81,9 @@ class Prefs(private val context: Context) {
     val recordFolder: Flow<String?> = ds.data.map { it[stringPreferencesKey("record_folder")] }
     suspend fun setRecordFolder(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("record_folder")) else it[stringPreferencesKey("record_folder")] = v }
 
+    val seenAnnouncement: Flow<String> = ds.data.map { it[stringPreferencesKey("seen_announcement")] ?: "" }
+    suspend fun setSeenAnnouncement(v: String) = ds.edit { it[stringPreferencesKey("seen_announcement")] = v }
+
     val license: Flow<String?> = ds.data.map { it[stringPreferencesKey("license")] }
     suspend fun setLicense(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("license")) else it[stringPreferencesKey("license")] = v.trim() }
     val licenseCheckedAt: Flow<Long> = ds.data.map { it[longPreferencesKey("license_checked_at")] ?: 0L }

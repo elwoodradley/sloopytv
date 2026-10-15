@@ -79,7 +79,7 @@ fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit, on
     // navigation pop, the first request can land before the node is attached.
     LaunchedEffect(overlay) {
         if (overlay == Overlay.NONE || overlay == Overlay.OSD || overlay == Overlay.NUMBER) {
-            repeat(8) { if (rootFocused) return@LaunchedEffect; runCatching { rootFocus.requestFocus() }; delay(60) }
+            repeat(8) { if (rootFocused || vm.modalUp) return@LaunchedEffect; runCatching { rootFocus.requestFocus() }; delay(60) }
         }
     }
     LaunchedEffect(channels.size) { if (current == null && channels.isNotEmpty()) vm.resumeLastChannel() }

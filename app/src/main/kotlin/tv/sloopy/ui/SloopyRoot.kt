@@ -50,10 +50,26 @@ fun SloopyRoot(vm: SloopyViewModel, onQuit: () -> Unit) {
     val toast by vm.toast.collectAsState()
     val locked by vm.locked.collectAsState()
     val due by vm.dueReminder.collectAsState()
+    val announcement by vm.announcement.collectAsState()
+    LaunchedEffect(announcement, due) { vm.modalUp = announcement != null || due != null }
+    val operator by vm.operatorName.collectAsState()
+    // The maker's mark rides the power-on and leaves once the picture is up.
+    var brand by remember { mutableStateOf(introEnabled) }
+    LaunchedEffect(introDone) { if (introDone) { delay(2200); brand = false } }
 
     val body: @Composable () -> Unit = {
         Box(Modifier.fillMaxSize().background(Sloopy.ground)) {
             if (locked) tv.sloopy.ui.pay.UnlockScreen(vm) else SloopyNav(vm, startAtProviders = providers.isEmpty(), onQuit = { quitting = true })
+            androidx.compose.animation.AnimatedVisibility(visible = brand, enter = androidx.compose.animation.EnterTransition.None, exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(600)), modifier = Modifier.align(Alignment.BottomStart).padding(start = 72.dp, bottom = 56.dp)) {
+                tv.sloopy.ui.common.StoneToadCredit(operator = operator.takeIf { it.isNotBlank() }, color = Sloopy.textSoft)
+            }
+            announcement?.let { a ->
+                tv.sloopy.ui.common.ChoicePrompt(
+                    (if (a.operatorName.isNotBlank()) "FROM ${a.operatorName.uppercase().take(20)}" else "ANNOUNCEMENT"),
+                    listOf("ok" to a.announcementText.take(120)),
+                    onCancel = { vm.dismissAnnouncement() }, onPick = { vm.dismissAnnouncement() },
+                )
+            }
             due?.let { r ->
                 tv.sloopy.ui.common.ChoicePrompt(
                     "STARTING NOW", listOf("watch" to "Watch ${r.title.take(26)} on ${r.channelName.take(20)}", "no" to "Not now"),

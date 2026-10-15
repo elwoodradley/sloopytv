@@ -159,6 +159,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     // Hold OK on a cell (or OK on a programme that has not started): watch, record, favourite.
     var cellMenu by remember { mutableStateOf<Pair<ChannelEntity, ProgrammeEntity?>?>(null) }
     val favIds by vm.favouriteIds.collectAsState()
+    val reportsOn by vm.reportsEnabled.collectAsState()
     val channelSort by vm.channelSort.collectAsState()
 
     val dpPerSec: Float = SLOT.value / 1800f
@@ -417,6 +418,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             if (live && vm.vlcInstalled()) add("vlc" to "Open in VLC")
             add("fav" to (if (c.id in favIds) "Remove ${c.name.take(24)} from favourites" else "Add ${c.name.take(24)} to favourites"))
             add("hidechan" to "Hide ${c.name.take(24)}")
+            if (reportsOn) add("report" to "Report this channel as broken")
             add("no" to "Not now")
         }
         ChoicePrompt((p?.title ?: c.name).uppercase().take(28), options, onCancel = { cellMenu = null }, onPick = { k ->
@@ -427,6 +429,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                 "vlc" -> vm.openChannelInVlc(c)
                 "remind" -> vm.addReminder(c, p!!.title, p.startEpoch, p.stopEpoch)
                 "unremind" -> vm.removeReminder(c, p!!.startEpoch)
+                "report" -> vm.reportChannel(c, null)
                 "hidechan" -> {
                     val i = channels.indexOfFirst { it.id == c.id }
                     vm.setChannelHidden(c.id, true); vm.toast("Hidden: ${c.name}. Settings › Listings brings it back.")

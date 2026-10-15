@@ -350,6 +350,8 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                             Row(Modifier.padding(top = 12.dp)) { SloopyButton("Clear", onClick = { tv.sloopy.CrashLog.clear(context); crash = null }) }
                         }
                         Text("SloopyTV ${BuildConfig.VERSION_NAME}. A player only: it ships with no channels and no providers. Credentials stay in this device's keystore. No analytics, no telemetry.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 20.dp).width(760.dp))
+                        val operatorName by vm.operatorName.collectAsState()
+                        tv.sloopy.ui.common.StoneToadCredit(operator = operatorName.takeIf { it.isNotBlank() }, modifier = Modifier.padding(top = 36.dp))
                     }
                 }
             }

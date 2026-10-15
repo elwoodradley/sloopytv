@@ -118,6 +118,8 @@ fun InfoOverlay(
                 SloopyButton(if (fav) "Remove favourite" else "Add favourite", onClick = { vm.toggleFavourite(channel); idle++ }, modifier = if (strip.isEmpty()) Modifier.focusRequester(first) else Modifier)
                 Spacer(Modifier.width(8.dp))
                 SloopyButton("Record", onClick = { vm.recordNow(channel); onClose() })
+                val reportsOn by vm.reportsEnabled.collectAsState()
+                if (reportsOn) { Spacer(Modifier.width(8.dp)); SloopyButton("Report", onClick = { vm.reportChannel(channel, vm.player.state.value.error); onClose() }) }
                 Spacer(Modifier.width(8.dp))
                 SloopyButton("Channels", onClick = { onClose(); openChannels() })
                 Spacer(Modifier.width(8.dp))

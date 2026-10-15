@@ -264,6 +264,8 @@ fun ProviderScreen(vm: SloopyViewModel, providerId: String?, onDone: () -> Unit,
                     Spacer(Modifier.width(8.dp))
                     SloopyButton("Try the demo", onClick = { vm.addDemo(); onDone() })
                 }
+                val operatorName by vm.operatorName.collectAsState()
+                Text("A STONE TOAD JOINT" + (if (operatorName.isNotBlank()) "  ·  CODES FROM ${operatorName.uppercase()}" else ""), style = Sloopy.label.copy(color = Sloopy.dim), modifier = Modifier.padding(top = 28.dp))
             }
         }
     }

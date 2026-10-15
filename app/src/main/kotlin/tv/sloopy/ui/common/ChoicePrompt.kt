@@ -34,13 +34,18 @@ fun ChoicePrompt(title: String, options: List<Pair<String, String>>, current: St
     // can never wander into the screen behind it.
     val requesters = remember(options.size) { List(options.size) { FocusRequester() } }
     var idx by remember { mutableStateOf(0) }
+    var hasFocus by remember { mutableStateOf(false) }
     LaunchedEffect(idx) { delay(30); runCatching { requesters[idx].requestFocus() } }
+    // Screens underneath (the live picture) grab focus for themselves on their own schedule;
+    // while the prompt is up it takes it back.
+    LaunchedEffect(Unit) { while (true) { delay(250); if (!hasFocus) runCatching { requesters[idx].requestFocus() } } }
     // Phone remote apps keep repeating OK while the finger is down, so only a non-repeat press
     // after a short grace period counts.
     var okArmed by remember { mutableStateOf(false) }
     val openedAt = remember { System.currentTimeMillis() }
     Box(
         Modifier.fillMaxSize().background(Color(0x99000000))
+            .onFocusChanged { hasFocus = it.hasFocus }
             .onPreviewKeyEvent {
                 when {
                     it.inKeys(BACK_KEYS) -> { if (!it.isDown) onCancel(); true }

@@ -69,6 +69,14 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   the alarm receiver, folder handling (SAF tree or the app's own storage). Xtream channels are
   forced to TS; HLS-only URLs refuse with a message. Recordings play through the VOD player as
   `Playing.Vod(kind = "recording")`; the player's data source is DefaultDataSource over OkHttp.
+- 0.4.0 (2026-10-15): Stone Toad branding. The wordmark is `drawable-nodpi/stone_toad_mark.png`,
+  cut from the user's artwork as white-on-transparent (`ui/common/StoneToad.kt` tints it); never
+  redraw it by hand, the user rejected that. It rides the power-on (`SloopyRoot`, fades after
+  2.2 s), sits on About, the welcome window and the admin page. Operator config on the code
+  server: `operatorName`, `announcementText/Id` (shown once per id via `prefs.seenAnnouncement`),
+  `reportsEnabled` + Telegram/Discord secrets (never in `/config`). Dead-channel reports are
+  scaffolded and dormant: the app shows Report only when `reportsEnabled` is true. Prompts set
+  `vm.modalUp` so LiveScreen does not steal focus; `ChoicePrompt` re-grabs focus every 250 ms.
 - 0.3.9: `CrashLog` keeps the last uncaught exception (scrubbed) in files/last_crash.txt and
   Settings › About shows it under "Last crash" with a Clear button. When a friend reports being
   "kicked out", ask them to read that section. Guide focus: `focusRow` falls back to any cell of

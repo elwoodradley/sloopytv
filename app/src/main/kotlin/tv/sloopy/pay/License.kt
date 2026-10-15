@@ -13,7 +13,13 @@ import okhttp3.Request
 import tv.sloopy.data.AndroidHttp
 
 /** What the code server says about the paywall. An empty product means the app is free. */
-data class PayConfig(val gumroadProduct: String, val buyUrl: String, val price: String) {
+data class PayConfig(
+    val gumroadProduct: String, val buyUrl: String, val price: String,
+    val operatorName: String = "",
+    val announcementId: String = "", val announcementText: String = "",
+    /** Dead-channel reports: nothing in the app shows until the operator turns this on. */
+    val reportsEnabled: Boolean = false,
+) {
     val enabled: Boolean get() = gumroadProduct.isNotBlank()
 }
 
@@ -33,7 +39,12 @@ object License {
         runCatching {
             AndroidHttp.client.newCall(Request.Builder().url("$base/config").get().build()).execute().use { r ->
                 val root = json.parseToJsonElement(r.body?.string() ?: "") as? JsonObject ?: return@use null
-                PayConfig(root.str("gumroadProduct").orEmpty(), root.str("buyUrl").orEmpty(), root.str("price").orEmpty())
+                PayConfig(
+                    root.str("gumroadProduct").orEmpty(), root.str("buyUrl").orEmpty(), root.str("price").orEmpty(),
+                    operatorName = root.str("operatorName").orEmpty(),
+                    announcementId = root.str("announcementId").orEmpty(), announcementText = root.str("announcementText").orEmpty(),
+                    reportsEnabled = (root["reportsEnabled"] as? JsonPrimitive)?.booleanOrNull == true,
+                )
             }
         }.getOrNull()
     }
