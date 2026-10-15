@@ -107,6 +107,8 @@ class Prefs(private val context: Context) {
     val tonightSportsAnywhere: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("tonight_sports")] ?: false }
     suspend fun setTonightSportsAnywhere(v: Boolean) = ds.edit { it[booleanPreferencesKey("tonight_sports")] = v }
     val tonightNewOnDemand: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("tonight_vod")] ?: false }
+    val tonightPopular: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("tonight_popular")] ?: true }
+    suspend fun setTonightPopular(v: Boolean) = ds.edit { it[booleanPreferencesKey("tonight_popular")] = v }
     suspend fun setTonightNewOnDemand(v: Boolean) = ds.edit { it[booleanPreferencesKey("tonight_vod")] = v }
 
     /** Scores: network word (CBS, FOX…) -> channel id the viewer confirmed. */

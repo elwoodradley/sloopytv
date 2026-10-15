@@ -29,6 +29,7 @@ export default {
       if (request.method === "GET" && path === "/config") return json({ ok: true, ...publicConfig((await env.CODES.get("config", "json")) || {}) });
       if (request.method === "POST" && path === "/report") return report(request, env);
       if (request.method === "GET" && path === "/poster") return poster(request, env, url);
+      if (request.method === "GET" && path === "/trending") return trending(request, env);
       if (request.method === "POST" && path === "/friends/me") return friendMe(request, env);
       if (request.method === "GET" && path === "/friends/list") return friendList(env, url);
       if (request.method === "POST" && path === "/friends/send") return friendSend(request, env);
@@ -317,6 +318,30 @@ async function poster(request, env, url) {
   } catch (e) {}
   await env.CODES.put(key, found, { expirationTtl: 30 * 24 * 3600 });
   return json({ ok: true, url: found || null });
+}
+
+// What's popular today, from TMDB's trending lists; one fetch for everyone, kept six hours.
+// Titles only: the TV matches them against its own guide and library, so nothing is shown
+// that the viewer's service does not carry.
+async function trending(request, env) {
+  if (!env.TMDB_TOKEN) return json({ ok: true, tv: [], movies: [] });
+  if (await syncLimited(request, env)) return json({ ok: false, error: "Too many requests" }, 429);
+  const cached = await env.CODES.get("trending:v1");
+  if (cached) return new Response(cached, { headers: { "content-type": "application/json" } });
+  const pull = async (kind) => {
+    try {
+      const r = await fetch(`https://api.themoviedb.org/3/trending/${kind}/day?language=en-US`, { headers: { authorization: "Bearer " + env.TMDB_TOKEN, accept: "application/json" } });
+      const j = await r.json();
+      return (j.results || []).slice(0, 40).map((x) => ({
+        title: String(x.name || x.title || "").slice(0, 120),
+        year: String(x.first_air_date || x.release_date || "").slice(0, 4),
+        poster: x.poster_path ? "https://image.tmdb.org/t/p/w342" + x.poster_path : null,
+      })).filter((x) => x.title);
+    } catch (e) { return []; }
+  };
+  const body = JSON.stringify({ ok: true, tv: await pull("tv"), movies: await pull("movie") });
+  await env.CODES.put("trending:v1", body, { expirationTtl: 6 * 3600 });
+  return new Response(body, { headers: { "content-type": "application/json" } });
 }
 
 // ---- friends: opt-in presence and send-to-TV --------------------------------------------------

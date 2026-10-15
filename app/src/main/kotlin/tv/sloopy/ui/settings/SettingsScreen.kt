@@ -245,6 +245,9 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                         val tVod by vm.tonightNewOnDemand.collectAsState()
                         SettingRow("Tonight: include sport on any channel", if (tSport) "ON" else "OFF") { scope.launch { vm.prefs.setTonightSportsAnywhere(!tSport) } }
                         SettingRow("Tonight: include new episodes on demand", if (tVod) "ON" else "OFF") { scope.launch { vm.prefs.setTonightNewOnDemand(!tVod) } }
+                        val tPop by vm.tonightPopular.collectAsState()
+                        SettingRow("Tonight: include what's popular today", if (tPop) "ON" else "OFF") { scope.launch { vm.prefs.setTonightPopular(!tPop) } }
+                        Text("Today's most-watched shows and films, shown only when your service has them: on a channel tonight or in Movies and Series.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 4.dp, bottom = 10.dp).width(760.dp))
                         SettingRow("Channel badge stays for", "$osd S") { scope.launch { vm.prefs.setOsdSeconds(if (osd >= 8) 2 else osd + 1) } }
                     }
                     "recordings" -> {
@@ -276,6 +279,7 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                         passes.forEach { t -> SettingRow(t, "REMOVE") { vm.removeSeasonPass(t) } }
                         if (unsure.isNotEmpty()) {
                             Section("Needs a look · ${unsure.size}")
+                            Text("These also wait under Recordings › Scheduled.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(bottom = 6.dp))
                             unsure.take(12).forEach { e ->
                                 val parts = e.split('|')
                                 Column {

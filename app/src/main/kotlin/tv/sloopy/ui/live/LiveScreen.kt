@@ -128,9 +128,9 @@ fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit, on
                     d != null -> { digits = (digits + d).takeLast(4); overlay = Overlay.NUMBER; true }
                     ev.isKey(Key.DirectionUp, Key.ChannelUp) -> { vm.step(-1); true }
                     ev.isKey(Key.DirectionDown, Key.ChannelDown) -> { vm.step(1); true }
-                    // Catch-up: Left/Right skip 30 s, rewind/fast-forward skip 2 min; the badge shows where you are.
-                    catchup && ev.isKey(Key.DirectionLeft, Key.MediaRewind) -> { val d = if (ev.isKey(Key.DirectionLeft)) -30_000L else -120_000L; vm.seekBy(d); vm.noteSeek(d); overlay = Overlay.OSD; osdTick++; true }
-                    catchup && ev.isKey(Key.DirectionRight, Key.MediaFastForward) -> { val d = if (ev.isKey(Key.DirectionRight)) 30_000L else 120_000L; vm.seekBy(d); vm.noteSeek(d); overlay = Overlay.OSD; osdTick++; true }
+                    // Catch-up: Left/Right skip 15 s, rewind/fast-forward skip 1 min; the badge shows where you are.
+                    catchup && ev.isKey(Key.DirectionLeft, Key.MediaRewind) -> { val d = if (ev.isKey(Key.DirectionLeft)) -15_000L else -60_000L; vm.seekBy(d); vm.noteSeek(d); overlay = Overlay.OSD; osdTick++; true }
+                    catchup && ev.isKey(Key.DirectionRight, Key.MediaFastForward) -> { val d = if (ev.isKey(Key.DirectionRight)) 15_000L else 60_000L; vm.seekBy(d); vm.noteSeek(d); overlay = Overlay.OSD; osdTick++; true }
                     ev.isKey(Key.DirectionLeft) -> { overlay = Overlay.CHANNELS; true }
                     ev.isKey(Key.DirectionRight, Key.Menu) -> { overlay = Overlay.DECK; true }
                     ev.isKey(Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause) -> {

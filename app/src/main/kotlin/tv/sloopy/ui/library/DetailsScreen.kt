@@ -26,6 +26,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -115,14 +116,32 @@ fun DetailsScreen(vm: SloopyViewModel, kind: String, id: Long, onBack: () -> Uni
         val title = info?.series?.name ?: base?.name ?: ""
         val image = info?.series?.backdrop ?: base?.backdrop ?: base?.cover
         val episodes = season?.let { s -> info?.episodes?.get(s) } ?: emptyList()
+        // The episode the cursor rests on. While one is lit, the left panel describes it instead of
+        // the show; it falls back to the show's summary when the provider sent nothing for it.
+        var focusedEp by remember { mutableStateOf<Episode?>(null) }
 
         Backdrop(image) {
             Row(Modifier.fillMaxSize().padding(horizontal = 72.dp, vertical = 48.dp)) {
                 Column(Modifier.width(720.dp)) {
-                    Label("Series" + (base?.releaseDate?.take(4)?.let { " · $it" } ?: "") + (info?.seasons?.size?.let { " · $it seasons" } ?: ""))
-                    Text(title, style = Sloopy.titleHuge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp))
-                    Text(listOfNotNull(base?.genre, base?.rating?.let { "★ $it" }).joinToString("  ·  "), style = Sloopy.meta, modifier = Modifier.padding(top = 14.dp))
-                    Text(info?.series?.plot ?: base?.plot ?: "", style = Sloopy.bodyBig, maxLines = 5, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 12.dp))
+                    val ep = focusedEp
+                    if (ep != null) {
+                        Label(listOfNotNull("Season ${ep.season} · Episode ${ep.number}", ep.airDate, ep.durationSecs?.let { "${it / 60} min" }).joinToString("  ·  "))
+                        Text(ep.title, style = Sloopy.titleHuge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp))
+                        Text(title, style = Sloopy.meta, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 14.dp))
+                        if (ep.image != null && ep.image != image) {
+                            Box(Modifier.padding(top = 12.dp).width(320.dp).height(180.dp).background(Sloopy.surface)) {
+                                AsyncImage(model = ep.image, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                            }
+                        }
+                        val plot = ep.plot?.takeIf { it.isNotBlank() }
+                        Text(plot ?: (info?.series?.plot ?: base?.plot ?: ""), style = Sloopy.bodyBig, maxLines = if (ep.image != null && ep.image != image) 4 else 6, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 12.dp))
+                        if (plot == null) Text("No details for this episode from your service; this is the show's summary.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 6.dp))
+                    } else {
+                        Label("Series" + (base?.releaseDate?.take(4)?.let { " · $it" } ?: "") + (info?.seasons?.size?.let { " · $it seasons" } ?: ""))
+                        Text(title, style = Sloopy.titleHuge, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp))
+                        Text(listOfNotNull(base?.genre, base?.rating?.let { "★ $it" }).joinToString("  ·  "), style = Sloopy.meta, modifier = Modifier.padding(top = 14.dp))
+                        Text(info?.series?.plot ?: base?.plot ?: "", style = Sloopy.bodyBig, maxLines = 5, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 12.dp))
+                    }
                     if (error != null) Text(error!!, style = Sloopy.body.copy(color = Sloopy.amber), modifier = Modifier.padding(top = 8.dp))
                     Spacer(Modifier.height(20.dp))
                     SloopyButton(if (id in favSeries) "On your list" else "Add to list", onClick = { vm.toggleItemFavourite("series", id) })
@@ -137,7 +156,7 @@ fun DetailsScreen(vm: SloopyViewModel, kind: String, id: Long, onBack: () -> Uni
                 LazyColumn(Modifier.weight(1f).fillMaxSize()) {
                     items(episodes, key = { it.id }) { ep ->
                         val watched = latest?.takeIf { it.itemId == ep.id }
-                        EpisodeRow(ep, watched?.positionMs ?: 0, watched?.durationMs ?: 0, onClick = {
+                        EpisodeRow(ep, watched?.positionMs ?: 0, watched?.durationMs ?: 0, onFocus = { if (it) focusedEp = ep else if (focusedEp?.id == ep.id) focusedEp = null }, onClick = {
                             vm.setEpisodeQueue(id, title, image, info?.seasons?.flatMap { sn -> info?.episodes?.get(sn) ?: emptyList() } ?: emptyList())
                             if (vm.playVod(ep.id, title, "S${ep.season} E${ep.number} · ${ep.title}", ep.image ?: image, ep.container, "episode", id, watched?.positionMs ?: 0)) onPlay()
                         })
@@ -158,14 +177,14 @@ private fun Backdrop(image: String?, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun EpisodeRow(ep: Episode, posMs: Long, durMs: Long, onClick: () -> Unit) {
+private fun EpisodeRow(ep: Episode, posMs: Long, durMs: Long, onFocus: (Boolean) -> Unit, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         shape = ClickableSurfaceDefaults.shape(RectangleShape),
         colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Sloopy.surface2, contentColor = Sloopy.text, focusedContentColor = Color.White),
         border = ClickableSurfaceDefaults.border(focusedBorder = androidx.tv.material3.Border(androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.55f)), shape = RectangleShape)),
         scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
-        modifier = Modifier.fillMaxWidth().height(64.dp),
+        modifier = Modifier.fillMaxWidth().height(64.dp).onFocusChanged { onFocus(it.isFocused) },
     ) {
         Column {
             Row(Modifier.fillMaxWidth().height(63.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {

@@ -540,6 +540,29 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val tonight: StateFlow<List<TonightItem>> = _tonight
     val tonightSportsAnywhere: StateFlow<Boolean> = prefs.tonightSportsAnywhere.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val tonightNewOnDemand: StateFlow<Boolean> = prefs.tonightNewOnDemand.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    val tonightPopular: StateFlow<Boolean> = prefs.tonightPopular.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    data class Trend(val title: String, val year: String?, val poster: String?)
+    private var trendCache: Pair<Long, Pair<List<Trend>, List<Trend>>>? = null
+    /** TMDB's trending shows and films for today, via the code server (one key, cached there six hours, here one). */
+    private suspend fun trending(): Pair<List<Trend>, List<Trend>> {
+        trendCache?.let { (at, v) -> if (System.currentTimeMillis() - at < 3_600_000) return v }
+        val server = codeServer.value; if (!server.startsWith("http")) return emptyList<Trend>() to emptyList()
+        val v = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                tv.sloopy.data.AndroidHttp.client.newCall(okhttp3.Request.Builder().url(server.trimEnd('/') + "/trending").get().build()).execute().use { r ->
+                    val root = kotlinx.serialization.json.Json.parseToJsonElement(r.body?.string() ?: "") as kotlinx.serialization.json.JsonObject
+                    fun list(k: String) = (root[k] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { e ->
+                        val o = e as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+                        fun str(n: String) = (o[n] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+                        str("title")?.let { Trend(it, str("year")?.ifBlank { null }, str("poster")) }
+                    } ?: emptyList()
+                    list("tv") to list("movies")
+                }
+            }.getOrDefault(emptyList<Trend>() to emptyList())
+        }
+        if (v.first.isNotEmpty() || v.second.isNotEmpty()) trendCache = System.currentTimeMillis() to v
+        return v
+    }
     fun notInterested(title: String) = viewModelScope.launch { prefs.addTonightNotInterested(title); buildTonight() }
     fun buildTonight() = viewModelScope.launch {
         val p = active.value ?: return@launch
@@ -581,6 +604,34 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             val mine = favouriteSeriesIds.value
             runCatching { graph.db.series().recent(p.id, 60) }.getOrDefault(emptyList()).filter { it.id in mine && (it.lastModifiedEpoch ?: 0) > cutoff }.take(4)
                 .forEach { items.add(TonightItem("series", it.name, "New episode · My list", null, null, it.id, "series", it.cover, it.releaseDate?.take(4), 20)) }
+        }
+        if (tonightPopular.value) {
+            // Popular tonight: TMDB's trending titles, kept only when this service carries them (on a
+            // channel tonight, or in the film/series library). Never more than four tiles.
+            val (shows, films) = trending()
+            val seen = items.map { it.title.lowercase() }.toMutableSet()
+            val popular = ArrayList<TonightItem>()
+            for (t in shows.take(30)) {
+                if (popular.size >= 4) break
+                if (t.title.lowercase() in no || t.title.lowercase() in seen) continue
+                val progs = runCatching { catalog.searchProgrammes(p.id, t.title, now) }.getOrDefault(emptyList())
+                    .filter { it.startEpoch < to && it.stopEpoch > from && tv.sloopy.core.model.Names.sameTitle(it.title, t.title) }
+                val hit = progs.firstOrNull { pr -> all.any { it.epgId == pr.epgId } }
+                if (hit != null) {
+                    val c = all.first { it.epgId == hit.epgId }
+                    popular.add(TonightItem("popular", t.title, tv.sloopy.core.model.Names.clean(c.name) + " · " + tv.sloopy.ui.common.TimeFmt.hhmm(hit.startEpoch), c, hit, null, null, t.poster, t.year, 4))
+                    seen.add(t.title.lowercase()); continue
+                }
+                val s = runCatching { graph.db.series().search(p.id, t.title, 20) }.getOrDefault(emptyList()).firstOrNull { tv.sloopy.core.model.Names.sameTitle(it.name, t.title) }
+                if (s != null) { popular.add(TonightItem("popular", t.title, "Popular · Series", null, null, s.id, "series", s.cover ?: t.poster, t.year, 3)); seen.add(t.title.lowercase()) }
+            }
+            for (t in films.take(30)) {
+                if (popular.size >= 4) break
+                if (t.title.lowercase() in no || t.title.lowercase() in seen) continue
+                val v = runCatching { graph.db.vod().search(p.id, t.title, 20) }.getOrDefault(emptyList()).firstOrNull { tv.sloopy.core.model.Names.sameTitle(it.name, t.title) }
+                if (v != null) { popular.add(TonightItem("popular", t.title, "Popular · Movies", null, null, v.id, "vod", v.poster ?: t.poster, t.year, 3)); seen.add(t.title.lowercase()) }
+            }
+            items.addAll(popular)
         }
         _tonight.value = items.sortedByDescending { it.score }.distinctBy { it.kind + it.title.lowercase() }.take(12)
     }

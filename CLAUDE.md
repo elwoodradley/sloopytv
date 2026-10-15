@@ -87,6 +87,15 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
   Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
   viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
+- 0.5.1 (2026-10-15), buddy's notes. Tonight adds "Popular": the code server's `/trending`
+  (TMDB trending TV + films for the day, cached in KV six hours, no key on the TV) and
+  `buildTonight` keeps a title only when the service carries it (guide programme tonight via
+  `Names.sameTitle`, tested, or a series/film in the library); at most four tiles, toggle in
+  Settings › Picture (`prefs.tonightPopular`, default on). Series details: resting on an episode
+  swaps the left panel to that episode (still, air date, length, plot; falls back to the show's
+  summary with a note). Recordings screen is a rail: Recorded (done/failed) and Scheduled
+  (booked, running, and the season-pass "Needs a look" rows with Record/Skip); Back on the rail
+  leaves, on the list returns to the rail (rail wrapper uses `hasFocus`, not `isFocused`).
 - 0.4.2 (2026-10-15): duplicate engine. `core/model/Dupes.kt` (tested) gives a cluster key from
   the stripped name; identical keys = copies, never "starts with". `vm.dupes` clusters the
   channel list (viewer merges join clusters, splits break them, a preferred copy wins, else best
@@ -111,7 +120,7 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   `SloopyRoot` shows a prompt over any screen (Watch tunes + goHome). Hidden channels live in
   Prefs like hidden groups. Guide window is 48 h back (catch-up within `archiveDays`); rows only
   compose cells within a 6-hour bucket window around the scroll to keep the Shield happy.
-  Catch-up: Left/Right ±30 s, RW/FF ±2 min, badge shows the time position. Live OK opens the info
+  Catch-up: Left/Right ±15 s, RW/FF ±1 min (0.5.1, was 30 s / 2 min), badge shows the time position. Live OK opens the info
   overlay on key-up and the overlay ignores OK for 400 ms, for phone remotes that repeat.
 - 0.3.6: `PlayerHolder.player` is rebuilt when Settings › Picture › Buffer changes (small/medium/
   large, default large); it is Compose state so PlayerViews re-attach. Guide re-downloads every

@@ -63,9 +63,9 @@ fun TonightScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit,
             NavStrip("tonight", go = go)
             Spacer(Modifier.width(16.dp))
             Column(Modifier.fillMaxSize().padding(end = 72.dp, top = 8.dp)) {
-                Label("Tonight · from your channels, your list and your reminders")
+                Label("Tonight · from your channels, your list, your reminders and what's popular today")
                 Text("ON TONIGHT", style = Sloopy.titleHuge, modifier = Modifier.padding(top = 8.dp, bottom = 14.dp))
-                if (items.isEmpty()) Text("Nothing you follow is on tonight. Watch a few channels and this fills in on its own. Settings › Picture can widen it to sport on any channel and new episodes on demand.", style = Sloopy.bodyBig, modifier = Modifier.width(900.dp))
+                if (items.isEmpty()) Text("Nothing you follow is on tonight. Watch a few channels and this fills in on its own. Settings › Picture can widen it to sport on any channel, new episodes on demand, and what's popular today.", style = Sloopy.bodyBig, modifier = Modifier.width(900.dp))
                 LazyVerticalGrid(columns = GridCells.Fixed(4), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
                     itemsIndexed(items, key = { _, it -> it.kind + it.title }) { i, item ->
                         Tile(vm, item, modifier = if (i == 0) Modifier.focusRequester(first) else Modifier,
@@ -116,7 +116,7 @@ private fun Tile(vm: SloopyViewModel, item: SloopyViewModel.TonightItem, modifie
         Box(Modifier.fillMaxSize()) {
             if (poster != null) AsyncImage(model = poster, contentDescription = null, modifier = Modifier.fillMaxSize(), contentScale = ContentScale.Crop, alpha = if (focused) 0.55f else 0.4f)
             Column(Modifier.align(Alignment.BottomStart).padding(12.dp)) {
-                Label(when (item.kind) { "reminder" -> "Reminder"; "series" -> "New episode"; else -> "Tonight" }, bright = item.kind == "reminder")
+                Label(when (item.kind) { "reminder" -> "Reminder"; "series" -> "New episode"; "popular" -> "Popular"; else -> "Tonight" }, bright = item.kind == "reminder")
                 Text(item.title, style = Sloopy.titleRow.copy(color = Color.Unspecified), maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp))
                 Text(item.sub, style = Sloopy.listSub.copy(color = if (focused) Sloopy.textSoft else Sloopy.muted), maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
