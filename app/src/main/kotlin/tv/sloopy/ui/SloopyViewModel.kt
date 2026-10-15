@@ -10,6 +10,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.drop
 import kotlinx.coroutines.flow.debounce
@@ -38,6 +39,8 @@ import java.time.ZoneId
 /** Pseudo groups shown above the provider's categories. */
 const val GUIDE_HOURS_BACK = 2L
 const val GUIDE_HOURS_FWD = 24L
+
+const val VLC = "org.videolan.vlc"
 
 object Groups {
     const val ALL = "\u0000all"
@@ -327,6 +330,31 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     val introEnabled: StateFlow<Boolean> = prefs.introEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val bufferSize: StateFlow<String> = prefs.bufferSize.stateIn(viewModelScope, SharingStarted.Eagerly, "large")
+    init { viewModelScope.launch { bufferSize.collect { player.setBuffer(it) } } }
+
+    // ---- External player (VLC) ----------------------------------------------------------------
+    val externalPlayer: StateFlow<String> = prefs.externalPlayer.stateIn(viewModelScope, SharingStarted.Eagerly, "builtin")
+    /** Intents the Activity starts: VLC opening a stream. */
+    val externalLaunches = kotlinx.coroutines.flow.MutableSharedFlow<android.content.Intent>(extraBufferCapacity = 2)
+    fun vlcInstalled(): Boolean = runCatching { getApplication<android.app.Application>().packageManager.getLaunchIntentForPackage(VLC) != null }.getOrDefault(false)
+    /** Hands [url] to VLC. False (with a toast) when VLC is not installed, so the caller plays it itself. */
+    fun openInVlc(url: String, title: String): Boolean {
+        if (!vlcInstalled()) { _toast.value = "VLC is not installed on this box"; return false }
+        val i = android.content.Intent(android.content.Intent.ACTION_VIEW)
+            .setDataAndTypeAndNormalize(android.net.Uri.parse(url), "video/*")
+            .setPackage(VLC)
+            .putExtra("title", title)
+            .addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        player.player.pause()
+        return externalLaunches.tryEmit(i)
+    }
+    private fun useVlc(): Boolean = externalPlayer.value == "vlc" && vlcInstalled()
+    fun openChannelInVlc(c: ChannelEntity) { val p = active.value ?: return; runCatching { openInVlc(catalog.liveUrl(p, c), c.name) }.onFailure { _toast.value = TLog.userMessage(it) } }
+    fun openVodInVlc(id: Long, container: String, kind: String, title: String) {
+        val p = active.value ?: return
+        openInVlc(if (kind == "episode") catalog.episodeUrl(p, id, container) else catalog.vodUrl(p, id, container), title)
+    }
     val clock12: StateFlow<Boolean> = prefs.clock12.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     val theme: StateFlow<String> = prefs.theme.stateIn(viewModelScope, SharingStarted.Eagerly, "phosphor")
     val frameRateMatch: StateFlow<Boolean> = prefs.frameRateMatch.stateIn(viewModelScope, SharingStarted.Eagerly, false)
@@ -394,9 +422,14 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     /** Why the last guide download failed, shown on the guide so a viewer can report it. */
     private val _epgError = MutableStateFlow<String?>(null)
     val epgError: StateFlow<String?> = _epgError
+    val epgIntervalHours: StateFlow<Int> = prefs.epgIntervalHours.stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+    init {
+        // Re-download the guide on the chosen cadence while the app is open.
+        viewModelScope.launch { epgIntervalHours.collectLatest { h -> while (true) { delay(h * 3600_000L); refreshEpgNow() } } }
+    }
     fun refreshEpgNow() = viewModelScope.launch {
         val p = active.value ?: return@launch
-        runCatching { catalog.refreshEpg(p) }
+        runCatching { catalog.refreshEpg(p, minIntervalMs = epgIntervalHours.value * 3600_000L) }
             .onSuccess { _epgError.value = null }
             .onFailure { _epgError.value = TLog.userMessage(it); TLog.w { "epg refresh: ${TLog.userMessage(it)}" } }
     }
@@ -527,8 +560,9 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun tune(c: ChannelEntity) {
         val p = active.value ?: return
-        _playing.value = Playing.Live(c)
         viewModelScope.launch { prefs.setLastChannel(p.id, c.id); prefs.pushRecent(p.id, c.id) }
+        if (useVlc() && runCatching { openInVlc(catalog.liveUrl(p, c), c.name) }.getOrDefault(false)) return
+        _playing.value = Playing.Live(c)
         try {
             player.play(catalog.liveUrl(p, c), isLive = true)
         } catch (e: Exception) {
@@ -556,16 +590,20 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val p = active.value ?: return
         val url = catalog.catchupUrl(p, c, startEpoch, ((stopEpoch - startEpoch) / 60).toInt().coerceAtLeast(1), ZoneId.systemDefault())
         if (url == null) { _toast.value = "No catch-up for this channel"; return }
+        if (useVlc() && openInVlc(url, title)) return
         _playing.value = Playing.Catchup(c, title, startEpoch, stopEpoch)
         player.play(url, isLive = false)
     }
 
-    fun playVod(id: Long, title: String, subtitle: String?, image: String?, container: String, kind: String, parentId: Long?, resumeMs: Long) {
-        val p = active.value ?: return
-        if (kind == "recording") { viewModelScope.launch { graph.db.recordings().get(id)?.let { playRecording(it) } }; return }
+    /** True when the built-in player took it (open the player screen); false when VLC did. */
+    fun playVod(id: Long, title: String, subtitle: String?, image: String?, container: String, kind: String, parentId: Long?, resumeMs: Long): Boolean {
+        val p = active.value ?: return false
+        if (kind == "recording") { viewModelScope.launch { graph.db.recordings().get(id)?.let { playRecording(it) } }; return true }
         val url = if (kind == "episode") catalog.episodeUrl(p, id, container) else catalog.vodUrl(p, id, container)
+        if (useVlc() && openInVlc(url, title)) return false
         _playing.value = Playing.Vod(id, title, subtitle, image, container, kind, parentId)
         player.play(url, isLive = false, startPositionMs = resumeMs)
+        return true
     }
 
     /** Called when leaving the VOD player to remember position. */

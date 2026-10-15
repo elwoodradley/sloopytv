@@ -89,11 +89,15 @@ fun DetailsScreen(vm: SloopyViewModel, kind: String, id: Long, onBack: () -> Uni
                     val b = base
                     val onList = id in favVod
                     SloopyButton(if (resume > 0) "Resume · ${fmtMs(resume)}" else "Play", primary = true, enabled = b != null, modifier = Modifier.focusRequester(playFocus), onClick = {
-                        if (b != null) { vm.playVod(b.id, title, b.year, image, info?.container ?: b.container, "vod", null, resume); onPlay() }
+                        if (b != null) { if (vm.playVod(b.id, title, b.year, image, info?.container ?: b.container, "vod", null, resume)) onPlay() }
                     })
                     if (resume > 0) {
                         Spacer(Modifier.width(10.dp))
-                        SloopyButton("From the start", onClick = { val bb = base ?: return@SloopyButton; vm.playVod(bb.id, title, bb.year, image, info?.container ?: bb.container, "vod", null, 0); onPlay() })
+                        SloopyButton("From the start", onClick = { val bb = base ?: return@SloopyButton; if (vm.playVod(bb.id, title, bb.year, image, info?.container ?: bb.container, "vod", null, 0)) onPlay() })
+                    }
+                    if (b != null && vm.vlcInstalled()) {
+                        Spacer(Modifier.width(10.dp))
+                        SloopyButton("Open in VLC", onClick = { vm.openVodInVlc(b.id, info?.container ?: b.container, "vod", title) })
                     }
                     Spacer(Modifier.width(10.dp))
                     SloopyButton(if (onList) "On your list" else "Add to list", onClick = { vm.toggleItemFavourite("vod", id) })
@@ -135,8 +139,7 @@ fun DetailsScreen(vm: SloopyViewModel, kind: String, id: Long, onBack: () -> Uni
                         val watched = latest?.takeIf { it.itemId == ep.id }
                         EpisodeRow(ep, watched?.positionMs ?: 0, watched?.durationMs ?: 0, onClick = {
                             vm.setEpisodeQueue(id, title, image, info?.seasons?.flatMap { sn -> info?.episodes?.get(sn) ?: emptyList() } ?: emptyList())
-                            vm.playVod(ep.id, title, "S${ep.season} E${ep.number} · ${ep.title}", ep.image ?: image, ep.container, "episode", id, watched?.positionMs ?: 0)
-                            onPlay()
+                            if (vm.playVod(ep.id, title, "S${ep.season} E${ep.number} · ${ep.title}", ep.image ?: image, ep.container, "episode", id, watched?.positionMs ?: 0)) onPlay()
                         })
                     }
                 }

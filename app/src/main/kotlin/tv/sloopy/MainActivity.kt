@@ -39,6 +39,9 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             vm.updater.launches.collect { runCatching { startActivity(it) }.onFailure { e -> TLog.w { "could not open the system screen: ${TLog.userMessage(e)}" } } }
         }
+        lifecycleScope.launch {
+            vm.externalLaunches.collect { runCatching { startActivity(it) }.onFailure { vm.toast("Could not open VLC") } }
+        }
     }
 
     private fun matchRefreshRate(fps: Float) {

@@ -14,6 +14,7 @@
 
     <queries>
         <intent><action android:name="android.speech.action.RECOGNIZE_SPEECH" /></intent>
+        <package android:name="org.videolan.vlc" />
     </queries>
 
     <uses-feature android:name="android.software.leanback" android:required="false" />

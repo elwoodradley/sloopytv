@@ -168,6 +168,9 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                                 modifier = Modifier.align(Alignment.CenterVertically),
                             )
                         }
+                        val epgH by vm.epgIntervalHours.collectAsState()
+                        Spacer(Modifier.height(16.dp))
+                        SettingRow("Guide refreshes every", "$epgH H") { scope.launch { vm.prefs.setEpgIntervalHours(when (epgH) { 1 -> 2; 2 -> 3; 3 -> 6; 6 -> 12; 12 -> 24; else -> 1 }) } }
                         Text("To reorder or hide channel groups: open the guide, press Back for the groups, hold OK on a group.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 24.dp).width(760.dp))
                         val hidden by vm.hiddenGroups.collectAsState()
                         val hiddenCats = categories.filter { it.id in hidden }
@@ -186,6 +189,17 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                             scope.launch { vm.prefs.setTheme(all[(i + 1) % all.size].id) }
                         }
                         SettingRow("Clock", if (clock12) "12 HOUR" else "24 HOUR") { scope.launch { vm.prefs.setClock12(!clock12) } }
+                        val buffer by vm.bufferSize.collectAsState()
+                        SettingRow("Buffer", buffer.uppercase()) { scope.launch { vm.prefs.setBufferSize(when (buffer) { "small" -> "medium"; "medium" -> "large"; else -> "small" }) } }
+                        Text("How much of the stream is kept ahead. Large rides out a shaky connection; small starts faster.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 4.dp, bottom = 10.dp).width(760.dp))
+                        val ext by vm.externalPlayer.collectAsState()
+                        val vlc = vm.vlcInstalled()
+                        SettingRow("Player", if (ext == "vlc") "VLC" else "SLOOPYTV") {
+                            if (ext == "vlc") scope.launch { vm.prefs.setExternalPlayer("builtin") }
+                            else if (vlc) scope.launch { vm.prefs.setExternalPlayer("vlc") }
+                            else vm.toast("VLC is not installed on this box")
+                        }
+                        Text(if (vlc) "With VLC, channels and films open in VLC; Back returns here. The badge, recent channels and resume are VLC's own." else "Install VLC for Android TV to use it as the player, or for Open in VLC on a film.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 4.dp, bottom = 10.dp).width(760.dp))
                         SettingRow("Match the TV's refresh rate to the stream", if (frm) "ON" else "OFF") { scope.launch { vm.prefs.setFrameRateMatch(!frm) } }
                         Text("Stops the judder on 50 fps channels when the TV runs at 60. The picture goes black for a moment when the rate changes.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 4.dp, bottom = 10.dp).width(760.dp))
                         SettingRow("Tube power-on at launch", if (intro) "ON" else "OFF") { scope.launch { vm.prefs.setIntroEnabled(!intro) } }

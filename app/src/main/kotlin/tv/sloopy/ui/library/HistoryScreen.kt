@@ -66,8 +66,7 @@ fun HistoryScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit,
                     val pct = (r.positionMs * 100 / r.durationMs.coerceAtLeast(1)).toInt()
                     Surface(
                         onClick = {
-                            vm.playVod(r.itemId, r.title, r.subtitle, r.image, r.container, r.kind, r.parentId, r.positionMs)
-                            onPlay()
+                            if (vm.playVod(r.itemId, r.title, r.subtitle, r.image, r.container, r.kind, r.parentId, r.positionMs)) onPlay()
                         },
                         onLongClick = { vm.forgetProgress(r) },
                         shape = ClickableSurfaceDefaults.shape(RectangleShape),

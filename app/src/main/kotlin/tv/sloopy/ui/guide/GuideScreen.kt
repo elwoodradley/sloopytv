@@ -376,7 +376,17 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
         val name = groups.firstOrNull { it.first == id }?.second ?: "GROUP"
         ChoicePrompt(name.uppercase().take(28), listOf("move" to "Move this group · Up and Down, OK drops", "hide" to "Hide this group", "no" to "Not now"), onCancel = { groupMenu = null }, onPick = { k ->
             groupMenu = null
-            when (k) { "move" -> grabbed = id; "hide" -> { vm.setHidden(id, true); vm.toast("Hidden: $name. Settings › Listings brings it back.") } }
+            when (k) {
+                "move" -> grabbed = id
+                "hide" -> {
+                    // The cursor lands on the group below the hidden one (or above, at the end).
+                    val i = groups.indexOfFirst { it.first == id }
+                    val next = groups.getOrNull(i + 1) ?: groups.getOrNull(i - 1)
+                    if (next != null && next.first != groupNow) { focused = null; vm.selectGroup(next.first) }
+                    vm.setHidden(id, true); vm.toast("Hidden: $name. Settings › Listings brings it back.")
+                    scope.launch { delay(150); focusRail() }
+                }
+            }
         })
     }
     cellMenu?.let { (c, p) ->
@@ -387,6 +397,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             if (live) add("watch" to "Watch now")
             if (past && c.archive) add("catchup" to "Play from the start (catch-up)")
             if (!past) addAll(tv.sloopy.ui.record.RecordOptions.choices)
+            if (live && vm.vlcInstalled()) add("vlc" to "Open in VLC")
             add("fav" to (if (c.id in favIds) "Remove ${c.name.take(24)} from favourites" else "Add ${c.name.take(24)} to favourites"))
             add("no" to "Not now")
         }
@@ -395,6 +406,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                 "watch" -> { vm.tune(c); go("live") }
                 "catchup" -> { vm.playCatchup(c, p!!.title, p.startEpoch, p.stopEpoch); go("live") }
                 "fav" -> vm.toggleFavourite(c)
+                "vlc" -> vm.openChannelInVlc(c)
                 else -> tv.sloopy.ui.record.RecordOptions.handle(vm, k, c, p)
             }
             cellMenu = null

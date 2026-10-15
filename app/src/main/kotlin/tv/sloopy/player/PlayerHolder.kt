@@ -1,6 +1,9 @@
 package tv.sloopy.player
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
@@ -48,22 +51,44 @@ class PlayerHolder(context: Context) {
     private var retries = 0
     private var currentUrl: String? = null
 
-    val player: ExoPlayer = ExoPlayer.Builder(context.applicationContext)
+    private val appContext = context.applicationContext
+    private var bufferMode = "large"
+    /** Rebuilt when the buffer size changes; Compose reads it as state so views re-attach. */
+    var player: ExoPlayer by mutableStateOf(build("large"))
+        private set
+
+    /** Seconds of stream kept ahead: small for quick starts, large for shaky connections. */
+    fun setBuffer(mode: String) {
+        if (mode == bufferMode) return
+        bufferMode = mode
+        val url = currentUrl; val live = _state.value.isLive
+        val pos = if (live) 0L else player.currentPosition
+        val old = player
+        old.stop(); old.release()
+        player = build(mode)
+        if (url != null) play(url, live, pos)
+    }
+
+    private fun build(mode: String): ExoPlayer = ExoPlayer.Builder(appContext)
         .setRenderersFactory(
-            DefaultRenderersFactory(context.applicationContext)
+            DefaultRenderersFactory(appContext)
                 .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
                 .setEnableDecoderFallback(true)
         )
         .setMediaSourceFactory(
-            DefaultMediaSourceFactory(context.applicationContext)
+            DefaultMediaSourceFactory(appContext)
                 .setDataSourceFactory(
                     // http(s) through OkHttp; content:// and file:// (recordings) through the platform sources.
-                    androidx.media3.datasource.DefaultDataSource.Factory(context.applicationContext, OkHttpDataSource.Factory(AndroidHttp.client).setUserAgent(AndroidHttp.USER_AGENT))
+                    androidx.media3.datasource.DefaultDataSource.Factory(appContext, OkHttpDataSource.Factory(AndroidHttp.client).setUserAgent(AndroidHttp.USER_AGENT))
                 )
         )
         .setLoadControl(
             DefaultLoadControl.Builder()
-                .setBufferDurationsMs(12_000, 45_000, 1_200, 2_000)
+                .setBufferDurationsMs(
+                    when (mode) { "small" -> 6_000; "medium" -> 12_000; else -> 30_000 },
+                    when (mode) { "small" -> 20_000; "medium" -> 45_000; else -> 120_000 },
+                    1_200, 2_000,
+                )
                 .setPrioritizeTimeOverSizeThresholds(true)
                 .build()
         )

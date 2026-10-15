@@ -69,6 +69,12 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   the alarm receiver, folder handling (SAF tree or the app's own storage). Xtream channels are
   forced to TS; HLS-only URLs refuse with a message. Recordings play through the VOD player as
   `Playing.Vod(kind = "recording")`; the player's data source is DefaultDataSource over OkHttp.
+- 0.3.6: `PlayerHolder.player` is rebuilt when Settings › Picture › Buffer changes (small/medium/
+  large, default large); it is Compose state so PlayerViews re-attach. Guide re-downloads every
+  N hours (Settings › Listings, default 3). External player: Settings › Picture › Player = VLC
+  hands every stream to `org.videolan.vlc` via `vm.externalLaunches` (started by the Activity);
+  `playVod` returns false when VLC took it so callers skip opening the player screen. Hold menu
+  on a live cell and the details screen offer Open in VLC when it is installed.
 - Icon strip (0.3.4, `NavStrip` in `ui/common/Rail.kt`): seven drawn line icons at the far left of
   every screen (Guide, Movies, Series, History, Recordings, Search, Settings). Landing on it opens a
   label panel over the content to its right. Guide Back chain is grid → groups → strip → switch off.

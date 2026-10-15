@@ -44,6 +44,18 @@ class Prefs(private val context: Context) {
 
     val osdSeconds: Flow<Int> = ds.data.map { it[intPreferencesKey("osd_seconds")] ?: 4 }
 
+    /** "small" | "medium" | "large": how much stream the player keeps ahead. */
+    val bufferSize: Flow<String> = ds.data.map { it[stringPreferencesKey("buffer_size")] ?: "large" }
+    suspend fun setBufferSize(v: String) = ds.edit { it[stringPreferencesKey("buffer_size")] = v }
+
+    /** Hours between guide downloads. */
+    val epgIntervalHours: Flow<Int> = ds.data.map { it[intPreferencesKey("epg_interval_h")] ?: 3 }
+    suspend fun setEpgIntervalHours(v: Int) = ds.edit { it[intPreferencesKey("epg_interval_h")] = v }
+
+    /** "builtin" | "vlc": who plays streams. */
+    val externalPlayer: Flow<String> = ds.data.map { it[stringPreferencesKey("player")] ?: "builtin" }
+    suspend fun setExternalPlayer(v: String) = ds.edit { it[stringPreferencesKey("player")] = v }
+
     val clock12: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("clock_12h")] ?: false }
     suspend fun setClock12(v: Boolean) = ds.edit { it[booleanPreferencesKey("clock_12h")] = v }
 

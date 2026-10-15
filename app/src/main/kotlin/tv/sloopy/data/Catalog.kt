@@ -137,9 +137,9 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
     }
 
     /** Downloads and imports the XMLTV guide. Safe to call often; it is a no-op when fresh. */
-    suspend fun refreshEpg(record: ProviderRecord, force: Boolean = false): Int = withContext(Dispatchers.IO) {
+    suspend fun refreshEpg(record: ProviderRecord, force: Boolean = false, minIntervalMs: Long = EPG_MIN_INTERVAL_MS): Int = withContext(Dispatchers.IO) {
         val age = System.currentTimeMillis() - prefs.refreshedAt(record.id, "epg")
-        if (!force && age < EPG_MIN_INTERVAL_MS && db.programmes().count(record.id, epgGen(record.id)) > 0) return@withContext 0
+        if (!force && age < minIntervalMs && db.programmes().count(record.id, epgGen(record.id)) > 0) return@withContext 0
         _refresh.value = RefreshState.Running("Guide")
         val newGen = epgGen(record.id) + 1
         val count: Int
