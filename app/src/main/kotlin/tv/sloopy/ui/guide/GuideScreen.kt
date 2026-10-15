@@ -251,7 +251,12 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     Column(
         Modifier.fillMaxSize().background(Sloopy.ground)
             .onPreviewKeyEvent { ev ->
-                if (quit || sortMenu != null || cellMenu != null || groupMenu != null) return@onPreviewKeyEvent false
+                if (sortMenu != null || cellMenu != null || groupMenu != null) {
+                    // A menu is up. Back closes it whatever has focus; other keys stay inside it.
+                    if (ev.inKeys(BACK_KEYS)) { if (!ev.isDown) { sortMenu = null; cellMenu = null; groupMenu = null }; return@onPreviewKeyEvent true }
+                    return@onPreviewKeyEvent false
+                }
+                if (quit) return@onPreviewKeyEvent false
                 // Taken here on key-up: something below the grid cells swallows Back's key-down and
                 // drops focus instead, so the system BackHandler never saw every other press.
                 if (grabbed != null) {
