@@ -76,6 +76,7 @@ import tv.sloopy.ui.common.inKeys
 import tv.sloopy.ui.common.Label
 import tv.sloopy.ui.common.LiveDot
 import tv.sloopy.ui.common.ProgressHairline
+import tv.sloopy.ui.common.NavStrip
 import tv.sloopy.ui.common.RAIL_W
 import tv.sloopy.ui.common.RailHeader
 import tv.sloopy.ui.common.RailItem
@@ -101,13 +102,9 @@ private val NoBringIntoView = object : BringIntoViewSpec {
 
 private data class Focused(val channel: ChannelEntity, val prog: ProgrammeEntity?)
 
-/** What the left panel shows. Back walks NONE → GROUPS → SECTIONS → switch-off, like TiviMate. */
-private enum class Rail { NONE, GROUPS, SECTIONS }
+/** Where the cursor lives. Back walks NONE (grid) → GROUPS → STRIP (the icon column) → switch-off. */
+private enum class Rail { NONE, GROUPS, STRIP }
 
-private val SECTIONS = listOf(
-    "live" to "Live TV", "guide" to "Guide", "movies" to "Movies", "series" to "Series",
-    "history" to "History", "recordings" to "Recordings", "search" to "Search", "settings" to "Settings",
-)
 
 @UnstableApi
 @Composable
@@ -119,8 +116,9 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     val categories by vm.liveCategories.collectAsState()
     val locked by vm.lockedGroups.collectAsState()
     val unlocked by vm.unlockedSession.collectAsState()
-    val groups = remember(categories, locked, unlocked) {
-        listOf(Groups.ALL to "All channels", Groups.FAV to "Favourites") + categories.filter { unlocked || it.id !in locked }.map { it.id to tv.sloopy.core.model.Names.clean(it.name) }
+    val hiddenGroups by vm.hiddenGroups.collectAsState()
+    val groups = remember(categories, locked, unlocked, hiddenGroups) {
+        listOf(Groups.ALL to "All channels", Groups.FAV to "Favourites") + categories.filter { (unlocked || it.id !in locked) && it.id !in hiddenGroups }.map { it.id to tv.sloopy.core.model.Names.clean(it.name) }
     }
     val scope = rememberCoroutineScope()
 
@@ -134,6 +132,9 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     val firstRowFocus = remember { FocusRequester() }
     val lastRowFocus = remember { FocusRequester() }
     val railFocus = remember { FocusRequester() }
+    val stripFocus = remember { FocusRequester() }
+    // Hold OK on a group: move it or hide it.
+    var groupMenu by remember { mutableStateOf<String?>(null) }
     var focusedRow by remember { mutableStateOf(-1) }
     // Vertical moves keep a cursor time and land on the cell under it in the next row, without
     // scrolling the timeline (TiviMate behaviour). Only Left and Right move time.
@@ -143,7 +144,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     var verticalMove by remember { mutableStateOf(false) }
     var timelinePx by remember { mutableStateOf(0) }
 
-    var rail by remember { mutableStateOf(if (vm.takeGuideOpensAtSections()) Rail.SECTIONS else Rail.NONE) }
+    var rail by remember { mutableStateOf(if (vm.takeGuideOpensAtSections()) Rail.STRIP else Rail.NONE) }
     var quit by remember { mutableStateOf(false) }
     var pendingGroup by remember { mutableStateOf(false) }
     // Resting on a group for a moment previews it on the right; fast scrolling through the list does not.
@@ -176,8 +177,8 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     fun back() {
         when (rail) {
             Rail.NONE -> setRail(Rail.GROUPS)
-            Rail.GROUPS -> setRail(Rail.SECTIONS)
-            Rail.SECTIONS -> quit = true
+            Rail.GROUPS -> setRail(Rail.STRIP)
+            Rail.STRIP -> quit = true
         }
     }
     BackHandler { back() }
@@ -194,7 +195,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             }
         }
     }
-    suspend fun focusRail() { repeat(40) { delay(50); if (runCatching { railFocus.requestFocus() }.getOrDefault(false)) return } }
+    suspend fun focusRail() { val t = if (rail == Rail.STRIP) stripFocus else railFocus; repeat(40) { delay(50); if (runCatching { t.requestFocus() }.getOrDefault(false)) return } }
 
     fun viewStartEpoch(): Long = winStart + (hScroll.value / (dpPerSec * density)).toLong()
     /** The cell in [list] under the cursor time; else the next one; else the last; else the no-data cell. */
@@ -250,7 +251,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     Column(
         Modifier.fillMaxSize().background(Sloopy.ground)
             .onPreviewKeyEvent { ev ->
-                if (quit || sortMenu != null || cellMenu != null) return@onPreviewKeyEvent false
+                if (quit || sortMenu != null || cellMenu != null || groupMenu != null) return@onPreviewKeyEvent false
                 // Taken here on key-up: something below the grid cells swallows Back's key-down and
                 // drops focus instead, so the system BackHandler never saw every other press.
                 if (grabbed != null) {
@@ -275,8 +276,8 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                     ev.isKey(Key.Menu) -> { sortMenu = if (rail == Rail.GROUPS) "groups" else if (inGrid) "channels" else null; sortMenu != null }
                     // Left off the edge of the grid opens the groups, never a random rail row.
                     inGrid && ev.isKey(Key.DirectionLeft) && (hScroll.value == 0 || focused?.prog == null) -> { setRail(Rail.GROUPS); true }
-                    !inGrid && ev.isKey(Key.DirectionLeft) -> true
-                    !inGrid && ev.isKey(Key.DirectionRight) -> { setRail(if (rail == Rail.SECTIONS) Rail.GROUPS else Rail.NONE); true }
+                    !inGrid && ev.isKey(Key.DirectionLeft) -> { if (rail == Rail.GROUPS) setRail(Rail.STRIP); true }
+                    !inGrid && ev.isKey(Key.DirectionRight) -> { setRail(if (rail == Rail.STRIP) Rail.GROUPS else Rail.NONE); true }
                     inGrid && channels.isNotEmpty() && ev.isKey(Key.DirectionUp) -> { scope.launch { focusRow(if (focusedRow <= 0) channels.lastIndex else focusedRow - 1) }; true }
                     inGrid && channels.isNotEmpty() && ev.isKey(Key.DirectionDown) -> { scope.launch { focusRow(if (focusedRow >= channels.lastIndex) 0 else focusedRow + 1) }; true }
                     inGrid && channels.isNotEmpty() && ev.isKey(Key.ChannelUp, Key.PageUp) -> { scope.launch { focusRow((focusedRow - 10).coerceAtLeast(0)) }; true }
@@ -302,17 +303,17 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
         DetailPanel(vm, focused, current, nowEpoch)
 
         Row(Modifier.fillMaxSize().padding(horizontal = 72.dp)) {
+        NavStrip("guide", go = { route -> if (route == "guide") setRail(Rail.GROUPS) else go(route) }, requester = stripFocus, canFocus = rail == Rail.STRIP)
+        Spacer(Modifier.width(16.dp))
         // The groups stay on screen while the cursor is in the channels (TiviMate layout).
-        Column(Modifier.width(RAIL_W).fillMaxHeight().focusProperties { canFocus = rail != Rail.NONE }) {
+        Column(Modifier.width(RAIL_W).fillMaxHeight().focusProperties { canFocus = rail == Rail.GROUPS }) {
             RailHeader(
-                when { grabbed != null -> "Moving · Up/Down · OK drops"; rail == Rail.SECTIONS -> "SloopyTV"; rail == Rail.GROUPS -> "Groups · hold OK to move · Menu sorts"; else -> "Groups · Left or Back to change" },
+                when { grabbed != null -> "Moving · Up/Down · OK drops"; rail == Rail.GROUPS -> "Groups · hold OK for more · Menu sorts"; else -> "Groups · Left or Back to change" },
                 amber = grabbed != null,
             )
-            if (rail != Rail.SECTIONS) GroupRail(groups, groupNow, railFocus, grabbed, onGrab = { grabbed = it }, onHover = { if (rail == Rail.GROUPS) hoverGroup = it }) { id ->
+            GroupRail(groups, groupNow, railFocus, grabbed, onGrab = { groupMenu = it }, onHover = { if (rail == Rail.GROUPS) hoverGroup = it }) { id ->
                 if (id != groupNow) { pendingGroup = true; vm.selectGroup(id) }
                 setRail(Rail.NONE)
-            } else SectionRail(railFocus) { route ->
-                when (route) { "guide" -> setRail(Rail.GROUPS); else -> go(route) }
             }
         }
         Spacer(Modifier.width(24.dp))
@@ -366,6 +367,13 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
         "groups" -> ChoicePrompt("SORT GROUPS", listOf("az" to "A to Z", "provider" to "Provider order"), onPick = { vm.sortGroups(it); sortMenu = null }, onCancel = { sortMenu = null })
         "channels" -> ChoicePrompt("SORT THIS GROUP", listOf("provider" to "Provider order", "number" to "By number", "name" to "By name"), current = channelSort, onPick = { vm.setChannelSort(it); sortMenu = null }, onCancel = { sortMenu = null })
     }
+    groupMenu?.let { id ->
+        val name = groups.firstOrNull { it.first == id }?.second ?: "GROUP"
+        ChoicePrompt(name.uppercase().take(28), listOf("move" to "Move this group · Up and Down, OK drops", "hide" to "Hide this group", "no" to "Not now"), onCancel = { groupMenu = null }, onPick = { k ->
+            groupMenu = null
+            when (k) { "move" -> grabbed = id; "hide" -> { vm.setHidden(id, true); vm.toast("Hidden: $name. Settings › Listings brings it back.") } }
+        })
+    }
     cellMenu?.let { (c, p) ->
         val now = System.currentTimeMillis() / 1000
         val live = p == null || (p.startEpoch <= now && p.stopEpoch > now)
@@ -387,7 +395,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             cellMenu = null
         })
     }
-    LaunchedEffect(sortMenu, cellMenu) { if (sortMenu == null && cellMenu == null) { if (rail == Rail.NONE) focusGrid() else focusRail() } }
+    LaunchedEffect(sortMenu, cellMenu, groupMenu) { if (sortMenu == null && cellMenu == null && groupMenu == null) { if (rail == Rail.NONE) focusGrid() else focusRail() } }
     }
 }
 
@@ -418,15 +426,6 @@ private fun GroupRail(groups: List<Pair<String, String>>, group: String, railFoc
     }
 }
 
-/** The top level: where to go from the guide. */
-@Composable
-private fun SectionRail(railFocus: FocusRequester, onPick: (String) -> Unit) {
-    Column(Modifier.fillMaxSize()) {
-        SECTIONS.forEachIndexed { i, (route, label) ->
-            RailItem(label, selected = route == "guide", requester = if (route == "guide") railFocus else null, first = i == 0, last = i == SECTIONS.lastIndex) { onPick(route) }
-        }
-    }
-}
 
 @UnstableApi
 private fun onSelect(vm: SloopyViewModel, c: ChannelEntity, p: ProgrammeEntity?, go: (String) -> Unit) {

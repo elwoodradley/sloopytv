@@ -51,6 +51,7 @@ import tv.sloopy.ui.common.LiveDot
 import tv.sloopy.ui.common.BACK_KEYS
 import tv.sloopy.ui.common.RAIL_W
 import tv.sloopy.ui.common.RailHeader
+import tv.sloopy.ui.common.NavStrip
 import tv.sloopy.ui.common.RailItem
 import tv.sloopy.ui.common.ScreenHeader
 import tv.sloopy.ui.common.inKeys
@@ -78,6 +79,7 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
     var codeServerEdit by remember(codeServerSaved) { mutableStateOf(codeServerSaved ?: "") }
 
     val railFocus = remember { FocusRequester() }
+    val stripFocus = remember { FocusRequester() }
     val contentFocus = remember { FocusRequester() }
     var inRail by remember { mutableStateOf(true) }
     var section by remember { mutableStateOf(vm.settingsSection) }
@@ -97,11 +99,13 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
     ) {
         ScreenHeader("Settings")
         Row(Modifier.fillMaxSize().padding(horizontal = 72.dp)) {
+            NavStrip("settings", go = go, requester = stripFocus)
+            Spacer(Modifier.width(16.dp))
             Column(Modifier.width(RAIL_W).fillMaxHeight().onFocusChanged { if (it.hasFocus) inRail = true }) {
                 RailHeader("Settings")
                 SECTIONS.forEachIndexed { i, (key, name) ->
                     Box(Modifier.onFocusChanged { if (it.isFocused) section = key }) {
-                        RailItem(name, selected = key == section, requester = if (key == section) railFocus else null, first = i == 0, last = i == SECTIONS.lastIndex) { scope.launch { focusContent() } }
+                        RailItem(name, selected = key == section, requester = if (key == section) railFocus else null, first = i == 0, last = i == SECTIONS.lastIndex, leftTarget = stripFocus) { scope.launch { focusContent() } }
                     }
                 }
             }
@@ -164,7 +168,13 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                                 modifier = Modifier.align(Alignment.CenterVertically),
                             )
                         }
-                        Text("To reorder channel groups: open the guide, press Back for the groups, hold OK on a group, move it with Up and Down, press OK to drop it.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 24.dp).width(760.dp))
+                        Text("To reorder or hide channel groups: open the guide, press Back for the groups, hold OK on a group.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 24.dp).width(760.dp))
+                        val hidden by vm.hiddenGroups.collectAsState()
+                        val hiddenCats = categories.filter { it.id in hidden }
+                        if (hiddenCats.isNotEmpty()) {
+                            Section("Hidden groups")
+                            hiddenCats.forEach { c -> SettingRow(tv.sloopy.core.model.Names.clean(c.name), "SHOW") { vm.setHidden(c.id, false) } }
+                        }
                     }
                     "picture" -> {
                         Section("Picture")

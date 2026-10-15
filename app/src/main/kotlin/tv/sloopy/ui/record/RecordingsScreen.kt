@@ -33,6 +33,7 @@ import tv.sloopy.ui.SloopyViewModel
 import tv.sloopy.ui.common.ChoicePrompt
 import tv.sloopy.ui.common.Hairline
 import tv.sloopy.ui.common.Label
+import tv.sloopy.ui.common.NavStrip
 import tv.sloopy.ui.common.ScreenHeader
 import tv.sloopy.ui.common.TimeFmt
 import tv.sloopy.ui.theme.Sloopy
@@ -40,7 +41,7 @@ import tv.sloopy.ui.theme.Sloopy
 /** Scheduled, running and finished recordings. OK opens the choices for one. */
 @UnstableApi
 @Composable
-fun RecordingsScreen(vm: SloopyViewModel, onBack: () -> Unit, onPlay: () -> Unit) {
+fun RecordingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, onPlay: () -> Unit) {
     val rows by vm.recordings.collectAsState()
     val folder by vm.recordFolder.collectAsState()
     var chosen by remember { mutableStateOf<RecordingEntity?>(null) }
@@ -48,7 +49,10 @@ fun RecordingsScreen(vm: SloopyViewModel, onBack: () -> Unit, onPlay: () -> Unit
 
     Column(Modifier.fillMaxSize().background(Sloopy.ground)) {
         ScreenHeader("Recordings")
-        Column(Modifier.fillMaxSize().padding(horizontal = 72.dp, vertical = 16.dp)) {
+        Row(Modifier.fillMaxSize().padding(start = 72.dp)) {
+        NavStrip("recordings", go = go)
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.fillMaxSize().padding(end = 72.dp, top = 16.dp, bottom = 16.dp)) {
             Label("Recordings · ${rows.size}  ·  saved to: " + tv.sloopy.record.Recorder.describeFolder(folder))
             Text("RECORDED", style = Sloopy.titleHuge, modifier = Modifier.padding(top = 8.dp, bottom = 18.dp))
             if (rows.isEmpty()) Text("Nothing recorded yet. In the guide, OK on a programme that has not started offers Record. On the picture, OK then Record takes the programme that is on.", style = Sloopy.bodyBig, modifier = Modifier.width(900.dp))
@@ -93,6 +97,7 @@ fun RecordingsScreen(vm: SloopyViewModel, onBack: () -> Unit, onPlay: () -> Unit
             when (k) { "play" -> { vm.playRecording(r); onPlay() }; "stop" -> vm.stopRecording(r); "cancel", "delete" -> vm.deleteRecording(r) }
             chosen = null
         })
+        }
     }
 }
 

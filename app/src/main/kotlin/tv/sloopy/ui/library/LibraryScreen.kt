@@ -57,6 +57,7 @@ import tv.sloopy.data.db.ProgressEntity
 import tv.sloopy.ui.SloopyViewModel
 import tv.sloopy.ui.common.BACK_KEYS
 import tv.sloopy.ui.common.Label
+import tv.sloopy.ui.common.NavStrip
 import tv.sloopy.ui.common.ProgressHairline
 import tv.sloopy.ui.common.RAIL_W
 import tv.sloopy.ui.common.RailHeader
@@ -91,6 +92,8 @@ fun LibraryScreen(vm: SloopyViewModel, kind: String, go: (String) -> Unit, onBac
     var inRail by remember { mutableStateOf(true) }
     var gridHasFocus by remember { mutableStateOf(false) }
     val lastTile = remember { mutableStateOf<FocusRequester?>(null) }
+    val stripFocus = remember { FocusRequester() }
+    var inStrip by remember { mutableStateOf(false) }
 
     val categories by produceState<List<CategoryEntity>>(emptyList(), provider?.id, kind) {
         val p = provider ?: return@produceState
@@ -154,7 +157,7 @@ fun LibraryScreen(vm: SloopyViewModel, kind: String, go: (String) -> Unit, onBac
                 if (!ev.isDown) return@onPreviewKeyEvent false
                 when {
                     inRail && ev.isKey(Key.DirectionRight) -> { if (tiles.isNotEmpty()) scope.launch { focusGrid() }; true }
-                    !inRail && !gridHasFocus && lastTile.value != null && ev.isKey(Key.DirectionUp, Key.DirectionDown, Key.DirectionLeft, Key.DirectionRight) -> {
+                    !inRail && !inStrip && !gridHasFocus && lastTile.value != null && ev.isKey(Key.DirectionUp, Key.DirectionDown, Key.DirectionLeft, Key.DirectionRight) -> {
                         // Safety net: the highlight went nowhere; put it back on the last poster.
                         runCatching { lastTile.value?.requestFocus() }; true
                     }
@@ -187,6 +190,8 @@ fun LibraryScreen(vm: SloopyViewModel, kind: String, go: (String) -> Unit, onBac
         }
 
         Row(Modifier.fillMaxSize().padding(horizontal = 72.dp)) {
+            NavStrip(if (kind == "vod") "movies" else "series", go = go, requester = stripFocus, onFocusChange = { inStrip = it })
+            Spacer(Modifier.width(16.dp))
             Column(Modifier.width(RAIL_W).fillMaxHeight().onFocusChanged { if (it.hasFocus) inRail = true }) {
                 RailHeader(if (kind == "vod") "Categories" else "Categories")
                 val state = rememberLazyListState()
@@ -195,7 +200,7 @@ fun LibraryScreen(vm: SloopyViewModel, kind: String, go: (String) -> Unit, onBac
                 LazyColumn(state = state, modifier = Modifier.fillMaxSize()) {
                     itemsIndexed(rows, key = { _, r -> r.first }) { i, (key, name) ->
                         Box(Modifier.onFocusChanged { if (it.isFocused) selected = key }) {
-                            RailItem(name, selected = key == selected, requester = if (key == selected) railFocus else null, first = i == 0, last = i == rows.lastIndex) {
+                            RailItem(name, selected = key == selected, requester = if (key == selected) railFocus else null, first = i == 0, last = i == rows.lastIndex, leftTarget = stripFocus) {
                                 if (tiles.isNotEmpty()) scope.launch { focusGrid() }
                             }
                         }

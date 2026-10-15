@@ -116,6 +116,17 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val lockedGroups: StateFlow<Set<String>> = active.flatMapLatest { p ->
         if (p == null) flowOf(emptySet()) else prefs.lockedGroups(p.id)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    /** Groups the viewer hid from the guide, channel list and search. */
+    val hiddenGroups: StateFlow<Set<String>> = active.flatMapLatest { p ->
+        if (p == null) flowOf(emptySet()) else prefs.hiddenGroups(p.id)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    fun setHidden(groupId: String, hidden: Boolean) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val cur = hiddenGroups.value.toMutableSet()
+        if (hidden) cur.add(groupId) else cur.remove(groupId)
+        prefs.setHiddenGroups(p.id, cur)
+        if (hidden && _group.value == groupId) selectGroup(Groups.ALL)
+    }
 
     private val _group = MutableStateFlow(Groups.ALL)
     val group: StateFlow<String> = _group
@@ -141,7 +152,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (unlocked) base else base.filter { it.categoryId !in locked }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val visibleChannels: StateFlow<List<ChannelEntity>> = combine(visibleBase, channelSort) { list, mode ->
+    val visibleChannels: StateFlow<List<ChannelEntity>> = combine(visibleBase, channelSort, hiddenGroups) { base, mode, hidden ->
+        val list = if (hidden.isEmpty()) base else base.filter { it.categoryId !in hidden }
         when (mode) { "number" -> list.sortedBy { it.number }; "name" -> list.sortedBy { it.name.lowercase() }; else -> list }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -308,7 +320,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val progressTick = active.flatMapLatest { p -> if (p == null) flowOf(emptyList()) else graph.db.progress().recent(p.id, 1) }
             kotlinx.coroutines.flow.merge(
-                favouriteIds, favouriteVodIds, favouriteSeriesIds, groupOrder, lockedGroups, providerList, progressTick,
+                favouriteIds, favouriteVodIds, favouriteSeriesIds, groupOrder, lockedGroups, hiddenGroups, providerList, progressTick,
                 prefs.theme, prefs.clock12, prefs.frameRateMatch, prefs.introEnabled, prefs.osdSeconds, prefs.searchHistory, prefs.license,
             ).map { }.drop(1).debounce(8_000).collect { if (syncCode.value != null) syncNow() }
         }

@@ -49,6 +49,7 @@ import tv.sloopy.ui.common.ChannelLogo
 import tv.sloopy.ui.common.ChoicePrompt
 import tv.sloopy.ui.common.Hairline
 import tv.sloopy.ui.common.Label
+import tv.sloopy.ui.common.NavStrip
 import tv.sloopy.ui.common.ScreenHeader
 import tv.sloopy.ui.settings.Field
 import tv.sloopy.ui.theme.Sloopy
@@ -104,11 +105,13 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
         delay(250)
         val text = q.trim()
         val now = System.currentTimeMillis() / 1000
-        val byEpg = channels.filter { it.epgId != null }.associateBy { it.epgId!! }
+        val hidden = vm.hiddenGroups.value
+        val shown = channels.filter { it.categoryId !in hidden }
+        val byEpg = shown.filter { it.epgId != null }.associateBy { it.epgId!! }
         val out = ArrayList<Hit>()
         runCatching {
-            vm.graph.db.channels().search(p.id, text, 30).forEach { out.add(Hit.Chan(it)) }
-            vm.catalog.searchProgrammes(p.id, text, now).take(40).forEach { out.add(Hit.Prog(it, byEpg[it.epgId])) }
+            vm.graph.db.channels().search(p.id, text, 40).filter { it.categoryId !in hidden }.take(30).forEach { out.add(Hit.Chan(it)) }
+            vm.catalog.searchProgrammes(p.id, text, now).filter { byEpg[it.epgId] != null }.take(40).forEach { out.add(Hit.Prog(it, byEpg[it.epgId])) }
             vm.graph.db.vod().search(p.id, text, 30).forEach { out.add(Hit.Item("vod", it.id, it.name, "Movie" + (it.year?.let { y -> " · $y" } ?: ""))) }
             vm.graph.db.series().search(p.id, text, 30).forEach { out.add(Hit.Item("series", it.id, it.name, "Series" + (it.releaseDate?.take(4)?.let { y -> " · $y" } ?: ""))) }
         }
@@ -120,7 +123,10 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
 
     Column(Modifier.fillMaxSize().background(Sloopy.ground)) {
         ScreenHeader("Search")
-        Column(Modifier.fillMaxSize().padding(horizontal = 72.dp)) {
+        Row(Modifier.fillMaxSize().padding(start = 72.dp)) {
+        NavStrip("search", go = go)
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.fillMaxSize().padding(end = 72.dp)) {
             Row(verticalAlignment = Alignment.Bottom) {
                 Box(Modifier.width(720.dp)) {
                     Field("Search channels, programmes, movies and series", q, { q = it }, modifier = Modifier.focusRequester(field), placeholder = "Type, or press Speak", backLeaves = true)
@@ -174,6 +180,7 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
                     }
                 }
             }
+        }
         }
     }
     recordAsk?.let { (c, p) ->

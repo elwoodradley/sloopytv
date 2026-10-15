@@ -33,6 +33,7 @@ import tv.sloopy.data.db.ProgressEntity
 import tv.sloopy.ui.SloopyViewModel
 import tv.sloopy.ui.common.Hairline
 import tv.sloopy.ui.common.Label
+import tv.sloopy.ui.common.NavStrip
 import tv.sloopy.ui.common.ProgressHairline
 import tv.sloopy.ui.common.ScreenHeader
 import tv.sloopy.ui.theme.Sloopy
@@ -53,7 +54,10 @@ fun HistoryScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit,
 
     Column(Modifier.fillMaxSize().background(Sloopy.ground)) {
         ScreenHeader("History")
-        Column(Modifier.fillMaxSize().padding(horizontal = 72.dp, vertical = 16.dp)) {
+        Row(Modifier.fillMaxSize().padding(start = 72.dp)) {
+        NavStrip("history", go = go)
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.fillMaxSize().padding(end = 72.dp, top = 16.dp, bottom = 16.dp)) {
             Label("History · ${rows.size}")
             Text("WHERE YOU LEFT OFF", style = Sloopy.titleHuge, modifier = Modifier.padding(top = 8.dp, bottom = 18.dp))
             if (rows.isEmpty()) Text("Nothing on.", style = Sloopy.bodyBig)
@@ -91,6 +95,7 @@ fun HistoryScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit,
                     }
                 }
             }
+        }
         }
     }
 }

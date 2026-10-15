@@ -101,7 +101,7 @@ private fun SloopyNav(vm: SloopyViewModel, startAtProviders: Boolean, onQuit: ()
             LiveScreen(vm, go = go, onQuit = onQuit, onBack = { if (nav.previousBackStackEntry?.destination?.route == "search") nav.popBackStack() else go("guide") })
         }
         composable("guide") { GuideScreen(vm, go = go, onQuit = onQuit) }
-        composable("recordings") { tv.sloopy.ui.record.RecordingsScreen(vm, onBack = { vm.guideOpensAtSections = true; go("guide") }, onPlay = { nav.navigate("vodplayer") }) }
+        composable("recordings") { tv.sloopy.ui.record.RecordingsScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onPlay = { nav.navigate("vodplayer") }) }
         composable("history") { HistoryScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onPlay = { nav.navigate("vodplayer") }) }
         composable("movies") { LibraryScreen(vm, kind = "vod", go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onOpen = { id -> nav.navigate("details/vod/$id") }) }
         composable("series") { LibraryScreen(vm, kind = "series", go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onOpen = { id -> nav.navigate("details/series/$id") }) }
