@@ -187,7 +187,9 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
 
     // Put focus on the current channel's "now" cell (or the top row), with "now" one slot in from the left.
     suspend fun focusGrid() {
-        val i = channels.indexOfFirst { it.id == current?.id }
+        // The current channel's row when it is in this group; otherwise the row the cursor was on,
+        // never the top (a held Down used to end with a jump to row one).
+        val i = channels.indexOfFirst { it.id == current?.id }.let { if (it < 0 && focusedRow in channels.indices) focusedRow else it }
         listState.scrollToItem((i - 3).coerceAtLeast(0))
         val targets = if (i >= 0) listOf(nowFocus, firstRowFocus) else listOf(firstRowFocus)
         for (t in targets) repeat(40) {
@@ -208,8 +210,14 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             ?: list.lastOrNull { it.stopEpoch > winStart }
         return "${c.id}|${p?.startEpoch ?: "nodata"}"
     }
+    // Held keys repeat faster than the cursor lands; each move chains off the last *requested*
+    // row and cancels the one still in flight, so twelve repeats mean twelve rows.
+    var pendingRow by remember { mutableStateOf(-1) }
+    var moveJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    fun rowFrom(): Int = if (pendingRow in channels.indices) pendingRow else focusedRow
     suspend fun focusRow(target: Int) {
         val c = channels.getOrNull(target) ?: return
+        pendingRow = target
         verticalMove = true
         val vis = listState.layoutInfo.visibleItemsInfo
         if (vis.none { it.index == target }) {
@@ -218,16 +226,18 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
         }
         repeat(40) {
             val fr = cellRequesters[pickKey(c, rowProgs[c.id] ?: emptyList())]
-            if (fr != null && runCatching { fr.requestFocus() }.getOrDefault(false)) return
+            if (fr != null && runCatching { fr.requestFocus() }.getOrDefault(false)) { pendingRow = -1; return }
             delay(40)
         }
         // The cell under the cursor time never appeared (a wrap to the far end of a long list can
-        // outrun it). Any cell of that row will do; failing that, the current channel's row.
+        // outrun it). Any cell of that row will do; failing that, the row the cursor was on.
         val any = cellRequesters.entries.firstOrNull { it.key.startsWith("${c.id}|") }?.value
+        pendingRow = -1
         if (any != null && runCatching { any.requestFocus() }.getOrDefault(false)) return
         verticalMove = false
         focusGrid()
     }
+    fun move(target: Int) { moveJob?.cancel(); moveJob = scope.launch { focusRow(target) } }
     // Focus watchdog: if the grid is the active area and nothing in it has focus for a moment
     // (a focused cell scrolled out and was disposed), put the cursor back rather than lose it.
     var gridHasFocus by remember { mutableStateOf(false) }
@@ -298,10 +308,10 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                     inGrid && ev.isKey(Key.DirectionLeft) && (hScroll.value == 0 || focused?.prog == null) -> { setRail(Rail.GROUPS); true }
                     !inGrid && ev.isKey(Key.DirectionLeft) -> { if (rail == Rail.GROUPS) setRail(Rail.STRIP); true }
                     !inGrid && ev.isKey(Key.DirectionRight) -> { setRail(if (rail == Rail.STRIP) Rail.GROUPS else Rail.NONE); true }
-                    inGrid && channels.isNotEmpty() && ev.isKey(Key.DirectionUp) -> { scope.launch { focusRow(if (focusedRow <= 0) channels.lastIndex else focusedRow - 1) }; true }
-                    inGrid && channels.isNotEmpty() && ev.isKey(Key.DirectionDown) -> { scope.launch { focusRow(if (focusedRow >= channels.lastIndex) 0 else focusedRow + 1) }; true }
-                    inGrid && channels.isNotEmpty() && ev.isKey(Key.ChannelUp, Key.PageUp) -> { scope.launch { focusRow((focusedRow - 10).coerceAtLeast(0)) }; true }
-                    inGrid && channels.isNotEmpty() && ev.isKey(Key.ChannelDown, Key.PageDown) -> { scope.launch { focusRow((focusedRow + 10).coerceAtMost(channels.lastIndex)) }; true }
+                    inGrid && channels.isNotEmpty() && ev.isKey(Key.DirectionUp) -> { val r = rowFrom(); move(if (r <= 0) channels.lastIndex else r - 1); true }
+                    inGrid && channels.isNotEmpty() && ev.isKey(Key.DirectionDown) -> { val r = rowFrom(); move(if (r >= channels.lastIndex) 0 else r + 1); true }
+                    inGrid && channels.isNotEmpty() && ev.isKey(Key.ChannelUp, Key.PageUp) -> { move((rowFrom() - 10).coerceAtLeast(0)); true }
+                    inGrid && channels.isNotEmpty() && ev.isKey(Key.ChannelDown, Key.PageDown) -> { move((rowFrom() + 10).coerceAtMost(channels.lastIndex)); true }
                     else -> false
                 }
             }
@@ -369,7 +379,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                         vm = vm, channel = c, isCurrent = c.id == current?.id,
                         winStart = winStart, winEnd = winEnd, nowEpoch = nowEpoch, dpPerSec = dpPerSec,
                         hScroll = hScroll, requesters = requesters,
-                        onFocused = { p -> focusedRow = i; focused = Focused(c, p); cellFocused(p) },
+                        onFocused = { p -> focusedRow = i; if (pendingRow == i) pendingRow = -1; focused = Focused(c, p); cellFocused(p) },
                         onSelect = { p -> if (p != null && p.startEpoch > System.currentTimeMillis() / 1000) cellMenu = c to p else onSelect(vm, c, p, go) },
                         onHold = { p -> cellMenu = c to p },
                         onLoaded = { if (focusedRow == i && rail == Rail.NONE) scope.launch { focusRow(i) } },
