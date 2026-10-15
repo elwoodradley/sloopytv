@@ -178,6 +178,13 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                             Section("Hidden groups")
                             hiddenCats.forEach { c -> SettingRow(tv.sloopy.core.model.Names.clean(c.name), "SHOW") { vm.setHidden(c.id, false) } }
                         }
+                        val hiddenCh by vm.hiddenChannels.collectAsState()
+                        val allCh by vm.channels.collectAsState()
+                        val hiddenChans = allCh.filter { it.id in hiddenCh }
+                        if (hiddenChans.isNotEmpty()) {
+                            Section("Hidden channels")
+                            hiddenChans.forEach { c -> SettingRow("${c.number}  ${tv.sloopy.core.model.Names.clean(c.name)}", "SHOW") { vm.setChannelHidden(c.id, false) } }
+                        }
                     }
                     "picture" -> {
                         Section("Picture")
@@ -307,17 +314,32 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                     }
                     else -> {
                         Section("About")
+                        // One button that changes label with the state, so the cursor never leaves it.
+                        val aboutBtn = remember { FocusRequester() }
+                        var aboutHad by remember { mutableStateOf(false) }
+                        LaunchedEffect(update) { if (aboutHad) { delay(60); runCatching { aboutBtn.requestFocus() } } }
+                        val (label, primary, enabled, action) = when (val u = update) {
+                            is UpdateState.Available -> listOf("Install ${u.info.version}", true, true, { vm.installUpdate() })
+                            is UpdateState.NeedsPermission -> listOf("Install ${u.info.version}", true, true, { vm.installUpdate() })
+                            is UpdateState.Downloading -> listOf("Downloading ${u.percent}%", false, false, {})
+                            is UpdateState.Ready -> listOf("Show the install screen", true, true, { vm.installUpdate() })
+                            UpdateState.Checking -> listOf("Checking…", false, false, {})
+                            else -> listOf("Check for updates", false, true, { vm.checkForUpdate(force = true) })
+                        }
+                        val note = when (val u = update) {
+                            is UpdateState.Available -> "A newer SloopyTV is ready. The box will ask you to confirm."
+                            is UpdateState.NeedsPermission -> "One-time step: on the screen that opened, turn on \"Allow from this source\" for SloopyTV, press Back, then press Install again."
+                            is UpdateState.Downloading -> "Hang on: downloading ${u.info.version}."
+                            is UpdateState.Ready -> "Downloaded ${u.info.version}. The box asks you to confirm. If nothing appeared, press the button again."
+                            is UpdateState.Failed -> u.message
+                            UpdateState.UpToDate -> "This is the latest version."
+                            else -> ""
+                        }
                         Row(verticalAlignment = Alignment.CenterVertically) {
-                            when (val u = update) {
-                                is UpdateState.Available -> { SloopyButton("Install ${u.info.version}", primary = true, onClick = { vm.installUpdate() }); Spacer(Modifier.width(16.dp)); Text("A newer SloopyTV is ready. The Fire TV will ask you to confirm.", style = Sloopy.body) }
-                                is UpdateState.NeedsPermission -> { SloopyButton("Install ${u.info.version}", primary = true, onClick = { vm.installUpdate() }); Spacer(Modifier.width(16.dp)); Text("One-time step: on the screen that opened, turn on \"Allow from this source\" for SloopyTV, press Back, then press Install again.", style = Sloopy.body.copy(color = Sloopy.amber), modifier = Modifier.width(760.dp)) }
-                                is UpdateState.Downloading -> { SloopyButton("Downloading ${u.percent}%", enabled = false, onClick = {}); Spacer(Modifier.width(16.dp)); Text("Hang on: downloading ${u.info.version}.", style = Sloopy.body.copy(color = Sloopy.amber)) }
-                                is UpdateState.Ready -> { SloopyButton("Show the install screen", primary = true, onClick = { vm.installUpdate() }); Spacer(Modifier.width(16.dp)); Text("Downloaded ${u.info.version}. The box asks you to confirm. If nothing appeared, press the button again.", style = Sloopy.body.copy(color = Sloopy.amber), modifier = Modifier.width(700.dp)) }
-                                is UpdateState.Failed -> { SloopyButton("Check for updates", onClick = { vm.checkForUpdate(force = true) }); Spacer(Modifier.width(16.dp)); Text(u.message, style = Sloopy.body.copy(color = Sloopy.amber)) }
-                                UpdateState.Checking -> Text("Checking…", style = Sloopy.body)
-                                UpdateState.UpToDate -> { SloopyButton("Check for updates", onClick = { vm.checkForUpdate(force = true) }); Spacer(Modifier.width(16.dp)); Text("This is the latest version.", style = Sloopy.body) }
-                                UpdateState.Idle -> SloopyButton("Check for updates", onClick = { vm.checkForUpdate(force = true) })
-                            }
+                            @Suppress("UNCHECKED_CAST")
+                            SloopyButton(label as String, primary = primary as Boolean, enabled = enabled as Boolean, onClick = action as () -> Unit, modifier = Modifier.focusRequester(aboutBtn).onFocusChanged { if (it.isFocused) aboutHad = true })
+                            Spacer(Modifier.width(16.dp))
+                            Text(note, style = Sloopy.body.copy(color = if (update is UpdateState.Failed || update is UpdateState.NeedsPermission) Sloopy.amber else Sloopy.textSoft), modifier = Modifier.width(700.dp))
                         }
                         Text("SloopyTV ${BuildConfig.VERSION_NAME}. A player only: it ships with no channels and no providers. Credentials stay in this device's keystore. No analytics, no telemetry.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 20.dp).width(760.dp))
                     }

@@ -267,3 +267,25 @@ interface RecordingDao {
     @Query("UPDATE recordings SET status = CASE WHEN bytes > 0 THEN 'done' ELSE 'failed' END, error = CASE WHEN bytes > 0 THEN error ELSE 'Interrupted' END WHERE status = 'recording'")
     suspend fun finishStale()
 }
+
+@Dao
+interface ReminderDao {
+    @Query("SELECT * FROM reminders WHERE providerId = :p ORDER BY startEpoch")
+    fun all(p: String): Flow<List<ReminderEntity>>
+
+    /** The next reminder whose programme is starting (a minute early) or already on. */
+    @Query("SELECT * FROM reminders WHERE startEpoch - 60 <= :now AND stopEpoch > :now ORDER BY startEpoch LIMIT 1")
+    suspend fun due(now: Long): ReminderEntity?
+
+    @Insert
+    suspend fun insert(r: ReminderEntity): Long
+
+    @Query("DELETE FROM reminders WHERE id = :id")
+    suspend fun delete(id: Long)
+
+    @Query("DELETE FROM reminders WHERE providerId = :p AND channelId = :channelId AND startEpoch = :startEpoch")
+    suspend fun deleteFor(p: String, channelId: Long, startEpoch: Long)
+
+    @Query("DELETE FROM reminders WHERE stopEpoch <= :now")
+    suspend fun purge(now: Long)
+}

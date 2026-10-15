@@ -37,7 +37,7 @@ import tv.sloopy.player.PlayerHolder
 import java.time.ZoneId
 
 /** Pseudo groups shown above the provider's categories. */
-const val GUIDE_HOURS_BACK = 2L
+const val GUIDE_HOURS_BACK = 48L
 const val GUIDE_HOURS_FWD = 24L
 
 const val VLC = "org.videolan.vlc"
@@ -123,6 +123,45 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val hiddenGroups: StateFlow<Set<String>> = active.flatMapLatest { p ->
         if (p == null) flowOf(emptySet()) else prefs.hiddenGroups(p.id)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    val hiddenChannels: StateFlow<Set<Long>> = active.flatMapLatest { p ->
+        if (p == null) flowOf(emptySet()) else prefs.hiddenChannels(p.id)
+    }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
+    fun setChannelHidden(id: Long, hidden: Boolean) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val cur = hiddenChannels.value.toMutableSet()
+        if (hidden) cur.add(id) else cur.remove(id)
+        prefs.setHiddenChannels(p.id, cur)
+    }
+
+    // ---- Reminders -----------------------------------------------------------------------------
+    val reminders: StateFlow<List<tv.sloopy.data.db.ReminderEntity>> = active.flatMapLatest { p -> if (p == null) flowOf(emptyList()) else graph.db.reminders().all(p.id) }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    fun hasReminder(channelId: Long, startEpoch: Long): Boolean = reminders.value.any { it.channelId == channelId && it.startEpoch == startEpoch }
+    fun addReminder(c: ChannelEntity, title: String, startEpoch: Long, stopEpoch: Long) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        graph.db.reminders().deleteFor(p.id, c.id, startEpoch)
+        graph.db.reminders().insert(tv.sloopy.data.db.ReminderEntity(providerId = p.id, channelId = c.id, channelName = c.name, title = title, startEpoch = startEpoch, stopEpoch = stopEpoch))
+        _toast.value = "Reminder set: $title at ${tv.sloopy.ui.common.TimeFmt.hhmm(startEpoch)}. SloopyTV has to be open."
+    }
+    fun removeReminder(c: ChannelEntity, startEpoch: Long) = viewModelScope.launch { active.value?.let { graph.db.reminders().deleteFor(it.id, c.id, startEpoch) } }
+    /** The reminder whose programme is starting, shown as a prompt over whatever is on screen. */
+    private val _dueReminder = MutableStateFlow<tv.sloopy.data.db.ReminderEntity?>(null)
+    val dueReminder: StateFlow<tv.sloopy.data.db.ReminderEntity?> = _dueReminder
+    fun dismissReminder(r: tv.sloopy.data.db.ReminderEntity, watch: Boolean) {
+        viewModelScope.launch { graph.db.reminders().delete(r.id) }
+        _dueReminder.value = null
+        if (watch) channels.value.firstOrNull { it.id == r.channelId }?.let { tune(it); goHome() }
+    }
+    init {
+        viewModelScope.launch {
+            while (true) {
+                val now = System.currentTimeMillis() / 1000
+                runCatching { graph.db.reminders().purge(now); if (_dueReminder.value == null) _dueReminder.value = graph.db.reminders().due(now) }
+                delay(15_000)
+            }
+        }
+    }
+
     fun setHidden(groupId: String, hidden: Boolean) = viewModelScope.launch {
         val p = active.value ?: return@launch
         val cur = hiddenGroups.value.toMutableSet()
@@ -155,8 +194,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             }
             if (unlocked) base else base.filter { it.categoryId !in locked }
         }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    val visibleChannels: StateFlow<List<ChannelEntity>> = combine(visibleBase, channelSort, hiddenGroups) { base, mode, hidden ->
-        val list = if (hidden.isEmpty()) base else base.filter { it.categoryId !in hidden }
+    val visibleChannels: StateFlow<List<ChannelEntity>> = combine(visibleBase, channelSort, hiddenGroups, hiddenChannels) { base, mode, hidden, hiddenCh ->
+        val list = base.filter { (hidden.isEmpty() || it.categoryId !in hidden) && it.id !in hiddenCh }
         when (mode) { "number" -> list.sortedBy { it.number }; "name" -> list.sortedBy { it.name.lowercase() }; else -> list }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
@@ -323,7 +362,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         viewModelScope.launch {
             val progressTick = active.flatMapLatest { p -> if (p == null) flowOf(emptyList()) else graph.db.progress().recent(p.id, 1) }
             kotlinx.coroutines.flow.merge(
-                favouriteIds, favouriteVodIds, favouriteSeriesIds, groupOrder, lockedGroups, hiddenGroups, providerList, progressTick,
+                favouriteIds, favouriteVodIds, favouriteSeriesIds, groupOrder, lockedGroups, hiddenGroups, hiddenChannels, providerList, progressTick,
                 prefs.theme, prefs.clock12, prefs.frameRateMatch, prefs.introEnabled, prefs.osdSeconds, prefs.searchHistory, prefs.license,
             ).map { }.drop(1).debounce(8_000).collect { if (syncCode.value != null) syncNow() }
         }
@@ -585,6 +624,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val next = if (i < 0) 0 else ((i + delta) % list.size + list.size) % list.size
         tune(list[next])
     }
+
+    fun seekBy(ms: Long) { val p = player.player; p.seekTo((p.currentPosition + ms).coerceIn(0, maxOf(0, p.duration))) }
 
     fun playCatchup(c: ChannelEntity, title: String, startEpoch: Long, stopEpoch: Long) {
         val p = active.value ?: return

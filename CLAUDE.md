@@ -69,6 +69,12 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   the alarm receiver, folder handling (SAF tree or the app's own storage). Xtream channels are
   forced to TS; HLS-only URLs refuse with a message. Recordings play through the VOD player as
   `Playing.Vod(kind = "recording")`; the player's data source is DefaultDataSource over OkHttp.
+- 0.3.7: reminders table (`reminders`, DB v4); `vm.dueReminder` is polled every 15 s and
+  `SloopyRoot` shows a prompt over any screen (Watch tunes + goHome). Hidden channels live in
+  Prefs like hidden groups. Guide window is 48 h back (catch-up within `archiveDays`); rows only
+  compose cells within a 6-hour bucket window around the scroll to keep the Shield happy.
+  Catch-up: Left/Right ±30 s, RW/FF ±2 min, badge shows the time position. Live OK opens the info
+  overlay on key-up and the overlay ignores OK for 400 ms, for phone remotes that repeat.
 - 0.3.6: `PlayerHolder.player` is rebuilt when Settings › Picture › Buffer changes (small/medium/
   large, default large); it is Compose state so PlayerViews re-attach. Guide re-downloads every
   N hours (Settings › Listings, default 3). External player: Settings › Picture › Player = VLC

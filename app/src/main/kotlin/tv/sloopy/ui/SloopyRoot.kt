@@ -49,10 +49,17 @@ fun SloopyRoot(vm: SloopyViewModel, onQuit: () -> Unit) {
     var quitting by remember { mutableStateOf(false) }
     val toast by vm.toast.collectAsState()
     val locked by vm.locked.collectAsState()
+    val due by vm.dueReminder.collectAsState()
 
     val body: @Composable () -> Unit = {
         Box(Modifier.fillMaxSize().background(Sloopy.ground)) {
             if (locked) tv.sloopy.ui.pay.UnlockScreen(vm) else SloopyNav(vm, startAtProviders = providers.isEmpty(), onQuit = { quitting = true })
+            due?.let { r ->
+                tv.sloopy.ui.common.ChoicePrompt(
+                    "STARTING NOW", listOf("watch" to "Watch ${r.title.take(26)} on ${r.channelName.take(20)}", "no" to "Not now"),
+                    onCancel = { vm.dismissReminder(r, watch = false) }, onPick = { vm.dismissReminder(r, watch = it == "watch") },
+                )
+            }
             if (toast != null) {
                 LaunchedEffect(toast) { delay(5000); vm.clearToast() }
                 Box(Modifier.align(Alignment.BottomCenter).padding(bottom = 40.dp).background(Sloopy.surface2).padding(horizontal = 20.dp, vertical = 12.dp)) {

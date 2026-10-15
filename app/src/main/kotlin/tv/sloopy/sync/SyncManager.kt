@@ -27,6 +27,7 @@ data class SyncBundle(
     val groupOrder: Map<String, List<String>>,
     val lockedGroups: Map<String, List<String>>,
     val hiddenGroups: Map<String, List<String>> = emptyMap(),
+    val hiddenChannels: Map<String, List<Long>> = emptyMap(),
     val channelSorts: Map<String, String>,
     val lastChannel: Map<String, Long>,
     val lastGroup: Map<String, String>,
@@ -54,6 +55,7 @@ class SyncManager(private val db: SloopyDb, private val prefs: Prefs, private va
             groupOrder = ids.associateWith { prefs.groupOrder(it).first() },
             lockedGroups = ids.associateWith { prefs.lockedGroups(it).first().toList() },
             hiddenGroups = ids.associateWith { prefs.hiddenGroups(it).first().toList() },
+            hiddenChannels = ids.associateWith { prefs.hiddenChannels(it).first().toList() },
             channelSorts = prefs.allChannelSorts(),
             lastChannel = ids.mapNotNull { p -> prefs.lastChannel(p)?.let { p to it } }.toMap(),
             lastGroup = ids.mapNotNull { p -> prefs.lastGroup(p)?.let { p to it } }.toMap(),
@@ -80,6 +82,7 @@ class SyncManager(private val db: SloopyDb, private val prefs: Prefs, private va
         b.groupOrder.forEach { (p, o) -> if (o.isNotEmpty()) prefs.setGroupOrder(p, o) }
         b.lockedGroups.forEach { (p, l) -> prefs.setLockedGroups(p, l.toSet()) }
         b.hiddenGroups.forEach { (p, l) -> prefs.setHiddenGroups(p, l.toSet()) }
+        b.hiddenChannels.forEach { (p, l) -> prefs.setHiddenChannels(p, l.toSet()) }
         prefs.restoreChannelSorts(b.channelSorts)
         b.lastChannel.forEach { (p, c) -> prefs.setLastChannel(p, c) }
         b.lastGroup.forEach { (p, g) -> prefs.setLastGroup(p, g) }

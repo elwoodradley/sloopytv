@@ -26,6 +26,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -393,12 +394,16 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
         val now = System.currentTimeMillis() / 1000
         val live = p == null || (p.startEpoch <= now && p.stopEpoch > now)
         val past = p != null && p.stopEpoch <= now
+        val future = p != null && p.startEpoch > now
+        val inArchive = past && c.archive && (now - p!!.startEpoch) < c.archiveDays.coerceAtLeast(1) * 86_400L
         val options = buildList {
             if (live) add("watch" to "Watch now")
-            if (past && c.archive) add("catchup" to "Play from the start (catch-up)")
+            if (inArchive) add("catchup" to "Play from the start (catch-up)")
+            if (future) add(if (vm.hasReminder(c.id, p!!.startEpoch)) "unremind" to "Cancel the reminder" else "remind" to "Remind me when it starts")
             if (!past) addAll(tv.sloopy.ui.record.RecordOptions.choices)
             if (live && vm.vlcInstalled()) add("vlc" to "Open in VLC")
             add("fav" to (if (c.id in favIds) "Remove ${c.name.take(24)} from favourites" else "Add ${c.name.take(24)} to favourites"))
+            add("hidechan" to "Hide ${c.name.take(24)}")
             add("no" to "Not now")
         }
         ChoicePrompt((p?.title ?: c.name).uppercase().take(28), options, onCancel = { cellMenu = null }, onPick = { k ->
@@ -407,6 +412,13 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                 "catchup" -> { vm.playCatchup(c, p!!.title, p.startEpoch, p.stopEpoch); go("live") }
                 "fav" -> vm.toggleFavourite(c)
                 "vlc" -> vm.openChannelInVlc(c)
+                "remind" -> vm.addReminder(c, p!!.title, p.startEpoch, p.stopEpoch)
+                "unremind" -> vm.removeReminder(c, p!!.startEpoch)
+                "hidechan" -> {
+                    val i = channels.indexOfFirst { it.id == c.id }
+                    vm.setChannelHidden(c.id, true); vm.toast("Hidden: ${c.name}. Settings › Listings brings it back.")
+                    scope.launch { delay(200); focusRow(i.coerceAtMost(channels.lastIndex - 1).coerceAtLeast(0)) }
+                }
                 else -> tv.sloopy.ui.record.RecordOptions.handle(vm, k, c, p)
             }
             cellMenu = null
@@ -449,7 +461,7 @@ private fun onSelect(vm: SloopyViewModel, c: ChannelEntity, p: ProgrammeEntity?,
     val nowSec = System.currentTimeMillis() / 1000
     when {
         p == null || (p.startEpoch <= nowSec && p.stopEpoch > nowSec) -> { vm.tune(c); go("live") }
-        p.stopEpoch <= nowSec && c.archive -> { vm.playCatchup(c, p.title, p.startEpoch, p.stopEpoch); go("live") }
+        p.stopEpoch <= nowSec && c.archive && (nowSec - p.startEpoch) < c.archiveDays.coerceAtLeast(1) * 86_400L -> { vm.playCatchup(c, p.title, p.startEpoch, p.stopEpoch); go("live") }
         p.stopEpoch <= nowSec -> vm.toast("No catch-up on this channel")
         else -> vm.toast("Starts at ${hhmm(p.startEpoch)}")
     }
@@ -533,7 +545,13 @@ private fun GuideRow(
                         onFocus = { onFocused(null) }, onClick = { onSelect(null) }, onHold = { onHold(null) },
                     )
                 } else {
+                    // Two days back and a day ahead is a lot of cells; only those within six hours
+                    // either side of the view are composed. The bucket changes every six hours of scroll.
+                    val bucket by remember { derivedStateOf { (hScroll.value / (6 * 3600 * dpPerSec * density)).toInt() } }
+                    val lo = winStart + (bucket - 1) * 6 * 3600L
+                    val hi = winStart + (bucket + 3) * 6 * 3600L
                     for (p in list) {
+                        if (p.stopEpoch <= lo || p.startEpoch >= hi) continue
                         val a = maxOf(p.startEpoch, winStart)
                         val b = minOf(p.stopEpoch, winEnd)
                         if (b <= a) continue

@@ -131,6 +131,17 @@ data class RecordingEntity(
     val createdAt: Long = System.currentTimeMillis(),
 )
 
+@Entity(tableName = "reminders", indices = [Index("providerId", "startEpoch")])
+data class ReminderEntity(
+    @PrimaryKey(autoGenerate = true) val id: Long = 0,
+    val providerId: String,
+    val channelId: Long,
+    val channelName: String,
+    val title: String,
+    val startEpoch: Long,
+    val stopEpoch: Long,
+)
+
 /** Lightweight projection for the channel list and guide rows. */
 data class NowNext(
     val epgId: String,

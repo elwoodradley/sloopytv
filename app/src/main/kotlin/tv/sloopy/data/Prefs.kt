@@ -123,6 +123,10 @@ class Prefs(private val context: Context) {
     fun hiddenGroups(providerId: String): Flow<Set<String>> = ds.data.map { p -> p[hiddenKey(providerId)]?.split('\u0001')?.filter { it.isNotEmpty() }?.toSet() ?: emptySet() }
     suspend fun setHiddenGroups(providerId: String, groups: Set<String>) = ds.edit { it[hiddenKey(providerId)] = groups.joinToString("\u0001") }
 
+    private fun hiddenChanKey(providerId: String) = stringPreferencesKey("hidden_channels_$providerId")
+    fun hiddenChannels(providerId: String): Flow<Set<Long>> = ds.data.map { p -> p[hiddenChanKey(providerId)]?.split(',')?.mapNotNull { it.toLongOrNull() }?.toSet() ?: emptySet() }
+    suspend fun setHiddenChannels(providerId: String, ids: Set<Long>) = ds.edit { it[hiddenChanKey(providerId)] = ids.joinToString(",") }
+
     private fun lockedKey(providerId: String) = stringPreferencesKey("locked_groups_$providerId")
     fun lockedGroups(providerId: String): Flow<Set<String>> = ds.data.map { p -> p[lockedKey(providerId)]?.split('\u0001')?.filter { it.isNotEmpty() }?.toSet() ?: emptySet() }
     suspend fun setLockedGroups(providerId: String, groups: Set<String>) = ds.edit { it[lockedKey(providerId)] = groups.joinToString("\u0001") }

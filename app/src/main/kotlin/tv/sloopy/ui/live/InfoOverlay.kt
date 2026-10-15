@@ -42,6 +42,7 @@ import tv.sloopy.ui.common.BACK_KEYS
 import tv.sloopy.ui.common.ChannelLogo
 import tv.sloopy.ui.common.Label
 import tv.sloopy.ui.common.LiveDot
+import tv.sloopy.ui.common.OK_KEYS
 import tv.sloopy.ui.common.SloopyButton
 import tv.sloopy.ui.common.inKeys
 import tv.sloopy.ui.common.isDown
@@ -67,6 +68,7 @@ fun InfoOverlay(
     val strip = remember(recents, channel.id) { recents.filter { it.id != channel.id }.take(10) }
     val first = remember { FocusRequester() }
     var idle by remember { mutableStateOf(0) }
+    val openedAt = remember { System.currentTimeMillis() }
     LaunchedEffect(Unit) { delay(80); runCatching { first.requestFocus() } }
     LaunchedEffect(idle) { delay(10_000); onClose() }
 
@@ -74,6 +76,7 @@ fun InfoOverlay(
         Modifier.fillMaxSize()
             .background(Brush.verticalGradient(0.45f to Color.Transparent, 1f to Color(0xE60B0B0C)))
             .onPreviewKeyEvent { ev ->
+                if (ev.inKeys(OK_KEYS) && (ev.nativeKeyEvent.repeatCount > 0 || System.currentTimeMillis() - openedAt < 400)) return@onPreviewKeyEvent true
                 if (!ev.isDown) return@onPreviewKeyEvent false
                 idle++
                 if (ev.inKeys(BACK_KEYS)) { onClose(); true } else false

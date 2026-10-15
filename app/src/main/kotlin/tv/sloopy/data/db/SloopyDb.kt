@@ -8,9 +8,9 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [
         ChannelEntity::class, CategoryEntity::class, ProgrammeEntity::class, EpgChannelEntity::class,
-        FavouriteEntity::class, FavouriteItemEntity::class, ProgressEntity::class, VodEntity::class, SeriesEntity::class, MetaEntity::class, RecordingEntity::class,
+        FavouriteEntity::class, FavouriteItemEntity::class, ProgressEntity::class, VodEntity::class, SeriesEntity::class, MetaEntity::class, RecordingEntity::class, ReminderEntity::class,
     ],
-    version = 3,
+    version = 4,
     exportSchema = true,
 )
 abstract class SloopyDb : RoomDatabase() {
@@ -25,6 +25,7 @@ abstract class SloopyDb : RoomDatabase() {
     abstract fun series(): SeriesDao
     abstract fun meta(): MetaDao
     abstract fun recordings(): RecordingDao
+    abstract fun reminders(): ReminderDao
 
     companion object {
         private val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
@@ -40,9 +41,16 @@ abstract class SloopyDb : RoomDatabase() {
             }
         }
 
+        private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE TABLE IF NOT EXISTS `reminders` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `providerId` TEXT NOT NULL, `channelId` INTEGER NOT NULL, `channelName` TEXT NOT NULL, `title` TEXT NOT NULL, `startEpoch` INTEGER NOT NULL, `stopEpoch` INTEGER NOT NULL)")
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_reminders_providerId_startEpoch` ON `reminders` (`providerId`, `startEpoch`)")
+            }
+        }
+
         fun open(context: Context): SloopyDb =
             Room.databaseBuilder(context, SloopyDb::class.java, "sloopy.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .fallbackToDestructiveMigration(dropAllTables = true)   // cache only; credentials live in the vault
                 .build()
     }

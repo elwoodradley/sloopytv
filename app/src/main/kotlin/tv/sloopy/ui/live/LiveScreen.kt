@@ -115,16 +115,22 @@ fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit, on
             .onFocusChanged { rootFocused = it.isFocused }
             .focusable()
             .onPreviewKeyEvent { ev ->
-                if (!ev.isDown) return@onPreviewKeyEvent false
                 if (overlay == Overlay.CHANNELS || overlay == Overlay.DECK || overlay == Overlay.QUIT || overlay == Overlay.INFO) return@onPreviewKeyEvent false
+                // OK opens the info overlay on release, so a held button (and the repeats a phone
+                // remote sends while held) cannot land on the overlay and switch channels.
+                if (ev.inKeys(OK_KEYS)) { if (!ev.isDown) overlay = Overlay.INFO; return@onPreviewKeyEvent true }
+                if (!ev.isDown) return@onPreviewKeyEvent false
                 val d = ev.digit
+                val catchup = playing is Playing.Catchup
                 when {
                     d != null -> { digits = (digits + d).takeLast(4); overlay = Overlay.NUMBER; true }
                     ev.isKey(Key.DirectionUp, Key.ChannelUp) -> { vm.step(-1); true }
                     ev.isKey(Key.DirectionDown, Key.ChannelDown) -> { vm.step(1); true }
+                    // Catch-up: Left/Right skip 30 s, rewind/fast-forward skip 2 min; the badge shows where you are.
+                    catchup && ev.isKey(Key.DirectionLeft, Key.MediaRewind) -> { vm.seekBy(if (ev.isKey(Key.DirectionLeft)) -30_000 else -120_000); overlay = Overlay.OSD; osdTick++; true }
+                    catchup && ev.isKey(Key.DirectionRight, Key.MediaFastForward) -> { vm.seekBy(if (ev.isKey(Key.DirectionRight)) 30_000 else 120_000); overlay = Overlay.OSD; osdTick++; true }
                     ev.isKey(Key.DirectionLeft) -> { overlay = Overlay.CHANNELS; true }
                     ev.isKey(Key.DirectionRight, Key.Menu) -> { overlay = Overlay.DECK; true }
-                    ev.inKeys(OK_KEYS) -> { overlay = Overlay.INFO; true }
                     ev.isKey(Key.MediaPlayPause, Key.MediaPlay, Key.MediaPause) -> {
                         val p = vm.player.player; if (p.isPlaying) p.pause() else p.play(); true
                     }
@@ -198,7 +204,7 @@ internal fun Osd(vm: SloopyViewModel, channel: ChannelEntity, playing: Playing?,
             Text(channel.name.uppercase(), style = Sloopy.osdName, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 4.dp).width(900.dp))
             if (cur != null) {
                 Text(
-                    (if (playing is Playing.Catchup) "CATCH-UP · " else "") + cur.title + " · " + fmt(cur.startEpoch) + " – " + fmt(cur.stopEpoch),
+                    (if (playing is Playing.Catchup) "CATCH-UP · at " + fmt(cur.startEpoch + vm.player.position() / 1000) + " · " else "") + cur.title + " · " + fmt(cur.startEpoch) + " – " + fmt(cur.stopEpoch),
                     style = Sloopy.bodyBig.copy(color = Color.White.copy(alpha = 0.8f)), maxLines = 1, overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.padding(top = 10.dp).width(900.dp),
                 )
