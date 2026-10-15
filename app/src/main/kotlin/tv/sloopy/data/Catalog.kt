@@ -85,13 +85,13 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
         val api = XtreamApi(AndroidHttp.core, record.xtream())
         _refresh.value = RefreshState.Running("Channel groups")
         val cats = api.liveCategories()
-        db.categories().replaceKind(record.id, "live", cats.mapIndexed { i, c -> CategoryEntity(record.id, "live", c.id, c.name, c.parentId, i) })
+        db.categories().replaceKind(record.id, "live", cats.mapIndexed { i, c -> CategoryEntity(record.id, "live", c.id, tv.sloopy.core.model.Names.clean(c.name), c.parentId, i) })
         _refresh.value = RefreshState.Running("Channels")
         val live = api.liveStreams()
         val catOrder = cats.mapIndexed { i, c -> c.id to i }.toMap()
         val sorted = live.sortedWith(compareBy({ catOrder[it.categoryId] ?: Int.MAX_VALUE }, { it.number }))
         db.channels().replaceAll(record.id, sorted.mapIndexed { i, c ->
-            ChannelEntity(record.id, c.id, c.number, c.name, c.logo, c.categoryId, c.epgId?.ifBlank { null }, c.archive, c.archiveDays, null, i)
+            ChannelEntity(record.id, c.id, c.number, tv.sloopy.core.model.Names.clean(c.name), c.logo, c.categoryId, c.epgId?.ifBlank { null }, c.archive, c.archiveDays, null, i)
         })
         _refresh.value = RefreshState.Running("Channels", live.size)
         if (includeLibrary) {
@@ -123,9 +123,9 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
         }
         val channels = M3uParser.toChannels(entries)
         val groups = channels.mapNotNull { it.categoryId }.distinct()
-        db.categories().replaceKind(record.id, "live", groups.mapIndexed { i, g -> CategoryEntity(record.id, "live", g, g, null, i) })
+        db.categories().replaceKind(record.id, "live", groups.mapIndexed { i, g -> CategoryEntity(record.id, "live", g, tv.sloopy.core.model.Names.clean(g), null, i) })
         db.channels().replaceAll(record.id, channels.mapIndexed { i, c ->
-            ChannelEntity(record.id, c.id, c.number, c.name, c.logo, c.categoryId, c.epgId, c.archive, c.archiveDays, c.directUrl, i)
+            ChannelEntity(record.id, c.id, c.number, tv.sloopy.core.model.Names.clean(c.name), c.logo, c.categoryId, c.epgId, c.archive, c.archiveDays, c.directUrl, i)
         })
         return channels.size
     }

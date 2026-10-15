@@ -110,9 +110,9 @@ class XtreamCredentials private constructor(
  */
 class XtreamApi(private val http: Http, private val creds: XtreamCredentials) {
 
-    private suspend fun fetch(url: String, limit: Long = Limits.JSON_BYTES): JsonElement = withContext(Dispatchers.IO) {
+    private suspend fun fetch(url: String, limit: Long = Limits.JSON_BYTES, timeoutMs: Long = 20_000): JsonElement = withContext(Dispatchers.IO) {
         val resp = try {
-            http.get(url, mapOf("Accept" to "application/json", "User-Agent" to USER_AGENT))
+            http.get(url, mapOf("Accept" to "application/json", "User-Agent" to USER_AGENT), timeoutMs)
         } catch (e: IOException) {
             throw XtreamException("Could not reach the server: ${Redact.apply(e.message)}", e)
         }
@@ -289,7 +289,7 @@ class XtreamApi(private val http: Http, private val creds: XtreamCredentials) {
         epgListings(creds.api("get_simple_data_table", mapOf("stream_id" to streamId.toString()))).take(Limits.MAX_PROGRAMMES_PER_CHANNEL)
 
     private suspend fun epgListings(url: String): List<ShortEpg> {
-        val root = fetch(url)
+        val root = fetch(url, timeoutMs = 10_000)   // one channel's table: a slow panel must not hold the guide up
         val list = root.obj?.get("epg_listings").asList()
         return list.mapNotNull { o ->
             val start = o.long("start_timestamp") ?: return@mapNotNull null

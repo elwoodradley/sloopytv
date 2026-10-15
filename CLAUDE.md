@@ -69,6 +69,12 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   the alarm receiver, folder handling (SAF tree or the app's own storage). Xtream channels are
   forced to TS; HLS-only URLs refuse with a message. Recordings play through the VOD player as
   `Playing.Vod(kind = "recording")`; the player's data source is DefaultDataSource over OkHttp.
+- Guide layout (0.3.2): the groups panel is always visible. Resting on a group for 220 ms previews
+  it on the right; OK moves the cursor into the channels with the group still marked; Back returns
+  the cursor to the groups. Every row draws a focusable placeholder cell while its listings load
+  (`onLoaded` hands the cursor to the real cell), so the cursor can never be stranded.
+- Provider names are cleaned at import (`core/model/Names.clean`, with tests): "##### X #####" → "X".
+  Existing rows pick it up on the next channel refresh; the guide also cleans at display time.
 - Hold OK on a guide cell or a search result = menu (watch, record with 2/15/60 min padding,
   favourite). Recordings start a minute early. Live opened from search keeps search on the back
   stack so Back returns to the results; the query lives in `vm.lastSearch`.

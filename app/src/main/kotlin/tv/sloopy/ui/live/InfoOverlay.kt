@@ -104,7 +104,7 @@ fun InfoOverlay(
                             Spacer(Modifier.width(12.dp))
                             Column(Modifier.weight(1f)) {
                                 Text(c.number.toString(), style = Sloopy.mono14.copy(color = if (focused) Sloopy.textSoft else Sloopy.muted))
-                                Text(c.name, style = Sloopy.cellTitle.copy(color = Color.Unspecified), maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(tv.sloopy.core.model.Names.clean(c.name), style = Sloopy.cellTitle.copy(color = Color.Unspecified), maxLines = 1, overflow = TextOverflow.Ellipsis)
                             }
                         }
                     }

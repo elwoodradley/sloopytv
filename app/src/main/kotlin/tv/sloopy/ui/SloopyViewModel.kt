@@ -463,7 +463,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     fun guideWindowStart(now: Long = System.currentTimeMillis() / 1000): Long = (now / 1800) * 1800 - GUIDE_HOURS_BACK * 3600
     fun cachedProgrammes(epgId: String, winStart: Long): List<tv.sloopy.data.db.ProgrammeEntity>? = epgCache[epgKey(epgId, winStart)]
     private val channelEpgFetched = java.util.concurrent.ConcurrentHashMap<Long, Long>()
-    private val channelEpgGate = kotlinx.coroutines.sync.Semaphore(3)
+    private val channelEpgGate = kotlinx.coroutines.sync.Semaphore(6)
     /**
      * Guide rows for one channel: cache, then the database, then (Xtream only, at most hourly per
      * channel) the panel's own per-channel table for providers whose xmltv.php is refused.
@@ -499,7 +499,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         if (epgCache.size > 4000) epgCache.clear()
         val i = list.indexOfFirst { it.id == currentChannel.value?.id }.coerceAtLeast(0)
         val ws = guideWindowStart()
-        val ids = list.subList((i - 20).coerceAtLeast(0), (i + 25).coerceAtMost(list.size))
+        // The top of the group (what a fresh grid shows) plus the rows around the current channel.
+        val ids = (list.take(60) + list.subList((i - 20).coerceAtLeast(0), (i + 25).coerceAtMost(list.size)))
             .map { tv.sloopy.data.channelEpgKey(it) }.distinct().filter { cachedProgrammes(it, ws) == null }
         if (ids.isEmpty()) return@launch
         val rows = runCatching { catalog.programmesMany(p.id, ids, ws, ws + (GUIDE_HOURS_BACK + GUIDE_HOURS_FWD) * 3600) }.getOrDefault(emptyList()).groupBy { it.epgId }
