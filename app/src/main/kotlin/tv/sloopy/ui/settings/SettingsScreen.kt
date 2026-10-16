@@ -507,6 +507,8 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                                             .onSuccess { vm.toast("Brought over: $it"); restoreCode = "" }
                                             .onFailure { vm.toast(tv.sloopy.TLog.userMessage(it)) }
                                         busy = false
+                                        // The prompt took focus with it; put the cursor back on this page, not the strip.
+                                        repeat(10) { delay(60); if (runCatching { restoreBtn.requestFocus() }.getOrDefault(false)) return@launch }
                                     }
                                 },
                             )
