@@ -53,7 +53,7 @@ object AndroidHttp {
 
     private object UserAgent : Interceptor {
         override fun intercept(chain: Interceptor.Chain): Response =
-            chain.proceed(chain.request().newBuilder().header("User-Agent", USER_AGENT).build())
+            chain.proceed(if (chain.request().header("User-Agent") != null) chain.request() else chain.request().newBuilder().header("User-Agent", USER_AGENT).build())
     }
 
     val core: Http = object : Http {

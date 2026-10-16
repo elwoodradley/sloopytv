@@ -1258,10 +1258,12 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     private var guideJob: Job? = null
     /** The channels the guide last asked for, so the sweep can fill what is on screen first. */
     @Volatile private var guideWanted: List<ChannelEntity> = emptyList()
-    fun ensureGuide(groupKey: String, list: List<ChannelEntity>, rowLo: Int, rowHi: Int, lo: Long, hi: Long) {
+    fun ensureGuide(groupKey: String, list: List<ChannelEntity>, rowLo: Int, rowHi: Int, lo: Long, hi: Long, near: Int = rowLo + 40) {
         if (list.isEmpty()) return
-        val slice = list.subList(rowLo.coerceIn(0, list.size), rowHi.coerceIn(0, list.size))
-        val wantList = (list.take(40) + slice).distinctBy { it.id }
+        val a = rowLo.coerceIn(0, list.size); val b = rowHi.coerceIn(0, list.size)
+        // Nearest the view first, so the sweep fills the rows on screen before the ones below.
+        val slice = (a until b).sortedBy { kotlin.math.abs(it - near) }.map { list[it] }
+        val wantList = (slice + list.take(40)).distinctBy { it.id }
         guideWanted = wantList
         val want = wantList.mapTo(LinkedHashSet()) { tv.sloopy.data.channelEpgKey(it) }
         val cur = synchronized(guides) { guides[groupKey] }
@@ -1321,6 +1323,9 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     // rows on screen. The rest trickles one at a time with a pause, so the panel is not hammered
     // and the database stays free for the guide. Never from a guide row.
     private val sweptAt = java.util.concurrent.ConcurrentHashMap<Long, Long>()
+    @Volatile private var wideSweep = false
+    /** True while this channel's listings are still to be fetched from the panel: the row says "Loading" rather than "No guide data". */
+    fun listingsPending(c: ChannelEntity): Boolean = wideSweep && !sweptAt.containsKey(c.id)
     private val sweepKick = MutableStateFlow(0)
     private var sweepJob: Job? = null
     private val _sweepProgress = MutableStateFlow<Pair<Int, Int>?>(null)
@@ -1330,12 +1335,13 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     private fun startSweep() {
         sweepJob?.cancel()
         sweepJob = viewModelScope.launch {
-            val gate = kotlinx.coroutines.sync.Semaphore(3)
+            val gate = kotlinx.coroutines.sync.Semaphore(4)
             var done = 0; var total = 0
             while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                 val p = active.value
                 if (p == null || p.kind != tv.sloopy.data.ProviderKind.XTREAM) { _sweepProgress.value = null; val k = sweepKick.value; sweepKick.first { it != k }; continue }
                 val wide = _epgError.value != null || runCatching { catalog.programmeCount(p.id) }.getOrDefault(1) == 0
+                wideSweep = wide
                 val now = System.currentTimeMillis()
                 val favs = favouriteIds.value; val hiddenG = hiddenGroups.value
                 val fresh = { c: ChannelEntity -> c.categoryId !in hiddenG && now - (sweptAt[c.id] ?: 0L) > 6 * 3600_000L }
@@ -1349,7 +1355,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 if (remaining == 0) { _sweepProgress.value = null; done = 0; total = 0; val k = sweepKick.value; kotlinx.coroutines.withTimeoutOrNull(600_000) { sweepKick.first { it != k } }; continue }
                 total = maxOf(total, remaining + done)
                 _sweepProgress.value = done to total
-                val batch = if (urgent.isNotEmpty()) urgent.take(6) else rest.take(1)
+                val batch = if (urgent.isNotEmpty()) urgent.take(8) else rest.take(1)
                 val gentle = urgent.isEmpty()
                 val nowS = now / 1000
                 batch.map { c ->
@@ -1360,12 +1366,12 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                             if (have.isNotEmpty()) { sweptAt[c.id] = now; return@withPermit }
                             val n = try { catalog.fetchChannelEpg(p, c) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { TLog.w { "sweep: ${TLog.userMessage(e)}" }; -1 }
                             sweptAt[c.id] = if (n < 0) now - 6 * 3600_000L + 900_000L else now   // refused: try again in fifteen minutes
-                            if (n > 0) { epgCache.keys.removeAll { it.endsWith("|$key") }; changedKeys.add(key) }
+                            if (n >= 0) { epgCache.keys.removeAll { it.endsWith("|$key") }; changedKeys.add(key) }
                         }
                     }
                 }.forEach { it.join() }
                 done += batch.size
-                delay(if (gentle) 400 else 60)
+                delay(if (gentle) 400 else 30)
             }
         }
     }
@@ -1379,7 +1385,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 if (l.isNotEmpty()) {
                     val ws = guideWindowStart(); val now = System.currentTimeMillis() / 1000 / 3600 * 3600
                     val i = l.indexOfFirst { it.id == currentChannel.value?.id }.coerceAtLeast(0)
-                    ensureGuide(g, l, i - 40, i + 90, maxOf(ws, now - GUIDE_BAND_BACK * 3600), now + GUIDE_BAND_FWD * 3600)
+                    ensureGuide(g, l, i - 40, i + 90, maxOf(ws, now - GUIDE_BAND_BACK * 3600), now + GUIDE_BAND_FWD * 3600, near = i)
                 }
             }
         }

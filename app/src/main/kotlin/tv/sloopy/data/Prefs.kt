@@ -38,6 +38,9 @@ class Prefs(private val context: Context) {
     private fun refreshKey(providerId: String, what: String) = longPreferencesKey("refreshed_${what}_$providerId")
     suspend fun refreshedAt(providerId: String, what: String): Long = ds.data.first()[refreshKey(providerId, what)] ?: 0L
     suspend fun setRefreshedAt(providerId: String, what: String, at: Long = System.currentTimeMillis()) = ds.edit { it[refreshKey(providerId, what)] = at }
+    /** The User-Agent the provider's guide file accepted last time, tried first next time. */
+    suspend fun epgUserAgent(providerId: String): String? = ds.data.first()[stringPreferencesKey("epg_ua_$providerId")]
+    suspend fun setEpgUserAgent(providerId: String, ua: String?) = ds.edit { if (ua == null) it.remove(stringPreferencesKey("epg_ua_$providerId")) else it[stringPreferencesKey("epg_ua_$providerId")] = ua }
 
     val introEnabled: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("intro_enabled")] ?: true }
     suspend fun setIntroEnabled(v: Boolean) = ds.edit { it[booleanPreferencesKey("intro_enabled")] = v }

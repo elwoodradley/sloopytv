@@ -179,7 +179,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     LaunchedEffect(channels, groupNow, viewHour, rowBucket) {
         if (channels.isEmpty()) return@LaunchedEffect
         val v = viewHour * 3600
-        vm.ensureGuide(groupNow, channels, rowBucket * 30 - 40, rowBucket * 30 + 90, maxOf(winStart, v - GUIDE_BAND_BACK * 3600), minOf(winEnd, v + GUIDE_BAND_FWD * 3600))
+        vm.ensureGuide(groupNow, channels, rowBucket * 30 - 40, rowBucket * 30 + 90, maxOf(winStart, v - GUIDE_BAND_BACK * 3600), minOf(winEnd, v + GUIDE_BAND_FWD * 3600), near = listState.firstVisibleItemIndex + 4)
     }
 
     // Picture → Back → grid; Back → groups panel on the current group; Back → sections; Back → switch off.
@@ -616,7 +616,7 @@ private fun GuideRow(
                     // drag the view back to the start of the window.
                     val x0 = (nowEpoch - winStart - 1800).coerceAtLeast(0)
                     Cell(
-                        title = "No guide data", time = "", x = (x0 * dpPerSec).dp, w = (((winEnd - winStart - x0) * dpPerSec).dp), past = true, isNow = false, archive = false,
+                        title = if (vm.listingsPending(channel)) "Loading listings…" else "No guide data", time = "", x = (x0 * dpPerSec).dp, w = (((winEnd - winStart - x0) * dpPerSec).dp), past = true, isNow = false, archive = false,
                         requesters = requesters, cellKey = "${channel.id}|nodata", register = register,
                         onFocus = { loadingFocused = true; onFocused(null) }, onClick = { onSelect(null) }, onHold = { onHold(null) },
                     )

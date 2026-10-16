@@ -88,6 +88,13 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
   Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
   viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
+- 0.5.6 (2026-10-15): the guide file is retried with other User-Agents when the panel refuses
+  it (`Catalog.EPG_AGENTS`: ours, TiviMate, VLC, Chrome, okhttp; 401/403/404/406/429/451 move to
+  the next; the one that worked is remembered in `prefs.epgUserAgent`). The OkHttp agent
+  interceptor now keeps a per-request User-Agent instead of overwriting it. The sweep fills the
+  rows nearest the view first (`ensureGuide(..., near)`), four-wide for what is on screen, and
+  an empty row reads "Loading listings…" while `vm.listingsPending` (wide sweep, channel not yet
+  reached) rather than "No guide data".
 - 0.5.5 (2026-10-15): leaving the app switches it off. `MainActivity.onStop` stops playback and
   `finishAndRemoveTask()` unless one of the app's own child windows was just started (the
   activity notes the time in `startActivity`/`startActivityForResult`: speech recogniser, folder

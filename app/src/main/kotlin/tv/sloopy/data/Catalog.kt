@@ -186,10 +186,22 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
                 }
             }
         }
-        AndroidHttp.core.get(url, timeoutMs = 120_000).use { r ->
-            if (!r.ok) throw IOException("Guide server answered HTTP ${r.code}")
-            XmltvParser(parserFactory = { android.util.Xml.newPullParser() }, defaultZone = ZoneId.systemDefault()).parse(LimitedInputStream(r.body, Limits.XMLTV_BYTES), sink)
+        // Some panels refuse xmltv.php to a player they do not recognise (that HTTP 451 or 403) but
+        // hand it to the ones they know. Try the agent that worked last time, then the usual ones.
+        val remembered = prefs.epgUserAgent(p)
+        val agents = (listOfNotNull(remembered) + EPG_AGENTS).distinct()
+        var lastCode = 0
+        var got = false
+        for (ua in agents) {
+            val r = AndroidHttp.core.get(url, headers = mapOf("User-Agent" to ua), timeoutMs = 120_000)
+            if (!r.ok) { lastCode = r.code; r.close(); if (r.code in listOf(401, 403, 404, 406, 429, 451)) continue else break }
+            r.use { XmltvParser(parserFactory = { android.util.Xml.newPullParser() }, defaultZone = ZoneId.systemDefault()).parse(LimitedInputStream(it.body, Limits.XMLTV_BYTES), sink) }
+            if (ua != remembered) prefs.setEpgUserAgent(p, ua)
+            TLog.i { "guide file accepted with agent #${agents.indexOf(ua)}" }
+            got = true
+            break
         }
+        if (!got) { if (remembered != null) prefs.setEpgUserAgent(p, null); throw IOException("Guide server answered HTTP $lastCode") }
         if (chans.isNotEmpty()) cdao.insertBatchBlocking(chans)
         if (batch.isNotEmpty()) { dao.insertBatchBlocking(batch); total += batch.size }
         return total
@@ -291,6 +303,14 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
 
     companion object {
         private const val BATCH = 2000
+        /** Agents tried for the guide file, in order; the app's own first. */
+        private val EPG_AGENTS = listOf(
+            AndroidHttp.USER_AGENT,
+            "TiviMate/5.1.6 (Android 11)",
+            "VLC/3.0.20 LibVLC/3.0.20",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36",
+            "okhttp/4.12.0",
+        )
         const val EPG_MIN_INTERVAL_MS = 6L * 3600 * 1000
 
         private val junk = Regex("""\b(uk|us|usa|ca|de|fr|es|it|nl|au|ie)\b|\b(hd|fhd|uhd|4k|sd|hevc|h265|raw|backup|vip)\b|[^a-z0-9]""")
