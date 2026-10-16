@@ -515,6 +515,13 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                         val context = androidx.compose.ui.platform.LocalContext.current
                         val gstats by vm.guideStats.collectAsState()
                         if (gstats.isNotBlank()) Text(gstats, style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 10.dp))
+                        var sysExit by remember { mutableStateOf(tv.sloopy.CrashLog.readSystemExit(context)) }
+                        if (sysExit != null) {
+                            Section("Last time the app was closed on you")
+                            Text(sysExit!!, style = Sloopy.body.copy(color = Sloopy.amber), modifier = Modifier.width(900.dp))
+                            Text("Read this to whoever looks after SloopyTV, with what you were doing at the time.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 4.dp))
+                            Row(Modifier.padding(top = 12.dp)) { SloopyButton("Clear", onClick = { tv.sloopy.CrashLog.clearSystemExit(context); sysExit = null }) }
+                        }
                         var crash by remember { mutableStateOf(tv.sloopy.CrashLog.read(context)) }
                         if (crash != null) {
                             Section("Last crash")

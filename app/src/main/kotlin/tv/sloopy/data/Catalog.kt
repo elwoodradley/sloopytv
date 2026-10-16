@@ -268,6 +268,12 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
 
     suspend fun programmeCount(p: String): Int = db.programmes().count(p, epgGen(p))
 
+    /** Everything on between two times, across every channel, in one indexed read. */
+    suspend fun programmesBetween(p: String, from: Long, to: Long): List<ProgrammeEntity> {
+        val gen = epgGen(p)
+        return withContext(Dispatchers.IO) { db.programmes().betweenBlocking(p, gen, from, to) }
+    }
+
     /** The guide store's read: blocking, on the caller's IO thread, so it is never queued behind writes. */
     suspend fun programmesManyDirect(p: String, epgIds: List<String>, from: Long, to: Long): List<ProgrammeEntity> {
         if (epgIds.isEmpty()) return emptyList()

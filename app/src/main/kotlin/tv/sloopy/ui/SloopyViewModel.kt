@@ -580,8 +580,14 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         return v
     }
     fun notInterested(title: String) = viewModelScope.launch { prefs.addTonightNotInterested(title); buildTonight() }
+    private val _tonightBusy = MutableStateFlow(false)
+    val tonightBusy: StateFlow<Boolean> = _tonightBusy
     fun buildTonight() = viewModelScope.launch {
         val p = active.value ?: return@launch
+        _tonightBusy.value = true
+        try { buildTonightNow(p) } finally { _tonightBusy.value = false }
+    }
+    private suspend fun buildTonightNow(p: tv.sloopy.data.ProviderRecord) {
         val now = System.currentTimeMillis() / 1000
         val zone = java.time.ZoneId.systemDefault()
         val today = java.time.Instant.ofEpochSecond(now).atZone(zone).toLocalDate()
@@ -605,11 +611,16 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 items.add(TonightItem("live", pr.title, tv.sloopy.core.model.Names.clean(c.name) + " · " + tv.sloopy.ui.common.TimeFmt.hhmm(pr.startEpoch), c, pr, null, null, null, null, score))
             }
         }
+        // Everything on tonight across the whole lineup, read once; the sport pass and the popular
+        // pass match titles against it in memory. (A LIKE per title over a million rows was minutes.)
+        val byEpg = all.filter { it.epgId != null }.groupBy { it.epgId!! }
+        val tonightRows: List<tv.sloopy.data.db.ProgrammeEntity> = if (tonightSportsAnywhere.value || tonightPopular.value) runCatching { catalog.programmesBetween(p.id, from, to) }.getOrDefault(emptyList()).filter { it.epgId in byEpg } else emptyList()
         if (tonightSportsAnywhere.value) {
             val seen = items.map { it.title.lowercase() }.toMutableSet()
             for (word in listOf("NFL", "College Football", "NBA", "NHL")) {
-                runCatching { catalog.searchProgrammes(p.id, word, now) }.getOrDefault(emptyList()).filter { it.startEpoch in from..to && it.title.lowercase() !in no }.take(6).forEach { pr ->
-                    val c = all.firstOrNull { it.epgId == pr.epgId } ?: return@forEach
+                val w = word.lowercase()
+                tonightRows.filter { it.startEpoch in from..to && it.title.lowercase().let { t -> t.contains(w) && t !in no } }.sortedBy { it.startEpoch }.take(6).forEach { pr ->
+                    val c = byEpg[pr.epgId]?.firstOrNull() ?: return@forEach
                     if (seen.add(pr.title.lowercase())) items.add(TonightItem("live", pr.title, tv.sloopy.core.model.Names.clean(c.name) + " · " + tv.sloopy.ui.common.TimeFmt.hhmm(pr.startEpoch), c, pr, null, null, null, null, 6))
                 }
             }
@@ -630,11 +641,9 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             for (t in shows.take(30)) {
                 if (popular.size >= 4) break
                 if (t.title.lowercase() in no || t.title.lowercase() in seen) continue
-                val progs = runCatching { catalog.searchProgrammes(p.id, t.title, now) }.getOrDefault(emptyList())
-                    .filter { it.startEpoch < to && it.stopEpoch > from && tv.sloopy.core.model.Names.sameTitle(it.title, t.title) }
-                val hit = progs.firstOrNull { pr -> all.any { it.epgId == pr.epgId } }
+                val hit = tonightRows.filter { tv.sloopy.core.model.Names.sameTitle(it.title, t.title) }.minByOrNull { it.startEpoch }
                 if (hit != null) {
-                    val c = all.first { it.epgId == hit.epgId }
+                    val c = byEpg[hit.epgId]!!.first()
                     popular.add(TonightItem("popular", t.title, tv.sloopy.core.model.Names.clean(c.name) + " · " + tv.sloopy.ui.common.TimeFmt.hhmm(hit.startEpoch), c, hit, null, null, t.poster, t.year, 4))
                     seen.add(t.title.lowercase()); continue
                 }

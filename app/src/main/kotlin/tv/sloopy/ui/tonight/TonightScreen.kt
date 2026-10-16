@@ -28,6 +28,8 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.focusable
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
@@ -52,10 +54,15 @@ import tv.sloopy.ui.theme.Sloopy
 @Composable
 fun TonightScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, onOpen: (String, Long) -> Unit) {
     val items by vm.tonight.collectAsState()
+    val busy by vm.tonightBusy.collectAsState()
     var menu by remember { mutableStateOf<SloopyViewModel.TonightItem?>(null) }
     val first = remember { FocusRequester() }
+    val hold = remember { FocusRequester() }
     BackHandler { onBack() }
-    LaunchedEffect(Unit) { vm.buildTonight(); delay(300); runCatching { first.requestFocus() } }
+    // Focus leaves the strip at once (so its label panel folds away) and rests on the notice until
+    // the tiles exist; a slow lineup shows "Hang on" instead of a popped-out menu.
+    LaunchedEffect(Unit) { vm.buildTonight(); repeat(10) { delay(50); if (runCatching { hold.requestFocus() }.getOrDefault(false)) return@LaunchedEffect } }
+    LaunchedEffect(busy, items.size) { if (!busy && items.isNotEmpty()) repeat(20) { delay(60); if (runCatching { first.requestFocus() }.getOrDefault(false)) return@LaunchedEffect } }
 
     Column(Modifier.fillMaxSize().background(Sloopy.ground)) {
         ScreenHeader("Tonight")
@@ -65,7 +72,12 @@ fun TonightScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit,
             Column(Modifier.fillMaxSize().padding(end = 72.dp, top = 8.dp)) {
                 Label("Tonight · from your channels, your list, your reminders and what's popular today")
                 Text("ON TONIGHT", style = Sloopy.titleHuge, modifier = Modifier.padding(top = 8.dp, bottom = 14.dp))
-                if (items.isEmpty()) Text("Nothing you follow is on tonight. Watch a few channels and this fills in on its own. Settings › Picture can widen it to sport on any channel, new episodes on demand, and what's popular today.", style = Sloopy.bodyBig, modifier = Modifier.width(900.dp))
+                Box(Modifier.focusRequester(hold).focusProperties { up = FocusRequester.Cancel; down = FocusRequester.Cancel; right = FocusRequester.Cancel }.focusable()) {
+                    when {
+                        busy && items.isEmpty() -> Column { Label("Hang on", bright = true); Text("Fetching tonight's programmes…", style = Sloopy.bodyBig, modifier = Modifier.padding(top = 6.dp)) }
+                        items.isEmpty() -> Text("Nothing you follow is on tonight. Watch a few channels and this fills in on its own. Settings › Picture can widen it to sport on any channel, new episodes on demand, and what's popular today.", style = Sloopy.bodyBig, modifier = Modifier.width(900.dp))
+                    }
+                }
                 LazyVerticalGrid(columns = GridCells.Fixed(4), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
                     itemsIndexed(items, key = { _, it -> it.kind + it.title }) { i, item ->
                         Tile(vm, item, modifier = if (i == 0) Modifier.focusRequester(first) else Modifier,

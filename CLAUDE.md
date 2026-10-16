@@ -93,6 +93,16 @@ a grabbed group.
   nothing lit. `GuideRow` now paints a focus band across the visible row, "No listings here ·
   <channel>", whenever the cursor is on the row and its cell is not in view; the no-data cell
   names the channel while the cursor is on it.
+- 0.6.6 (2026-10-16): Tonight on a big lineup. `buildTonight` read the guide with a LIKE per
+  trending title and per sport word (minutes on a million rows); now one indexed range read of
+  everything on tonight (`ProgrammeDao.betweenBlocking` → `catalog.programmesBetween`) and title
+  matches in memory. `vm.tonightBusy` drives a "Hang on · fetching tonight's programmes" notice;
+  the screen moves focus off the strip onto that notice at once (so the label panel folds), then
+  to the first tile when items land. Sports day pages fetch 250 ms after the cursor rests.
+  `CrashLog.noteSystemExit` (Android 11+, `getHistoricalProcessExitReasons`) writes
+  files/last_exit.txt when Android closed the app (ANR, low memory, crash) and About shows it
+  under "Last time the app was closed on you": the buddy's "kicked out" left no crash line
+  because an ANR kill never reaches the exception handler.
 - 0.6.5 (2026-10-16): buddy was "kicked out" opening Sports › Tomorrow: `resolveGameChannels`
   ran on Main and called `channelsForNetwork` (a `Dupes.key` over every channel) per network
   per game, so a Saturday slate on a 10k-channel lineup froze the app long enough to be killed.

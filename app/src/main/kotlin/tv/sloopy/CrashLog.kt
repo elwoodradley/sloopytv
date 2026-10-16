@@ -28,6 +28,32 @@ object CrashLog {
         }
     }
 
+    /**
+     * The last time Android itself closed the app (a freeze it gave up on, or memory pressure),
+     * which never reaches the exception handler. Android 11+ keeps the record; read once per launch.
+     */
+    fun noteSystemExit(context: Context) {
+        if (android.os.Build.VERSION.SDK_INT < 30) return
+        runCatching {
+            val am = context.getSystemService(Context.ACTIVITY_SERVICE) as android.app.ActivityManager
+            val last = am.getHistoricalProcessExitReasons(context.packageName, 0, 1).firstOrNull() ?: return
+            val why = when (last.reason) {
+                android.app.ApplicationExitInfo.REASON_ANR -> "the app stopped responding and Android closed it"
+                android.app.ApplicationExitInfo.REASON_LOW_MEMORY -> "Android closed it to free memory"
+                android.app.ApplicationExitInfo.REASON_EXCESSIVE_RESOURCE_USAGE -> "Android closed it for using too much"
+                android.app.ApplicationExitInfo.REASON_CRASH, android.app.ApplicationExitInfo.REASON_CRASH_NATIVE -> "it crashed"
+                else -> return
+            }
+            val f = java.io.File(context.applicationContext.filesDir, "last_exit.txt")
+            val stamp = java.time.Instant.ofEpochMilli(last.timestamp).atZone(java.time.ZoneId.systemDefault()).toLocalDateTime().withNano(0).toString().replace('T', ' ')
+            val line = "$stamp · $why" + (last.description?.let { " · " + Redact.apply(it).take(120) } ?: "")
+            if (f.exists() && f.readText().startsWith(stamp)) return
+            f.writeText(line)
+        }
+    }
+    fun readSystemExit(context: Context): String? = runCatching { java.io.File(context.applicationContext.filesDir, "last_exit.txt").takeIf { it.exists() }?.readText() }.getOrNull()
+    fun clearSystemExit(context: Context) { runCatching { java.io.File(context.applicationContext.filesDir, "last_exit.txt").delete() } }
+
     fun read(context: Context): String? = runCatching { file(context).takeIf { it.exists() }?.readText() }.getOrNull()
     fun clear(context: Context) { runCatching { file(context).delete() } }
 }

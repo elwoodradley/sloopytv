@@ -79,6 +79,10 @@ interface ProgrammeDao {
     @Query("SELECT * FROM programmes WHERE providerId = :p AND gen = :gen AND epgId IN (:ids) AND stopEpoch > :from AND startEpoch < :to ORDER BY startEpoch")
     suspend fun windowMany(p: String, gen: Int, ids: List<String>, from: Long, to: Long): List<ProgrammeEntity>
 
+    /** Every channel's rows that overlap [from, to): one range scan on the stop-time index. Tonight and the sport pass read this and match titles in memory, never a LIKE over the table. */
+    @Query("SELECT * FROM programmes WHERE providerId = :p AND gen = :gen AND stopEpoch > :from AND startEpoch < :to LIMIT :limit")
+    fun betweenBlocking(p: String, gen: Int, from: Long, to: Long, limit: Int = 120_000): List<ProgrammeEntity>
+
     /** Blocking on purpose: the guide store calls this on its own IO thread so it never queues behind the sweep's writes on Room's executor. */
     @Query("SELECT * FROM programmes WHERE providerId = :p AND gen = :gen AND epgId IN (:ids) AND stopEpoch > :from AND startEpoch < :to ORDER BY startEpoch")
     fun windowManyBlocking(p: String, gen: Int, ids: List<String>, from: Long, to: Long): List<ProgrammeEntity>
