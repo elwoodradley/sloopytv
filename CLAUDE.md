@@ -153,6 +153,11 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.10 (2026-10-16): the same friend's stick opened the app but showed Fire TV's placeholder
+  tile. The banner was only on `<application>`; older Fire OS launchers read `android:banner`
+  from the launcher `<activity>`, so it is set on both now, with banner.png at every density
+  (mdpi to xxxhdpi, sips-scaled from the xxhdpi master). If a tile is still generic after an
+  update, a stick restart refreshes the launcher's icon cache.
 - 0.6.9 (2026-10-16): older Fire Sticks. A friend's stick installed the app but it went black and
   back to home at launch. `minSdk` is 24 and Fire OS 6 (Fire TV Stick 4K 2018, Cube 1st gen) is
   Android 7.1, where `java.time` and `java.util.Base64` do not exist. Core library desugaring is on
