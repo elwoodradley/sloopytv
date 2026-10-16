@@ -66,6 +66,8 @@ import tv.sloopy.data.db.ChannelEntity
 import tv.sloopy.data.db.ProgrammeEntity
 import tv.sloopy.ui.GUIDE_HOURS_BACK
 import tv.sloopy.ui.GUIDE_HOURS_FWD
+import tv.sloopy.ui.GUIDE_BAND_BACK
+import tv.sloopy.ui.GUIDE_BAND_FWD
 import tv.sloopy.ui.Groups
 import tv.sloopy.ui.SloopyViewModel
 import tv.sloopy.ui.common.BACK_KEYS
@@ -167,6 +169,16 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     val dpPerSec: Float = SLOT.value / 1800f
     val density = androidx.compose.ui.platform.LocalDensity.current.density
     val nowPx = ((nowEpoch - winStart - 1800) * dpPerSec * density).toInt()
+    // The listings in memory: this group, six hours behind the view and six ahead, widened as
+    // the view scrolls (the hour the view starts in is the trigger, so a scroll inside an hour
+    // costs nothing). The timeline itself still runs two days back for catch-up.
+    val guide by vm.groupGuide.collectAsState()
+    val viewHour by remember { derivedStateOf { (winStart + (hScroll.value / (dpPerSec * density)).toLong()) / 3600 } }
+    LaunchedEffect(channels, groupNow, viewHour) {
+        if (channels.isEmpty()) return@LaunchedEffect
+        val v = viewHour * 3600
+        vm.ensureGuide(groupNow, channels, maxOf(winStart, v - GUIDE_BAND_BACK * 3600), minOf(winEnd, v + GUIDE_BAND_FWD * 3600))
+    }
 
     // Picture → Back → grid; Back → groups panel on the current group; Back → sections; Back → switch off.
     // Focus parks on an invisible node while the rail is rebuilt, so the node being removed is
@@ -377,8 +389,9 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                         if (i == 0) add(firstRowFocus)
                         if (i == channels.lastIndex) add(lastRowFocus)
                     }
+                    val progs = guide?.takeIf { it.key == groupNow }?.let { g -> g.rows[tv.sloopy.data.channelEpgKey(c)] ?: emptyList() }
                     GuideRow(
-                        vm = vm, channel = c, isCurrent = c.id == current?.id, copies = dupesNow.byChannel[c.id]?.members?.size ?: 1,
+                        vm = vm, channel = c, isCurrent = c.id == current?.id, copies = dupesNow.byChannel[c.id]?.members?.size ?: 1, progs = progs,
                         winStart = winStart, winEnd = winEnd, nowEpoch = nowEpoch, dpPerSec = dpPerSec,
                         hScroll = hScroll, requesters = requesters,
                         onFocused = { p -> focusedRow = i; if (pendingRow == i) pendingRow = -1; focused = Focused(c, p); cellFocused(p) },
@@ -529,6 +542,8 @@ private fun GuideRow(
     channel: ChannelEntity,
     isCurrent: Boolean,
     copies: Int,
+    /** The row's listings from the group store; null while the group loads. */
+    progs: List<ProgrammeEntity>?,
     winStart: Long, winEnd: Long, nowEpoch: Long, dpPerSec: Float,
     hScroll: androidx.compose.foundation.ScrollState,
     requesters: List<FocusRequester>,
@@ -541,13 +556,10 @@ private fun GuideRow(
     onTimelineWidth: (Int) -> Unit,
 ) {
     val density = androidx.compose.ui.platform.LocalDensity.current.density
-    // Served from the view model's cache when it has the row, so a re-entry draws on the first frame.
-    val key = tv.sloopy.data.channelEpgKey(channel)
-    val progs by produceState<List<ProgrammeEntity>?>(initialValue = vm.cachedProgrammes(key, winStart), key, winStart) {
-        value = vm.programmesFor(channel, winStart)
-    }
+    // The cursor may be resting on the loading or no-data cell when real cells arrive (the group
+    // loaded, or the sweep filled this channel); hand it to the real cell then.
     var loadingFocused by remember { mutableStateOf(false) }
-    LaunchedEffect(progs) { progs?.let { onProgs(it); if (loadingFocused) { loadingFocused = false; onLoaded() } } }
+    LaunchedEffect(progs) { progs?.let { onProgs(it); if (loadingFocused && it.isNotEmpty()) { loadingFocused = false; onLoaded() } } }
 
     Column {
         Row(Modifier.fillMaxWidth().height(ROW_H)) {
@@ -589,14 +601,15 @@ private fun GuideRow(
                     Cell(
                         title = "No guide data", time = "", x = (x0 * dpPerSec).dp, w = (((winEnd - winStart - x0) * dpPerSec).dp), past = true, isNow = false, archive = false,
                         requesters = requesters, cellKey = "${channel.id}|nodata", register = register,
-                        onFocus = { onFocused(null) }, onClick = { onSelect(null) }, onHold = { onHold(null) },
+                        onFocus = { loadingFocused = true; onFocused(null) }, onClick = { onSelect(null) }, onHold = { onHold(null) },
                     )
                 } else {
-                    // Two days back and a day ahead is a lot of cells; only those within six hours
-                    // either side of the view are composed. The bucket changes every six hours of scroll.
-                    val bucket by remember { derivedStateOf { (hScroll.value / (6 * 3600 * dpPerSec * density)).toInt() } }
-                    val lo = winStart + (bucket - 1) * 6 * 3600L
-                    val hi = winStart + (bucket + 3) * 6 * 3600L
+                    // Only cells near the view are composed: two hours behind its left edge to eight
+                    // ahead. The hour the view starts in is the trigger, so a scroll inside an hour
+                    // composes nothing new.
+                    val viewHour by remember { derivedStateOf { (winStart + (hScroll.value / (dpPerSec * density)).toLong()) / 3600 } }
+                    val lo = viewHour * 3600 - 2 * 3600L
+                    val hi = viewHour * 3600 + 8 * 3600L
                     for (p in list) {
                         if (p.stopEpoch <= lo || p.startEpoch >= hi) continue
                         val a = maxOf(p.startEpoch, winStart)

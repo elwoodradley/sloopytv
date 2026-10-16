@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import androidx.media3.common.util.UnstableApi
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -42,6 +43,9 @@ import java.time.ZoneId
 /** Pseudo groups shown above the provider's categories. */
 const val GUIDE_HOURS_BACK = 48L
 const val GUIDE_HOURS_FWD = 24L
+/** Hours of listings held in memory behind and ahead of the guide's view. */
+const val GUIDE_BAND_BACK = 6L
+const val GUIDE_BAND_FWD = 6L
 
 const val VLC = "org.videolan.vlc"
 
@@ -1222,8 +1226,6 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     private fun epgKey(epgId: String, winStart: Long) = "$winStart|$epgId"
     fun guideWindowStart(now: Long = System.currentTimeMillis() / 1000): Long = (now / 1800) * 1800 - GUIDE_HOURS_BACK * 3600
     fun cachedProgrammes(epgId: String, winStart: Long): List<tv.sloopy.data.db.ProgrammeEntity>? = epgCache[epgKey(epgId, winStart)]
-    private val channelEpgFetched = java.util.concurrent.ConcurrentHashMap<Long, Long>()
-    private val channelEpgGate = kotlinx.coroutines.sync.Semaphore(6)
     /**
      * Guide rows for one channel: cache, then the database, then (Xtream only, at most hourly per
      * channel) the panel's own per-channel table for providers whose xmltv.php is refused.
@@ -1233,42 +1235,122 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         cachedProgrammes(key, winStart)?.takeIf { it.isNotEmpty() }?.let { return it }
         val p = active.value ?: return emptyList()
         val winEnd = winStart + (GUIDE_HOURS_BACK + GUIDE_HOURS_FWD) * 3600
-        var rows = runCatching { catalog.programmes(p.id, key, winStart, winEnd) }.getOrDefault(emptyList())
-        if (rows.isEmpty() && p.kind == tv.sloopy.data.ProviderKind.XTREAM) {
-            val now = System.currentTimeMillis()
-            if (now - (channelEpgFetched[channel.id] ?: 0L) > 3600_000L) {
-                channelEpgFetched[channel.id] = now
-                try {
-                    channelEpgGate.withPermit { catalog.fetchChannelEpg(p, channel) }
-                } catch (e: kotlinx.coroutines.CancellationException) {
-                    channelEpgFetched.remove(channel.id); throw e            // row scrolled away: try again next time
-                } catch (e: Exception) {
-                    channelEpgFetched[channel.id] = now - 3600_000L + 600_000L   // refused: wait ten minutes before asking again
-                    TLog.w { "channel epg: ${TLog.userMessage(e)}" }
-                }
-                rows = runCatching { catalog.programmes(p.id, key, winStart, winEnd) }.getOrDefault(emptyList())
-            }
-        }
+        val rows = runCatching { catalog.programmes(p.id, key, winStart, winEnd) }.getOrDefault(emptyList())
         epgCache[epgKey(key, winStart)] = rows
         return rows
     }
-    fun prefetchGuide() = viewModelScope.launch {
-        val p = active.value ?: return@launch
-        val list = visibleChannels.value
-        if (list.isEmpty()) return@launch
-        if (epgCache.size > 4000) epgCache.clear()
-        val i = list.indexOfFirst { it.id == currentChannel.value?.id }.coerceAtLeast(0)
-        val ws = guideWindowStart()
-        // The top of the group (what a fresh grid shows) plus the rows around the current channel.
-        val ids = (list.take(60) + list.subList((i - 20).coerceAtLeast(0), (i + 25).coerceAtMost(list.size)))
-            .map { tv.sloopy.data.channelEpgKey(it) }.distinct().filter { cachedProgrammes(it, ws) == null }
-        if (ids.isEmpty()) return@launch
-        val rows = runCatching { catalog.programmesMany(p.id, ids, ws, ws + (GUIDE_HOURS_BACK + GUIDE_HOURS_FWD) * 3600) }.getOrDefault(emptyList()).groupBy { it.epgId }
-        ids.forEach { epgCache[epgKey(it, ws)] = rows[it] ?: emptyList() }
+
+    // ---- The guide store: one group at a time, in memory, loaded in one query ------------------
+    // A guide row never queries the database or the network itself. The screen asks for the
+    // group's channels across a band of hours around the view; the store answers from memory
+    // when it already covers that band and runs one query otherwise. Moving to another group
+    // cancels a load still in flight, so flicking through fifty groups costs one query: the
+    // group you stop on. The last few groups stay in memory so bouncing back is instant.
+    class GroupGuide(val key: String, val ids: Set<String>, val lo: Long, val hi: Long, val rows: Map<String, List<tv.sloopy.data.db.ProgrammeEntity>>) {
+        fun covers(lo: Long, hi: Long) = this.lo <= lo && this.hi >= hi
+    }
+    private val guides = object : LinkedHashMap<String, GroupGuide>(8, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, GroupGuide>?) = size > 6
+    }
+    private val _groupGuide = MutableStateFlow<GroupGuide?>(null)
+    val groupGuide: StateFlow<GroupGuide?> = _groupGuide
+    private var guideJob: Job? = null
+    fun ensureGuide(groupKey: String, list: List<ChannelEntity>, lo: Long, hi: Long) {
+        val ids = list.mapTo(LinkedHashSet()) { tv.sloopy.data.channelEpgKey(it) }
+        val cur = synchronized(guides) { guides[groupKey] }
+        if (cur != null && cur.ids == ids && cur.covers(lo, hi)) { if (_groupGuide.value !== cur) _groupGuide.value = cur; return }
+        // A different group shows placeholders while it loads; a wider band keeps what it has.
+        if (cur == null || cur.ids != ids) { if (_groupGuide.value?.key != groupKey || cur == null) _groupGuide.value = null }
+        else _groupGuide.value = cur
+        guideJob?.cancel()
+        guideJob = viewModelScope.launch {
+            val p = active.value ?: return@launch
+            val nlo = if (cur != null && cur.ids == ids) minOf(lo, cur.lo) else lo
+            val nhi = if (cur != null && cur.ids == ids) maxOf(hi, cur.hi) else hi
+            val rows = HashMap<String, List<tv.sloopy.data.db.ProgrammeEntity>>()
+            val idList = ids.toList()
+            for (chunk in idList.chunked(400)) {
+                val got = runCatching { catalog.programmesMany(p.id, chunk, nlo, nhi) }.getOrDefault(emptyList()).groupBy { it.epgId }
+                chunk.forEach { rows[it] = got[it] ?: emptyList() }
+                kotlinx.coroutines.yield()
+            }
+            val g = GroupGuide(groupKey, ids, nlo, nhi, rows)
+            synchronized(guides) { guides[groupKey] = g }
+            _groupGuide.value = g
+        }
+    }
+    /** A channel's rows changed in the database (the sweep filled it): refresh it in the store. */
+    private suspend fun guideRowChanged(key: String) {
+        val p = active.value ?: return
+        val g = _groupGuide.value ?: return
+        if (key !in g.ids) { synchronized(guides) { guides.entries.removeAll { key in it.value.ids && it.value !== g } }; return }
+        val fresh = runCatching { catalog.programmes(p.id, key, g.lo, g.hi) }.getOrDefault(emptyList())
+        val ng = GroupGuide(g.key, g.ids, g.lo, g.hi, g.rows + (key to fresh))
+        synchronized(guides) { guides[g.key] = ng; guides.entries.removeAll { key in it.value.ids && it.value !== ng } }
+        if (_groupGuide.value === g) _groupGuide.value = ng
+    }
+    private fun dropGuides() { synchronized(guides) { guides.clear() }; val g = _groupGuide.value; _groupGuide.value = null; if (g != null) ensureGuide(g.key, visibleChannels.value, g.lo, g.hi) }
+
+    // ---- The sweep: fills listings the guide file did not carry, in the background -------------
+    // Xtream panels keep a per-channel table (get_simple_data_table). When the guide file is
+    // refused (that HTTP 451) every channel needs it; otherwise only the odd channel the file
+    // missed. The sweep works through the current channel, favourites, the group on screen,
+    // then everything, three at a time with a breath between, and never from a guide row.
+    private val sweptAt = java.util.concurrent.ConcurrentHashMap<Long, Long>()
+    private val sweepKick = MutableStateFlow(0)
+    private var sweepJob: Job? = null
+    fun kickSweep() { sweepKick.value++ }
+    private fun startSweep() {
+        sweepJob?.cancel()
+        sweepJob = viewModelScope.launch {
+            val gate = kotlinx.coroutines.sync.Semaphore(3)
+            while (kotlinx.coroutines.currentCoroutineContext().isActive) {
+                val p = active.value
+                if (p == null || p.kind != tv.sloopy.data.ProviderKind.XTREAM) { val k = sweepKick.value; sweepKick.first { it != k }; continue }
+                val wide = _epgError.value != null || runCatching { catalog.programmeCount(p.id) }.getOrDefault(1) == 0
+                val now = System.currentTimeMillis()
+                val favs = favouriteIds.value; val hiddenG = hiddenGroups.value
+                val order = buildList {
+                    currentChannel.value?.let { add(it) }
+                    addAll(channels.value.filter { it.id in favs })
+                    addAll(visibleChannels.value)
+                    if (wide) addAll(channels.value)
+                }.distinctBy { it.id }.filter { it.categoryId !in hiddenG && now - (sweptAt[it.id] ?: 0L) > 6 * 3600_000L }
+                val batch = order.take(9)
+                if (batch.isEmpty()) {
+                    val k = sweepKick.value
+                    kotlinx.coroutines.withTimeoutOrNull(600_000) { sweepKick.first { it != k } }
+                    continue
+                }
+                val nowS = now / 1000
+                batch.map { c ->
+                    launch {
+                        gate.withPermit {
+                            val key = tv.sloopy.data.channelEpgKey(c)
+                            val have = runCatching { catalog.programmes(p.id, key, nowS - 6 * 3600, nowS + 6 * 3600) }.getOrDefault(emptyList())
+                            if (have.isNotEmpty()) { sweptAt[c.id] = now; return@withPermit }
+                            val n = try { catalog.fetchChannelEpg(p, c) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { TLog.w { "sweep: ${TLog.userMessage(e)}" }; -1 }
+                            sweptAt[c.id] = if (n < 0) now - 6 * 3600_000L + 900_000L else now   // refused: try again in fifteen minutes
+                            if (n > 0) { epgCache.keys.removeAll { it.endsWith("|$key") }; guideRowChanged(key) }
+                            delay(80)
+                        }
+                    }
+                }.forEach { it.join() }
+            }
+        }
     }
     init {
-        viewModelScope.launch { combine(currentChannel, visibleChannels) { c, l -> c?.id to l.size }.collect { prefetchGuide() } }
-        viewModelScope.launch { catalog.refresh.collect { if (it is tv.sloopy.data.RefreshState.Done) { epgCache.clear(); prefetchGuide() } } }
+        startSweep()
+        // Warm the store for the group on screen while the picture plays, so Back draws a full
+        // grid on its first frame instead of placeholders.
+        viewModelScope.launch {
+            combine(visibleChannels, _group) { l, g -> g to l }.collect { (g, l) ->
+                if (l.isNotEmpty()) { val ws = guideWindowStart(); val now = System.currentTimeMillis() / 1000 / 3600 * 3600; ensureGuide(g, l, maxOf(ws, now - GUIDE_BAND_BACK * 3600), now + GUIDE_BAND_FWD * 3600) }
+            }
+        }
+        viewModelScope.launch { combine(currentChannel, visibleChannels, favouriteIds) { c, l, f -> Triple(c?.id, l.size, f.size) }.collect { kickSweep() } }
+        viewModelScope.launch { catalog.refresh.collect { if (it is tv.sloopy.data.RefreshState.Done) { epgCache.clear(); sweptAt.clear(); dropGuides(); kickSweep() } } }
+        viewModelScope.launch { _epgError.collect { kickSweep() } }
     }
 
     fun forgetProgress(r: tv.sloopy.data.db.ProgressEntity) = viewModelScope.launch { graph.db.progress().remove(r.providerId, r.kind, r.itemId) }

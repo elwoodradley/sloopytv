@@ -248,6 +248,8 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
         list.size
     }
 
+    suspend fun programmeCount(p: String): Int = db.programmes().count(p, epgGen(p))
+
     suspend fun programmesMany(p: String, epgIds: List<String>, from: Long, to: Long): List<ProgrammeEntity> =
         if (epgIds.isEmpty()) emptyList() else db.programmes().windowMany(p, epgGen(p), epgIds, from, to)
 

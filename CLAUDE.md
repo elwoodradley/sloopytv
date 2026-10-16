@@ -50,8 +50,9 @@ Movies, Series and Settings use the same shape (`ui/common/Rail.kt`): categories
 the left, content on the right; highlighting a rail row shows it, Right or OK goes in, Left off the
 first column or Back comes out, Back on the rail leaves. No top navigation row anywhere (the user
 found it unintuitive). Hold OK on a group in the guide rail picks it up; Up/Down move it; OK drops.
-Guide programmes come from `vm.programmesFor` (cache in the view model, warmed around the current
-channel while watching) so the grid is full on its first frame after Back.
+Guide programmes come from the per-group store (`vm.groupGuide`, see 0.5.3), warmed for the group on
+screen while watching, so the grid is full on its first frame after Back. `vm.programmesFor` stays for
+the live screen, Tonight and recording (database only, never the network).
 Gotcha: something under the guide cells swallows Back's key-down and drops focus, so the guide takes
 Back itself in `onPreviewKeyEvent` (on key-up) and parks focus on a hidden node while the rail is
 rebuilt. Overlays that cancel on Back must consume both key-down and key-up (`QuitPrompt`). A
@@ -87,6 +88,19 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
   Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
   viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
+- 0.5.3 (2026-10-15): guide speed. Guide rows never touch the database or the network. The
+  view model keeps a per-group store (`GroupGuide`, LRU of six groups, `vm.groupGuide`):
+  `ensureGuide(group, channels, lo, hi)` runs one `windowMany` query for the group across a band
+  six hours behind the view and six ahead (`GUIDE_BAND_BACK/FWD`), widened as the view scrolls
+  (the hour the view starts in is the trigger), and a new group cancels a load still in flight,
+  so flicking through fifty groups costs one query. The store is warmed for the group on screen
+  while the picture plays, so Back draws a full grid on its first frame. Rows compose cells
+  only from two hours behind the view to eight ahead. The timeline still spans 48 h back / 24 h
+  ahead for catch-up. Per-channel Xtream listings (`get_simple_data_table`) come from the
+  background sweep (`startSweep`): current channel → favourites → visible group → everything
+  (the last only when the guide file was refused or the table is empty), three at a time, a
+  row updates live when its channel is filled (`guideRowChanged`). A refresh Done drops the
+  stores and re-sweeps instead of going cold. Coil crossfade is off.
 - 0.5.2 (2026-10-15): the Toad, the app's Claude helper. The Anthropic key is the Worker secret
   `ANTHROPIC_KEY` (local copy in `keystore/anthropic-key.txt`, never in the APK). Worker routes:
   `GET /toad/status?id=<friend code>` (enabled + allowed + requests left today), `POST /toad/ask`

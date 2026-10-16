@@ -35,7 +35,7 @@ class SloopyApp : Application(), SingletonImageLoader.Factory {
     override fun newImageLoader(context: coil3.PlatformContext): ImageLoader =
         ImageLoader.Builder(context)
             .components { add(OkHttpNetworkFetcherFactory(callFactory = { AndroidHttp.client })) }
-            .crossfade(true)
+            .crossfade(false)   // hard cuts only; a fade per logo is work the guide does not need
             .build()
 
     companion object {
