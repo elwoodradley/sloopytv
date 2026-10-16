@@ -269,11 +269,22 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         if (same) prefs.setDupMerged(p.id, dupMerged.value + tag) else prefs.setDupDismissed(p.id, dupDismissed.value + tag)
     }
     /** The list with every cluster reduced to the copy shown for it. */
+    /**
+     * One row per cluster, and the row shown is always a member of [list]: the preferred copy when
+     * it is in the list, else the best copy that is. A cluster's primary from another group never
+     * stands in for one here (a viewer found UK feeds appearing inside US groups that way).
+     */
     fun collapse(list: List<ChannelEntity>): List<ChannelEntity> {
         if (!collapseDupes.value) return list
         val d = dupes.value.byChannel
+        val here = list.mapTo(HashSet()) { it.id }
         val seen = HashSet<String>()
-        return list.mapNotNull { c -> val cl = d[c.id]; if (cl == null || cl.members.size < 2) c else if (seen.add(cl.key)) cl.primary else null }
+        return list.mapNotNull { c ->
+            val cl = d[c.id]
+            if (cl == null || cl.members.size < 2) c
+            else if (seen.add(cl.key)) (if (cl.primary.id in here) cl.primary else cl.members.filter { it.id in here }.maxByOrNull { tv.sloopy.core.model.Dupes.quality(it.name) } ?: c)
+            else null
+        }
     }
 
     /** Channels in the selected group, locked groups hidden until unlocked for this session. */

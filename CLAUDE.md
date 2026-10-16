@@ -88,6 +88,12 @@ a grabbed group.
   TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
   Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
   viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
+- 0.6.3 (2026-10-16): duplicates across countries. `Dupes.key` keeps the country prefix as part
+  of the identity ("US| ESPN HD" = "US: ESPN 4K" ≠ "UK| ESPN"; tests updated), and
+  `vm.collapse` only ever shows a member of the list it was given (the preferred copy when it is
+  there, else the best copy that is), so a cluster's primary from another group never appears
+  inside this one. The off switch already existed: Settings › Listings › Collapse duplicate
+  channels.
 - 0.6.2 (2026-10-16): buddy's bug, "channel names missing until you scroll": the row Canvas
   painted outside its bounds, so a programme that began before the view's left edge (negative x)
   drew its rectangle over the channel column. `clipToBounds()` on the Canvas. `SloopyDb.migrating`

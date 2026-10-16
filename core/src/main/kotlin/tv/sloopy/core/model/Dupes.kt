@@ -2,9 +2,11 @@ package tv.sloopy.core.model
 
 /**
  * Tells copies of a channel apart from channels that merely look alike. Two channels are the
- * same channel only when their names are identical once decoration is stripped: country
- * prefixes, quality tags, backup markers. "ESPN HD" and "ESPN 4K" share a key; "ESPN",
- * "ESPN2" and "ESPNU" never do. Anything weaker is left to the viewer to confirm.
+ * same channel only when their names are identical once decoration is stripped: quality tags,
+ * backup markers, bracketed numbers. A country prefix is part of the identity, not decoration:
+ * "US| ESPN HD" and "US: ESPN 4K" share a key, "UK| ESPN" does not (a viewer found UK feeds
+ * standing in for US ones). "ESPN", "ESPN2" and "ESPNU" never share. Anything weaker is left
+ * to the viewer to confirm.
  */
 object Dupes {
     private val QUALITY = mapOf(
@@ -20,11 +22,13 @@ object Dupes {
     /** The cluster key: what is left of the name after decoration. Empty when nothing is left. */
     fun key(raw: String): String {
         var s = Names.clean(raw).uppercase()
+        val country = prefix.find(s)?.value?.filter { it.isLetter() } ?: ""
         s = s.replace(prefix, "")
         s = s.replace(bracketNumber, " ")
         val tokens = s.split(sep).filter { it.isNotBlank() }
         val kept = tokens.filter { it !in STRIP }
-        return kept.joinToString(" ")
+        if (kept.isEmpty()) return ""
+        return (if (country.isEmpty()) "" else "$country ") + kept.joinToString(" ")
     }
 
     /** 0 unknown … 5 best. Read off the tags the key strips. */

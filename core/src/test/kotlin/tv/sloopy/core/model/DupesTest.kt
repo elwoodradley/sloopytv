@@ -7,9 +7,11 @@ import kotlin.test.assertNotEquals
 class DupesTest {
     @Test fun `copies share a key`() {
         assertEquals(Dupes.key("ESPN HD"), Dupes.key("ESPN FHD"))
-        assertEquals(Dupes.key("US| ESPN 4K"), Dupes.key("ESPN"))
+        assertEquals(Dupes.key("US| ESPN 4K"), Dupes.key("US: ESPN"))
+        assertNotEquals(Dupes.key("US| ESPN 4K"), Dupes.key("UK| ESPN"))
+        assertEquals(Dupes.key("ESPN HD"), Dupes.key("ESPN 4K"))
         assertEquals(Dupes.key("##### ESPN BACKUP #####"), Dupes.key("ESPN"))
-        assertEquals(Dupes.key("UK: BBC ONE HD"), Dupes.key("BBC ONE"))
+        assertEquals(Dupes.key("UK: BBC ONE HD"), Dupes.key("UK| BBC ONE"))
     }
     @Test fun `lookalikes never share a key`() {
         assertNotEquals(Dupes.key("ESPN"), Dupes.key("ESPN2"))
