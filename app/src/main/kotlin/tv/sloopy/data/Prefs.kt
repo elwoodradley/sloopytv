@@ -156,6 +156,13 @@ class Prefs(private val context: Context) {
         p[stringPreferencesKey("toad_tags_$providerId")] = tags.entries.joinToString("\u0001") { it.key + "\u0002" + it.value }
         p[stringPreferencesKey("toad_tags_digest_$providerId")] = digest
     }
+    // Sports: teams followed (league|id|name|abbr|logo), the hide-scores switch, and a week-old team list per league.
+    val followedTeams: Flow<List<String>> = ds.data.map { p -> p[stringPreferencesKey("followed_teams")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
+    suspend fun setFollowedTeams(list: List<String>) = ds.edit { it[stringPreferencesKey("followed_teams")] = list.distinct().joinToString("\u0001") }
+    val hideScores: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("hide_scores")] ?: false }
+    suspend fun setHideScores(v: Boolean) = ds.edit { it[booleanPreferencesKey("hide_scores")] = v }
+    suspend fun teamList(league: String): Pair<Long, List<String>>? = ds.data.first().let { p -> val at = p[longPreferencesKey("teams_at_$league")] ?: return null; at to (p[stringPreferencesKey("teams_$league")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList()) }
+    suspend fun setTeamList(league: String, list: List<String>) = ds.edit { it[stringPreferencesKey("teams_$league")] = list.joinToString("\u0001"); it[longPreferencesKey("teams_at_$league")] = System.currentTimeMillis() }
     val searchHistory: Flow<List<String>> = ds.data.map { p -> p[stringPreferencesKey("search_history")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
     suspend fun pushSearch(q: String) = ds.edit { p ->
         val cur = p[stringPreferencesKey("search_history")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList()

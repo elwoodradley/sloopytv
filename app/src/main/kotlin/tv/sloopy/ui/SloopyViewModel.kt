@@ -922,9 +922,33 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     fun allowedCats(kind: String): List<String>? = activeProfile.value?.let { if (kind == "vod") it.vodCats else it.seriesCats }
 
     // ---- Scores ----------------------------------------------------------------------------------
+    // ESPN's public feeds, read straight from the stick. Games carry ESPN team ids, so "my teams"
+    // matches on ids, never on names. The channel for a game is found in the viewer's own lineup:
+    // the programme on now whose title names both teams, else the network map, else a guess.
     data class GameRow(val game: tv.sloopy.core.sports.Game, val channel: ChannelEntity?, val via: String)
+    data class FollowedTeam(val league: String, val id: String, val name: String, val abbr: String, val logo: String?) {
+        fun encode() = listOf(league, id, name, abbr, logo ?: "").joinToString("|")
+        companion object {
+            fun decode(s: String): FollowedTeam? { val p = s.split('|'); return if (p.size < 4) null else FollowedTeam(p[0], p[1], p[2], p[3], p.getOrNull(4)?.ifBlank { null }) }
+            fun of(t: tv.sloopy.core.sports.Team) = FollowedTeam(t.league, t.id, t.name, t.abbr, t.logo)
+        }
+    }
     private val _games = MutableStateFlow<List<GameRow>>(emptyList())
     val games: StateFlow<List<GameRow>> = _games
+    private val _scoresBusy = MutableStateFlow(false)
+    val scoresBusy: StateFlow<Boolean> = _scoresBusy
+    /** Days from today for the games shown: -1 yesterday … +6. */
+    val scoresDay = MutableStateFlow(0)
+    val followedTeams: StateFlow<List<FollowedTeam>> = prefs.followedTeams.map { l -> l.mapNotNull { FollowedTeam.decode(it) } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    fun follows(league: String, id: String) = followedTeams.value.any { it.league == league && it.id == id }
+    fun toggleFollow(t: FollowedTeam) = viewModelScope.launch {
+        val cur = followedTeams.value
+        val next = if (cur.any { it.league == t.league && it.id == t.id }) cur.filterNot { it.league == t.league && it.id == t.id } else cur + t
+        prefs.setFollowedTeams(next.map { it.encode() })
+        _toast.value = if (next.size > cur.size) "Following the ${t.name}" else "No longer following the ${t.name}"
+    }
+    val hideScores: StateFlow<Boolean> = prefs.hideScores.stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    fun setHideScores(v: Boolean) = viewModelScope.launch { prefs.setHideScores(v) }
     val networkMap: StateFlow<Map<String, Long>> = perProvider({ prefs.networkMap(it) }, emptyMap())
     private val gameChannelCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long?, Long>>()
     fun setNetworkChannel(network: String, c: ChannelEntity?) = viewModelScope.launch {
@@ -937,35 +961,61 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val words = tv.sloopy.core.sports.Scores.NETWORK_WORDS[network] ?: listOf(network)
         return collapse(channels.value.filter { c -> val k = tv.sloopy.core.model.Dupes.key(c.name); words.any { w -> k == w || k.startsWith("$w ") || k.endsWith(" $w") || k.contains(" $w ") } }).take(30)
     }
-    fun refreshScores() = viewModelScope.launch {
-        val p = active.value
-        val all = ArrayList<tv.sloopy.core.sports.Game>()
-        for (league in listOf("nfl", "college-football", "nba", "nhl", "mlb")) runCatching { scores.games(league) }.getOrNull()?.let { all.addAll(it) }
-        val now = System.currentTimeMillis() / 1000
-        val visible = all.filter { it.state == "in" || (it.state == "pre" && it.startEpoch < now + 12 * 3600) || (it.state == "post" && it.startEpoch > now - 4 * 3600) }
-            .sortedWith(compareBy({ when (it.state) { "in" -> 0; "pre" -> 1; else -> 2 } }, { !it.redZone }, { it.startEpoch }))
-        val rows = visible.map { g -> val (ch, via) = if (p == null) null to "" else resolveGameChannel(p, g, now); GameRow(g, ch, via) }
-        _games.value = rows
+    fun setScoresDay(d: Int) { if (scoresDay.value != d) { scoresDay.value = d; refreshScores() } }
+    private var scoresJob: Job? = null
+    fun refreshScores() {
+        scoresJob?.cancel()
+        scoresJob = viewModelScope.launch {
+            _scoresBusy.value = true
+            try {
+                val p = active.value
+                val day = java.time.LocalDate.now().plusDays(scoresDay.value.toLong())
+                val ymd = day.format(java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd"))
+                val all = ArrayList<tv.sloopy.core.sports.Game>()
+                for (league in tv.sloopy.core.sports.Scores.LEAGUES) runCatching { scores.games(league, ymd) }.getOrNull()?.let { all.addAll(it) }
+                val sorted = all.sortedWith(compareBy({ when (it.state) { "in" -> 0; "pre" -> 1; else -> 2 } }, { !it.redZone }, { it.startEpoch }))
+                val rows = if (p == null) sorted.map { GameRow(it, null, "") } else resolveGameChannels(p, sorted)
+                _games.value = rows
+            } finally { _scoresBusy.value = false }
+        }
     }
-    private suspend fun resolveGameChannel(p: tv.sloopy.data.ProviderRecord, g: tv.sloopy.core.sports.Game, now: Long): Pair<ChannelEntity?, String> {
-        gameChannelCache[g.id]?.let { (id, at) -> if (now - at < 600) return channels.value.firstOrNull { it.id == id } to "cached" }
+    /** One pass over what is on now, then the network map, then a guess by name: never a search through the guide table. */
+    private suspend fun resolveGameChannels(p: tv.sloopy.data.ProviderRecord, list: List<tv.sloopy.core.sports.Game>): List<GameRow> {
+        val now = System.currentTimeMillis() / 1000
         val hiddenCh = hiddenChannels.value; val hiddenG = hiddenGroups.value
         val live = channels.value.filter { it.id !in hiddenCh && it.categoryId !in hiddenG }
         val byEpg = live.filter { it.epgId != null }.groupBy { it.epgId!! }
+        val onNow = if (list.any { it.state == "in" || kotlin.math.abs(it.startEpoch - now) < 2 * 3600 }) runCatching { catalog.nowPlaying(p.id, byEpg.keys.toList(), now) }.getOrDefault(emptyMap()) else emptyMap()
         fun last(n: String) = n.trim().substringAfterLast(' ').lowercase()
-        // 1. The guide names the game on a channel airing now.
-        val hits = runCatching { catalog.searchProgrammes(p.id, last(g.home), now - 4 * 3600) }.getOrDefault(emptyList())
-            .filter { pr -> val t = pr.title.lowercase(); t.contains(last(g.away)) && kotlin.math.abs(pr.startEpoch - g.startEpoch) < 5400 }
-        val fromGuide = hits.flatMap { byEpg[it.epgId] ?: emptyList() }.maxByOrNull { tv.sloopy.core.model.Dupes.quality(it.name) }
-        if (fromGuide != null) { gameChannelCache[g.id] = fromGuide.id to now; return (dupes.value.byChannel[fromGuide.id]?.primary ?: fromGuide) to "guide" }
-        // 2. The viewer's network map, else a confident guess from the channel names.
-        for (net in g.networks) {
-            networkMap.value[net]?.let { id -> live.firstOrNull { it.id == id }?.let { gameChannelCache[g.id] = it.id to now; return it to net } }
-            val guess = channelsForNetwork(net).let { c -> c.firstOrNull { it.categoryId?.let { g -> liveCategories.value.firstOrNull { it.id == g }?.name?.uppercase()?.contains("US") == true } == true } ?: c.firstOrNull() }
-            if (guess != null) { gameChannelCache[g.id] = guess.id to now; return guess to "$net?" }
+        return list.map { g ->
+            gameChannelCache[g.id]?.let { (id, at) -> if (now - at < 600) return@map GameRow(g, live.firstOrNull { it.id == id }, "cached") }
+            val h = last(g.home); val a = last(g.away)
+            val fromGuide = onNow.entries.filter { (_, nn) -> val t = nn.title.lowercase(); t.contains(h) && t.contains(a) }
+                .flatMap { byEpg[it.key] ?: emptyList() }.maxByOrNull { tv.sloopy.core.model.Dupes.quality(it.name) }
+            if (fromGuide != null) { gameChannelCache[g.id] = fromGuide.id to now; return@map GameRow(g, dupes.value.byChannel[fromGuide.id]?.primary ?: fromGuide, "guide") }
+            for (net in g.networks) {
+                networkMap.value[net]?.let { id -> live.firstOrNull { it.id == id }?.let { gameChannelCache[g.id] = it.id to now; return@map GameRow(g, it, net) } }
+                val cands = channelsForNetwork(net)
+                val guess = cands.firstOrNull { c -> c.categoryId?.let { gid -> liveCategories.value.firstOrNull { it.id == gid }?.name?.uppercase()?.contains("US") == true } == true } ?: cands.firstOrNull()
+                if (guess != null) { gameChannelCache[g.id] = guess.id to now; return@map GameRow(g, guess, "$net?") }
+            }
+            gameChannelCache[g.id] = null to now
+            GameRow(g, null, "")
         }
-        gameChannelCache[g.id] = null to now
-        return null to ""
+    }
+    /** A league's teams, kept a week on the stick. */
+    suspend fun teamsFor(league: String): List<tv.sloopy.core.sports.Team> {
+        prefs.teamList(league)?.let { (at, lines) -> if (System.currentTimeMillis() - at < 7 * 86_400_000L && lines.isNotEmpty()) return lines.mapNotNull { FollowedTeam.decode(it) }.map { tv.sloopy.core.sports.Team(it.league, it.id, it.name, it.abbr, it.logo) } }
+        val fresh = runCatching { scores.teams(league) }.getOrDefault(emptyList())
+        if (fresh.isNotEmpty()) prefs.setTeamList(league, fresh.map { FollowedTeam.of(it).encode() })
+        return fresh
+    }
+    private val standingsCache = HashMap<String, Pair<Long, List<tv.sloopy.core.sports.StandingsGroup>>>()
+    suspend fun standingsFor(league: String): List<tv.sloopy.core.sports.StandingsGroup> {
+        standingsCache[league]?.let { (at, v) -> if (System.currentTimeMillis() - at < 15 * 60_000L) return v }
+        val v = runCatching { scores.standings(league) }.getOrDefault(emptyList())
+        if (v.isNotEmpty()) standingsCache[league] = System.currentTimeMillis() to v
+        return v
     }
 
     // ---- Recordings ------------------------------------------------------------------------------

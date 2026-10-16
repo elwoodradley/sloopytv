@@ -88,6 +88,21 @@ a grabbed group.
   TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
   Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
   viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
+- 0.6.4 (2026-10-16): Sports rebuilt in the rail shape (`ui/scores/ScoresScreen`): rail = Live
+  now, Today, Tomorrow, Yesterday, the next five weekdays, My teams, Standings per league; the
+  content shows the game under the cursor as a card ("OK to watch · On <channel>") and the day's
+  games as tiles by league. Hold OK: watch, remind (pre + channel), follow/unfollow either team,
+  pick the channel for the network, hide scores. The remote's Menu key toggles `prefs.hideScores`
+  (scores and clocks blank; "LIVE"/"FINAL" only). Followed teams are ESPN (league, id) pairs in
+  `prefs.followedTeams` ("league|id|name|abbr|logo"), in the sync bundle; `Game.has(league, id)`
+  matches by id, never by name. Team lists (`Scores.teams`, cached a week in
+  `prefs.teamList`) and standings (`Scores.standings`, `/apis/v2/.../standings`, conferences
+  walked recursively; college tables repeat stats per split so the first occurrence or the
+  `total`-typed stat is the record) are ESPN public JSON, read from the stick. Channel for a game
+  is resolved in one pass from `catalog.nowPlaying` (title names both teams) → network map →
+  name guess, never `searchProgrammes` (a LIKE over a million rows per game was why Scores
+  "didn't work" on the user's box). Rail rows cancel Right, so the screen's rail handles Right →
+  content. Emulator note: adb `--longpress` does not fire tv-material `onLongClick`; real remotes do.
 - 0.6.3 (2026-10-16): duplicates across countries. `Dupes.key` keeps the country prefix as part
   of the identity ("US| ESPN HD" = "US: ESPN 4K" ≠ "UK| ESPN"; tests updated), and
   `vm.collapse` only ever shows a member of the list it was given (the preferred copy when it is
