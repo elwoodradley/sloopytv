@@ -324,6 +324,13 @@ from the version and must only rise). The updater (`update/Updater.kt`) keys on 
 (`adb reverse tcp:8099`, python http.server with latest.json + a debug APK) is in the session notes.
 
 ## Code server
+KV free plan: 1,000 writes/day. Cloudflare warned at 50% on 2026-10-16 with ~550 requests/day:
+the rate limiters wrote a KV mark per request. Since then (`memLimited`) limits live in isolate
+memory, presence (`/friends/me`) is rewritten only on a channel change or after two minutes
+(TTL 300 s), and every counter/cache put is `.catch(() => null)` so a quota miss degrades instead
+of failing the request. Remaining writers: login code mint/redeem, sync put, config, poster and
+trending caches, Toad counters, presence. If the group turns on friends presence at scale, the
+Workers Paid plan ($5/mo, 1M writes/day) is the answer, not more trimming.
 `codes/src/index.js` (Cloudflare Worker, KV `CODES`, secret `ADMIN_PASSWORD`). Local run:
 `cd codes && npx wrangler@4 dev --local --port 8787` with `.dev.vars` holding the password;
 `adb reverse tcp:8787 tcp:8787` and set Settings › Login code server to `http://127.0.0.1:8787`.

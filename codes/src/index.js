@@ -141,10 +141,7 @@ async function del(code, env) {
 
 async function redeem(request, env) {
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
-  const rlKey = "rl:" + ip;
-  const attempts = parseInt((await env.CODES.get(rlKey)) || "0", 10);
-  if (attempts >= RATE_MAX) return json({ ok: false, error: "Too many tries. Wait ten minutes." }, 429);
-  await env.CODES.put(rlKey, String(attempts + 1), { expirationTtl: RATE_WINDOW });
+  if (memLimited("rl:" + ip, RATE_MAX, RATE_WINDOW)) return json({ ok: false, error: "Too many tries. Wait ten minutes." }, 429);
 
   const body = await request.json().catch(() => null);
   const code = String(body?.code || "").trim();
@@ -171,13 +168,20 @@ const SYNC_MAX_CT = 1_200_000;    // base64 chars, ~900 KB
 const SYNC_RATE_MAX = 200;        // requests per IP per window
 const SYNC_RATE_WINDOW = 600;
 
+// Counts live in the isolate's memory, never in KV: a write per request was most of the free
+// plan's daily write budget (one mark per call, ~550 calls a day). Memory resets when the
+// isolate does, which only ever makes the limit more forgiving.
+const rateMem = new Map();
+function memLimited(key, max, windowSec) {
+  const now = Date.now();
+  const e = rateMem.get(key);
+  if (!e || now - e.at > windowSec * 1000) { rateMem.set(key, { at: now, n: 1 }); if (rateMem.size > 5000) rateMem.clear(); return false; }
+  e.n++;
+  return e.n > max;
+}
 async function syncLimited(request, env) {
   const ip = request.headers.get("cf-connecting-ip") || "unknown";
-  const k = "srl:" + ip;
-  const n = parseInt((await env.CODES.get(k)) || "0", 10);
-  if (n >= SYNC_RATE_MAX) return true;
-  await env.CODES.put(k, String(n + 1), { expirationTtl: SYNC_RATE_WINDOW });
-  return false;
+  return memLimited("srl:" + ip, SYNC_RATE_MAX, SYNC_RATE_WINDOW);
 }
 
 async function syncPut(request, env) {
@@ -327,7 +331,7 @@ async function poster(request, env, url) {
     const hit = (j.results || []).find((x) => x.poster_path);
     if (hit) found = "https://image.tmdb.org/t/p/w342" + hit.poster_path;
   } catch (e) {}
-  await env.CODES.put(key, found, { expirationTtl: 30 * 24 * 3600 });
+  await env.CODES.put(key, found, { expirationTtl: 30 * 24 * 3600 }).catch(() => null);
   return json({ ok: true, url: found || null });
 }
 
@@ -351,7 +355,7 @@ async function trending(request, env) {
     } catch (e) { return []; }
   };
   const body = JSON.stringify({ ok: true, tv: await pull("tv"), movies: await pull("movie") });
-  await env.CODES.put("trending:v1", body, { expirationTtl: 6 * 3600 });
+  await env.CODES.put("trending:v1", body, { expirationTtl: 6 * 3600 }).catch(() => null);
   return new Response(body, { headers: { "content-type": "application/json" } });
 }
 
@@ -390,10 +394,10 @@ async function toadSpend(env, code, model, usage) {
   const cost = ((usage?.input_tokens || 0) * price[0] + (usage?.output_tokens || 0) * price[1]) / 1e6;
   const mk = "toad:spend:" + monthKey();
   const cur = (await env.CODES.get(mk, "json")) || { usd: 0, calls: 0 };
-  await env.CODES.put(mk, JSON.stringify({ usd: cur.usd + cost, calls: cur.calls + 1 }), { expirationTtl: 400 * 24 * 3600 });
+  await env.CODES.put(mk, JSON.stringify({ usd: cur.usd + cost, calls: cur.calls + 1 }), { expirationTtl: 400 * 24 * 3600 }).catch(() => null);
   const uk = "toad:use:" + code + ":" + dayKey();
   const used = parseInt((await env.CODES.get(uk)) || "0", 10);
-  await env.CODES.put(uk, String(used + 1), { expirationTtl: 2 * 24 * 3600 });
+  await env.CODES.put(uk, String(used + 1), { expirationTtl: 2 * 24 * 3600 }).catch(() => null);
 }
 
 // One call to Claude. Returns the text and the usage, or throws with a short message.
@@ -482,7 +486,7 @@ async function toadTags(request, env) {
     const got = jsonFromText(r.text)?.tags || {};
     const tags = {};
     for (const name of groups) { const t = String(got[name] || "").toLowerCase(); tags[name] = TOAD_TAGS.includes(t) ? t : "general"; }
-    await env.CODES.put(key, JSON.stringify(tags), { expirationTtl: 30 * 24 * 3600 });
+    await env.CODES.put(key, JSON.stringify(tags), { expirationTtl: 30 * 24 * 3600 }).catch(() => null);
     return json({ ok: true, tags });
   } catch (e) {
     return json({ ok: false, error: String(e.message || e).slice(0, 160) }, 502);
@@ -504,7 +508,12 @@ async function friendMe(request, env) {
   const b = await request.json().catch(() => null);
   const id = String(b?.id || "");
   if (!FRIEND_RE.test(id)) return json({ ok: false, error: "Bad code" }, 400);
-  await env.CODES.put("f:" + id, JSON.stringify({ nick: String(b?.nick || "").slice(0, 24), channel: String(b?.channel || "").slice(0, 60), at: Math.floor(Date.now() / 1000) }), { expirationTtl: 180 });
+  const nick = String(b?.nick || "").slice(0, 24), channel = String(b?.channel || "").slice(0, 60), at = Math.floor(Date.now() / 1000);
+  // A stick reports every 45 s; the note is rewritten only when the channel changed or it is
+  // over two minutes old (the note lives five), so a quiet evening costs a handful of writes.
+  const cur = await env.CODES.get("f:" + id, "json");
+  if (cur && cur.channel === channel && cur.nick === nick && at - (cur.at || 0) < 120) return json({ ok: true });
+  await env.CODES.put("f:" + id, JSON.stringify({ nick, channel, at }), { expirationTtl: 300 }).catch(() => null);
   return json({ ok: true });
 }
 
