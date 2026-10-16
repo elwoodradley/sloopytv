@@ -61,6 +61,14 @@ fun SloopyRoot(vm: SloopyViewModel, onQuit: () -> Unit) {
 
     val body: @Composable () -> Unit = {
         Box(Modifier.fillMaxSize().background(Sloopy.ground)) {
+            val migrating by tv.sloopy.data.db.SloopyDb.migrating.collectAsState()
+            if (migrating) {
+                androidx.compose.foundation.layout.Column(Modifier.fillMaxSize().background(Sloopy.ground).padding(72.dp), verticalArrangement = androidx.compose.foundation.layout.Arrangement.Center) {
+                    tv.sloopy.ui.common.Label("Hang on", bright = true)
+                    androidx.tv.material3.Text("PREPARING THE GUIDE", style = Sloopy.titleHuge, modifier = Modifier.padding(top = 8.dp))
+                    androidx.tv.material3.Text("This update changes how the guide is stored. One minute on a big lineup, once.", style = Sloopy.bodyBig, modifier = Modifier.padding(top = 10.dp))
+                }
+            }
             if (locked) tv.sloopy.ui.pay.UnlockScreen(vm) else SloopyNav(vm, startAtProviders = providers.isEmpty(), onQuit = { quitting = true })
             androidx.compose.animation.AnimatedVisibility(visible = brand, enter = androidx.compose.animation.EnterTransition.None, exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(600)), modifier = Modifier.align(Alignment.BottomStart).padding(start = 72.dp, bottom = 56.dp)) {
                 tv.sloopy.ui.common.StoneToadCredit(operator = operator.takeIf { it.isNotBlank() }, color = Sloopy.textSoft)

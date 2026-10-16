@@ -533,7 +533,9 @@ private fun GuideRow(
                 if (copies > 1) Text("+${copies - 1}", style = Sloopy.mono14.copy(color = Sloopy.dim), modifier = Modifier.padding(end = 8.dp))
                 if (isCurrent) LiveDot()
             }
-            Canvas(Modifier.weight(1f).fillMaxHeight()) {
+            // clipToBounds: a programme that started before the view's left edge has a negative x, and
+            // without the clip its rectangle painted straight over the channel name.
+            Canvas(Modifier.weight(1f).fillMaxHeight().clipToBounds()) {
                 val scroll = hScroll.value
                 val viewLo = winStart + (scroll / pxPerSec).toLong()
                 val viewHi = viewLo + (size.width / pxPerSec).toLong()

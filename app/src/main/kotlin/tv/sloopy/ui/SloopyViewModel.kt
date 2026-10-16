@@ -1334,7 +1334,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 val ms = System.currentTimeMillis() - t0
                 val total = runCatching { catalog.programmeCount(p.id) }.getOrDefault(-1)
                 val wal = catalog.walBytes(getApplication()) / 1_000_000
-                _guideStats.value = "Last guide read: $rowsRead rows in $ms ms · ${"%,d".format(total)} programmes in the table · log file $wal MB"
+                val dbMb = runCatching { getApplication<android.app.Application>().getDatabasePath("sloopy.db").length() / 1_000_000 }.getOrDefault(0L)
+                _guideStats.value = "Last guide read: $rowsRead rows in $ms ms · ${"%,d".format(total)} programmes in the table · database $dbMb MB · log file $wal MB"
             }
         }
     }

@@ -88,6 +88,12 @@ a grabbed group.
   TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
   Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
   viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
+- 0.6.2 (2026-10-16): buddy's bug, "channel names missing until you scroll": the row Canvas
+  painted outside its bounds, so a programme that began before the view's left edge (negative x)
+  drew its rectangle over the channel column. `clipToBounds()` on the Canvas. `SloopyDb.migrating`
+  (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
+  migration runs, so an index build on a million rows is never a black screen. About's guide
+  line adds the database file size.
 - 0.6.1 (2026-10-15): the user's About line read "100 rows in 28585 ms": the IN-list window query
   let SQLite choose a plan that walked far more than it returned. DB v5 adds the index
   (providerId, gen, epgId, stopEpoch); the store reads one channel at a time through

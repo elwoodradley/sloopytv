@@ -28,6 +28,11 @@ abstract class SloopyDb : RoomDatabase() {
     abstract fun reminders(): ReminderDao
 
     companion object {
+        /** True while a schema migration runs. A big table makes an index build take a minute; the root shows a notice instead of a black screen. */
+        val migrating = kotlinx.coroutines.flow.MutableStateFlow(false)
+        private fun migration(from: Int, to: Int, body: (androidx.sqlite.db.SupportSQLiteDatabase) -> Unit) = object : androidx.room.migration.Migration(from, to) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) { migrating.value = true; try { body(db) } finally { migrating.value = false } }
+        }
         private val MIGRATION_1_2 = object : androidx.room.migration.Migration(1, 2) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("CREATE TABLE IF NOT EXISTS `favourite_items` (`providerId` TEXT NOT NULL, `kind` TEXT NOT NULL, `itemId` INTEGER NOT NULL, `addedAt` INTEGER NOT NULL, PRIMARY KEY(`providerId`, `kind`, `itemId`))")
@@ -43,10 +48,8 @@ abstract class SloopyDb : RoomDatabase() {
 
         // The guide asks "this channel, rows not yet ended": an index in that order answers it with
         // a short range scan instead of a walk through the channel's whole history.
-        private val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
-            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
-                db.execSQL("CREATE INDEX IF NOT EXISTS `index_programmes_providerId_gen_epgId_stopEpoch` ON `programmes` (`providerId`, `gen`, `epgId`, `stopEpoch`)")
-            }
+        private val MIGRATION_4_5 = migration(4, 5) { db ->
+            db.execSQL("CREATE INDEX IF NOT EXISTS `index_programmes_providerId_gen_epgId_stopEpoch` ON `programmes` (`providerId`, `gen`, `epgId`, `stopEpoch`)")
         }
         private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
