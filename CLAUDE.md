@@ -53,10 +53,10 @@ found it unintuitive). Hold OK on a group in the guide rail picks it up; Up/Down
 Guide programmes come from the per-group store (`vm.groupGuide`, see 0.5.3), warmed for the group on
 screen while watching, so the grid is full on its first frame after Back. `vm.programmesFor` stays for
 the live screen, Tonight and recording (database only, never the network).
-Gotcha: something under the guide cells swallows Back's key-down and drops focus, so the guide takes
-Back itself in `onPreviewKeyEvent` (on key-up) and parks focus on a hidden node while the rail is
-rebuilt. Overlays that cancel on Back must consume both key-down and key-up (`QuitPrompt`). A
-long press's own key-up must not count as the OK that drops a grabbed group.
+Since 0.6.0 the grid is one focusable node with a drawn cursor (see 0.6.0 below); the guide still
+takes Back itself in `onPreviewKeyEvent` on key-up. Overlays that cancel on Back must consume both
+key-down and key-up (`QuitPrompt`). A long press's own key-up must not count as the OK that drops
+a grabbed group.
 
 ## Added in 0.2.0 / 0.3.0 (2026-10-14)
 - Themes are palettes in `ui/theme/Theme.kt` (`Palettes`); `Sloopy.*` colours read the current one.
@@ -88,6 +88,15 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
   Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
   viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
+- 0.6.0 (2026-10-15): the grid is drawn, not composed. `GuideRow` keeps the channel column as
+  composables and paints the cells on one `Canvas` per row (`TextMeasurer`, layouts cached per
+  title+width); the whole grid is one focusable node (`gridFocus`) and the cursor is state
+  (`cursorRow`, `cursorEpoch`) moved by the screen's key handler: Up/Down wrap and keep the
+  time, Left/Right step programmes (`moveTime`) and scroll the timeline only as far as needed,
+  Left with nothing before opens the groups, OK selects on key-up, a held OK (repeatCount ≥ 2)
+  opens the cell menu, Channel± jump ten rows. No per-cell FocusRequesters, no placeholder
+  focus, no watchdog, no parking node; `DetailPanel` reads the cursor. `vm.guideStats` (last
+  read ms/rows) shows under Settings › About. The timeline header is unchanged.
 - 0.5.8 (2026-10-15): the 0.5.4–0.5.7 store had two callers (the screen and the watch-time
   warm-up) sharing one job, last writer wins, so the screen's rows could be cancelled by the
   warm-up's and sit on placeholders; and its reads queued behind the sweep's writes on Room's

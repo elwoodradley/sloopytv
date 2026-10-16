@@ -513,6 +513,8 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                             Text(note, style = Sloopy.body.copy(color = if (update is UpdateState.Failed || update is UpdateState.NeedsPermission) Sloopy.amber else Sloopy.textSoft), modifier = Modifier.width(700.dp))
                         }
                         val context = androidx.compose.ui.platform.LocalContext.current
+                        val gstats by vm.guideStats.collectAsState()
+                        if (gstats.isNotBlank()) Text(gstats, style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 10.dp))
                         var crash by remember { mutableStateOf(tv.sloopy.CrashLog.read(context)) }
                         if (crash != null) {
                             Section("Last crash")

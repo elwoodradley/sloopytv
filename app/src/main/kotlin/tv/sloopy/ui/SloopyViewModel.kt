@@ -1300,9 +1300,13 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             if (guideJob?.isActive != true) guideJob = viewModelScope.launch { drainGuideQueue(groupKey) }
         }
     }
+    private val _guideStats = MutableStateFlow("")
+    /** For Settings › About: how long the last guide reads took. */
+    val guideStats: StateFlow<String> = _guideStats
     private suspend fun drainGuideQueue(groupKey: String) {
         val p = active.value ?: return
         guideLoading = true
+        val t0 = System.currentTimeMillis(); var rowsRead = 0; var reads = 0
         try {
             while (true) {
                 val chunk = synchronized(guideQueue) {
@@ -1313,6 +1317,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 if (chunk.isEmpty()) break
                 val lo = bandLo; val hi = bandHi
                 val got = runCatching { catalog.programmesManyDirect(p.id, chunk, lo, hi) }.getOrDefault(emptyList()).groupBy { it.epgId }
+                rowsRead += chunk.size; reads++
                 synchronized(guideQueue) {
                     val cur = guides[groupKey]
                     val rows = HashMap(cur?.rows ?: emptyMap())
@@ -1323,7 +1328,10 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 }
                 kotlinx.coroutines.yield()
             }
-        } finally { guideLoading = false }
+        } finally {
+            guideLoading = false
+            if (reads > 0) _guideStats.value = "Last guide read: $rowsRead rows in ${System.currentTimeMillis() - t0} ms ($reads quer${if (reads == 1) "y" else "ies"})"
+        }
     }
     // Channels the sweep filled are folded into the store a few at a time, not one rebuild each.
     private val changedKeys = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
