@@ -88,9 +88,19 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
   Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
   viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
+- 0.5.4 (2026-10-15): the 0.5.3 store loaded whole groups (a quarter-million rows for "All
+  channels" on a 10k-channel provider) and the sweep ran three-wide over everything, rebuilding
+  the store per channel: slower than before on the user's box. Now `ensureGuide(group, channels,
+  rowLo, rowHi, lo, hi)` loads only the rows near the view (first visible row in steps of 30,
+  about 130 rows, plus the top 40) across the time band; scrolling down or sideways loads more;
+  rows not yet loaded show the placeholder. The sweep does the current channel, favourites and
+  the rows the guide asked for (`guideWanted`) three-wide, then the rest one at a time with a
+  400 ms pause, and filled channels fold into the store in 700 ms batches (`flushChangedKeys`).
+  `vm.sweepProgress` (done, total) shows as "Loading TV guide · d / t" with an amber hairline in
+  the guide header; the guide-file download shows there too.
 - 0.5.3 (2026-10-15): guide speed. Guide rows never touch the database or the network. The
   view model keeps a per-group store (`GroupGuide`, LRU of six groups, `vm.groupGuide`):
-  `ensureGuide(group, channels, lo, hi)` runs one `windowMany` query for the group across a band
+  `ensureGuide` runs one `windowMany` query for the rows asked for across a band
   six hours behind the view and six ahead (`GUIDE_BAND_BACK/FWD`), widened as the view scrolls
   (the hour the view starts in is the trigger), and a new group cancels a load still in flight,
   so flicking through fifty groups costs one query. The store is warmed for the group on screen

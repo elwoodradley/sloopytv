@@ -174,10 +174,12 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     // costs nothing). The timeline itself still runs two days back for catch-up.
     val guide by vm.groupGuide.collectAsState()
     val viewHour by remember { derivedStateOf { (winStart + (hScroll.value / (dpPerSec * density)).toLong()) / 3600 } }
-    LaunchedEffect(channels, groupNow, viewHour) {
+    // Rows are loaded around the view too: the first visible row, in steps of thirty, is the trigger.
+    val rowBucket by remember { derivedStateOf { listState.firstVisibleItemIndex / 30 } }
+    LaunchedEffect(channels, groupNow, viewHour, rowBucket) {
         if (channels.isEmpty()) return@LaunchedEffect
         val v = viewHour * 3600
-        vm.ensureGuide(groupNow, channels, maxOf(winStart, v - GUIDE_BAND_BACK * 3600), minOf(winEnd, v + GUIDE_BAND_FWD * 3600))
+        vm.ensureGuide(groupNow, channels, rowBucket * 30 - 40, rowBucket * 30 + 90, maxOf(winStart, v - GUIDE_BAND_BACK * 3600), minOf(winEnd, v + GUIDE_BAND_FWD * 3600))
     }
 
     // Picture → Back → grid; Back → groups panel on the current group; Back → sections; Back → switch off.
@@ -341,7 +343,22 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             Label("Guide  ·  " + dayLabel(nowEpoch), bright = true)
             val epgError by vm.epgError.collectAsState()
             if (epgError != null) { Spacer(Modifier.width(28.dp)); Text("Guide feed refused ($epgError) · using the provider's channel guide instead", style = Sloopy.label.copy(color = Sloopy.amber), maxLines = 1, overflow = TextOverflow.Ellipsis) }
-            Spacer(Modifier.weight(1f)); Clock()
+            Spacer(Modifier.weight(1f))
+            // Listings still filling in: a small line and a bar, gone when the sweep is done.
+            val sweep by vm.sweepProgress.collectAsState()
+            val refreshing by vm.catalog.refresh.collectAsState()
+            val dl = refreshing as? tv.sloopy.data.RefreshState.Running
+            if (dl != null && dl.step == "Guide") {
+                Text("Downloading TV guide" + (if (dl.count > 0) " · ${"%,d".format(dl.count)} programmes" else ""), style = Sloopy.label.copy(color = Sloopy.amber)); Spacer(Modifier.width(28.dp))
+            } else if (sweep != null && sweep!!.second > 0) {
+                val (d, t) = sweep!!
+                Column(horizontalAlignment = Alignment.End) {
+                    Text("Loading TV guide · ${"%,d".format(d)} / ${"%,d".format(t)}", style = Sloopy.label.copy(color = Sloopy.amber))
+                    tv.sloopy.ui.common.ProgressHairline(d.toFloat() / t, modifier = Modifier.padding(top = 4.dp).width(220.dp), fill = Sloopy.amber)
+                }
+                Spacer(Modifier.width(28.dp))
+            }
+            Clock()
         }
 
         DetailPanel(vm, focused, current, nowEpoch)
@@ -389,7 +406,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                         if (i == 0) add(firstRowFocus)
                         if (i == channels.lastIndex) add(lastRowFocus)
                     }
-                    val progs = guide?.takeIf { it.key == groupNow }?.let { g -> g.rows[tv.sloopy.data.channelEpgKey(c)] ?: emptyList() }
+                    val progs = guide?.takeIf { it.key == groupNow }?.rows?.get(tv.sloopy.data.channelEpgKey(c))
                     GuideRow(
                         vm = vm, channel = c, isCurrent = c.id == current?.id, copies = dupesNow.byChannel[c.id]?.members?.size ?: 1, progs = progs,
                         winStart = winStart, winEnd = winEnd, nowEpoch = nowEpoch, dpPerSec = dpPerSec,

@@ -1240,13 +1240,14 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         return rows
     }
 
-    // ---- The guide store: one group at a time, in memory, loaded in one query ------------------
+    // ---- The guide store: the rows near the view, in memory, a few queries at most ------------
     // A guide row never queries the database or the network itself. The screen asks for the
-    // group's channels across a band of hours around the view; the store answers from memory
-    // when it already covers that band and runs one query otherwise. Moving to another group
-    // cancels a load still in flight, so flicking through fifty groups costs one query: the
-    // group you stop on. The last few groups stay in memory so bouncing back is instant.
-    class GroupGuide(val key: String, val ids: Set<String>, val lo: Long, val hi: Long, val rows: Map<String, List<tv.sloopy.data.db.ProgrammeEntity>>) {
+    // channels around the view (about 130 rows) across a band of hours around it; the store
+    // answers from memory when it has them and runs one query for what is missing. Scrolling
+    // down loads the next rows, scrolling sideways widens the band. Moving to another group
+    // cancels a load still in flight, so flicking through fifty groups costs one small query:
+    // the group you stop on. The last few groups stay in memory so bouncing back is instant.
+    class GroupGuide(val key: String, val lo: Long, val hi: Long, val rows: Map<String, List<tv.sloopy.data.db.ProgrammeEntity>>) {
         fun covers(lo: Long, hi: Long) = this.lo <= lo && this.hi >= hi
     }
     private val guides = object : LinkedHashMap<String, GroupGuide>(8, 0.75f, true) {
@@ -1255,73 +1256,101 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     private val _groupGuide = MutableStateFlow<GroupGuide?>(null)
     val groupGuide: StateFlow<GroupGuide?> = _groupGuide
     private var guideJob: Job? = null
-    fun ensureGuide(groupKey: String, list: List<ChannelEntity>, lo: Long, hi: Long) {
-        val ids = list.mapTo(LinkedHashSet()) { tv.sloopy.data.channelEpgKey(it) }
+    /** The channels the guide last asked for, so the sweep can fill what is on screen first. */
+    @Volatile private var guideWanted: List<ChannelEntity> = emptyList()
+    fun ensureGuide(groupKey: String, list: List<ChannelEntity>, rowLo: Int, rowHi: Int, lo: Long, hi: Long) {
+        if (list.isEmpty()) return
+        val slice = list.subList(rowLo.coerceIn(0, list.size), rowHi.coerceIn(0, list.size))
+        val wantList = (list.take(40) + slice).distinctBy { it.id }
+        guideWanted = wantList
+        val want = wantList.mapTo(LinkedHashSet()) { tv.sloopy.data.channelEpgKey(it) }
         val cur = synchronized(guides) { guides[groupKey] }
-        if (cur != null && cur.ids == ids && cur.covers(lo, hi)) { if (_groupGuide.value !== cur) _groupGuide.value = cur; return }
-        // A different group shows placeholders while it loads; a wider band keeps what it has.
-        if (cur == null || cur.ids != ids) { if (_groupGuide.value?.key != groupKey || cur == null) _groupGuide.value = null }
-        else _groupGuide.value = cur
+        if (cur != null && cur.covers(lo, hi) && cur.rows.keys.containsAll(want)) { if (_groupGuide.value !== cur) _groupGuide.value = cur; return }
+        // Same group: keep showing what it has while the rest loads. Another group: placeholders.
+        _groupGuide.value = if (cur != null && cur.covers(lo, hi)) cur else if (_groupGuide.value?.key == groupKey) _groupGuide.value else null
         guideJob?.cancel()
         guideJob = viewModelScope.launch {
             val p = active.value ?: return@launch
-            val nlo = if (cur != null && cur.ids == ids) minOf(lo, cur.lo) else lo
-            val nhi = if (cur != null && cur.ids == ids) maxOf(hi, cur.hi) else hi
+            val widen = cur == null || !cur.covers(lo, hi)
+            val nlo = if (cur != null) minOf(lo, cur.lo) else lo
+            val nhi = if (cur != null) maxOf(hi, cur.hi) else hi
+            // When the band widens, the rows already held are reloaded for the wider band; the set
+            // is kept to what is near the view plus a few hundred so a long scroll cannot pile up.
+            val keep = if (cur == null) emptySet() else if (widen) cur.rows.keys.filter { it in want }.toSet() + cur.rows.keys.take(300) else cur.rows.keys
+            val toLoad = (if (widen) keep + want else want - keep).toList()
             val rows = HashMap<String, List<tv.sloopy.data.db.ProgrammeEntity>>()
-            val idList = ids.toList()
-            for (chunk in idList.chunked(400)) {
+            if (!widen) cur?.rows?.let { rows.putAll(it) }
+            for (chunk in toLoad.chunked(300)) {
                 val got = runCatching { catalog.programmesMany(p.id, chunk, nlo, nhi) }.getOrDefault(emptyList()).groupBy { it.epgId }
                 chunk.forEach { rows[it] = got[it] ?: emptyList() }
                 kotlinx.coroutines.yield()
             }
-            val g = GroupGuide(groupKey, ids, nlo, nhi, rows)
+            val g = GroupGuide(groupKey, nlo, nhi, rows)
             synchronized(guides) { guides[groupKey] = g }
             _groupGuide.value = g
         }
     }
-    /** A channel's rows changed in the database (the sweep filled it): refresh it in the store. */
-    private suspend fun guideRowChanged(key: String) {
+    // Channels the sweep filled are folded into the store a few at a time, not one rebuild each.
+    private val changedKeys = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
+    private suspend fun flushChangedKeys() {
+        val keys = synchronized(changedKeys) { val k = changedKeys.toList(); changedKeys.clear(); k }
+        if (keys.isEmpty()) return
         val p = active.value ?: return
+        synchronized(guides) { guides.entries.removeAll { e -> e.value !== _groupGuide.value && keys.any { it in e.value.rows } } }
         val g = _groupGuide.value ?: return
-        if (key !in g.ids) { synchronized(guides) { guides.entries.removeAll { key in it.value.ids && it.value !== g } }; return }
-        val fresh = runCatching { catalog.programmes(p.id, key, g.lo, g.hi) }.getOrDefault(emptyList())
-        val ng = GroupGuide(g.key, g.ids, g.lo, g.hi, g.rows + (key to fresh))
-        synchronized(guides) { guides[g.key] = ng; guides.entries.removeAll { key in it.value.ids && it.value !== ng } }
+        val mine = keys.filter { it in g.rows }
+        if (mine.isEmpty()) return
+        val got = runCatching { catalog.programmesMany(p.id, mine, g.lo, g.hi) }.getOrDefault(emptyList()).groupBy { it.epgId }
+        val rows = HashMap(g.rows); mine.forEach { rows[it] = got[it] ?: emptyList() }
+        val ng = GroupGuide(g.key, g.lo, g.hi, rows)
+        synchronized(guides) { guides[g.key] = ng }
         if (_groupGuide.value === g) _groupGuide.value = ng
     }
-    private fun dropGuides() { synchronized(guides) { guides.clear() }; val g = _groupGuide.value; _groupGuide.value = null; if (g != null) ensureGuide(g.key, visibleChannels.value, g.lo, g.hi) }
+    private fun dropGuides() {
+        synchronized(guides) { guides.clear() }
+        val g = _groupGuide.value ?: return
+        _groupGuide.value = null
+        val list = visibleChannels.value
+        ensureGuide(g.key, list, 0, 130, g.lo, g.hi)
+    }
 
     // ---- The sweep: fills listings the guide file did not carry, in the background -------------
     // Xtream panels keep a per-channel table (get_simple_data_table). When the guide file is
     // refused (that HTTP 451) every channel needs it; otherwise only the odd channel the file
-    // missed. The sweep works through the current channel, favourites, the group on screen,
-    // then everything, three at a time with a breath between, and never from a guide row.
+    // missed. What matters goes first and three at a time: the current channel, favourites, the
+    // rows on screen. The rest trickles one at a time with a pause, so the panel is not hammered
+    // and the database stays free for the guide. Never from a guide row.
     private val sweptAt = java.util.concurrent.ConcurrentHashMap<Long, Long>()
     private val sweepKick = MutableStateFlow(0)
     private var sweepJob: Job? = null
+    private val _sweepProgress = MutableStateFlow<Pair<Int, Int>?>(null)
+    /** (done, total) while listings are still being filled in; null when the sweep is idle. */
+    val sweepProgress: StateFlow<Pair<Int, Int>?> = _sweepProgress
     fun kickSweep() { sweepKick.value++ }
     private fun startSweep() {
         sweepJob?.cancel()
         sweepJob = viewModelScope.launch {
             val gate = kotlinx.coroutines.sync.Semaphore(3)
+            var done = 0; var total = 0
             while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                 val p = active.value
-                if (p == null || p.kind != tv.sloopy.data.ProviderKind.XTREAM) { val k = sweepKick.value; sweepKick.first { it != k }; continue }
+                if (p == null || p.kind != tv.sloopy.data.ProviderKind.XTREAM) { _sweepProgress.value = null; val k = sweepKick.value; sweepKick.first { it != k }; continue }
                 val wide = _epgError.value != null || runCatching { catalog.programmeCount(p.id) }.getOrDefault(1) == 0
                 val now = System.currentTimeMillis()
                 val favs = favouriteIds.value; val hiddenG = hiddenGroups.value
-                val order = buildList {
+                val fresh = { c: ChannelEntity -> c.categoryId !in hiddenG && now - (sweptAt[c.id] ?: 0L) > 6 * 3600_000L }
+                val urgent = buildList {
                     currentChannel.value?.let { add(it) }
                     addAll(channels.value.filter { it.id in favs })
-                    addAll(visibleChannels.value)
-                    if (wide) addAll(channels.value)
-                }.distinctBy { it.id }.filter { it.categoryId !in hiddenG && now - (sweptAt[it.id] ?: 0L) > 6 * 3600_000L }
-                val batch = order.take(9)
-                if (batch.isEmpty()) {
-                    val k = sweepKick.value
-                    kotlinx.coroutines.withTimeoutOrNull(600_000) { sweepKick.first { it != k } }
-                    continue
-                }
+                    addAll(guideWanted)
+                }.distinctBy { it.id }.filter(fresh)
+                val rest = if (wide) channels.value.filter(fresh).filter { c -> urgent.none { it.id == c.id } } else emptyList()
+                val remaining = urgent.size + rest.size
+                if (remaining == 0) { _sweepProgress.value = null; done = 0; total = 0; val k = sweepKick.value; kotlinx.coroutines.withTimeoutOrNull(600_000) { sweepKick.first { it != k } }; continue }
+                total = maxOf(total, remaining + done)
+                _sweepProgress.value = done to total
+                val batch = if (urgent.isNotEmpty()) urgent.take(6) else rest.take(1)
+                val gentle = urgent.isEmpty()
                 val nowS = now / 1000
                 batch.map { c ->
                     launch {
@@ -1331,21 +1360,27 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                             if (have.isNotEmpty()) { sweptAt[c.id] = now; return@withPermit }
                             val n = try { catalog.fetchChannelEpg(p, c) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { TLog.w { "sweep: ${TLog.userMessage(e)}" }; -1 }
                             sweptAt[c.id] = if (n < 0) now - 6 * 3600_000L + 900_000L else now   // refused: try again in fifteen minutes
-                            if (n > 0) { epgCache.keys.removeAll { it.endsWith("|$key") }; guideRowChanged(key) }
-                            delay(80)
+                            if (n > 0) { epgCache.keys.removeAll { it.endsWith("|$key") }; changedKeys.add(key) }
                         }
                     }
                 }.forEach { it.join() }
+                done += batch.size
+                delay(if (gentle) 400 else 60)
             }
         }
     }
     init {
         startSweep()
+        viewModelScope.launch { while (true) { delay(700); runCatching { flushChangedKeys() } } }
         // Warm the store for the group on screen while the picture plays, so Back draws a full
         // grid on its first frame instead of placeholders.
         viewModelScope.launch {
             combine(visibleChannels, _group) { l, g -> g to l }.collect { (g, l) ->
-                if (l.isNotEmpty()) { val ws = guideWindowStart(); val now = System.currentTimeMillis() / 1000 / 3600 * 3600; ensureGuide(g, l, maxOf(ws, now - GUIDE_BAND_BACK * 3600), now + GUIDE_BAND_FWD * 3600) }
+                if (l.isNotEmpty()) {
+                    val ws = guideWindowStart(); val now = System.currentTimeMillis() / 1000 / 3600 * 3600
+                    val i = l.indexOfFirst { it.id == currentChannel.value?.id }.coerceAtLeast(0)
+                    ensureGuide(g, l, i - 40, i + 90, maxOf(ws, now - GUIDE_BAND_BACK * 3600), now + GUIDE_BAND_FWD * 3600)
+                }
             }
         }
         viewModelScope.launch { combine(currentChannel, visibleChannels, favouriteIds) { c, l, f -> Triple(c?.id, l.size, f.size) }.collect { kickSweep() } }
