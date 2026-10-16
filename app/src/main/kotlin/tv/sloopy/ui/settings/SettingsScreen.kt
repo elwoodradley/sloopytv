@@ -466,7 +466,10 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                         }
                         if (status != null) Text(status!!, style = Sloopy.body.copy(color = Sloopy.amber), modifier = Modifier.padding(top = 12.dp).width(760.dp))
                         Section("Restore")
-                        Text("Make this stick a copy of another one. Its code goes here. Nothing on this stick is removed; the other stick's choices are laid over it.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.width(760.dp))
+                        Text("Bring another stick's choices here. Its code goes here, then you pick what comes over: the login too (this stick becomes a copy), or just the favourites, group order, History and settings laid over this stick's own login. Nothing here is removed.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.width(760.dp))
+                        var pendingBundle by remember { mutableStateOf<tv.sloopy.sync.SyncBundle?>(null) }
+                        var restoreOpts by remember { mutableStateOf(tv.sloopy.sync.SyncManager.RestoreOptions()) }
+                        val providersNow by vm.providerList.collectAsState()
                         // Right from the field is wired by hand: geometric search does not find the button.
                         val restoreBtn = remember { FocusRequester() }
                         Row(verticalAlignment = Alignment.Bottom) {
@@ -475,12 +478,38 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                             SloopyButton(if (busy) "Hang on…" else "Restore", enabled = !busy && tv.sloopy.sync.SyncClient.normalise(restoreCode).length == 8, modifier = Modifier.padding(bottom = 2.dp).focusRequester(restoreBtn), onClick = {
                                 busy = true
                                 scope.launch {
-                                    runCatching { vm.restoreFromCode(restoreCode) }
-                                        .onSuccess { vm.toast("Copied: $it"); restoreCode = "" }
+                                    runCatching { vm.fetchBundle(restoreCode) }
+                                        .onSuccess { b -> restoreOpts = tv.sloopy.sync.SyncManager.RestoreOptions(login = providersNow.isEmpty()); pendingBundle = b }
                                         .onFailure { vm.toast(tv.sloopy.TLog.userMessage(it)) }
                                     busy = false
                                 }
                             })
+                        }
+                        pendingBundle?.let { b ->
+                            val o = restoreOpts
+                            tv.sloopy.ui.common.CheckPrompt(
+                                "WHAT COMES OVER?",
+                                listOf(
+                                    Triple("login", "Provider login (this stick becomes a copy)", o.login),
+                                    Triple("fav", "Favourites and My list", o.favourites),
+                                    Triple("groups", "Group order, hidden groups and channels", o.groups),
+                                    Triple("history", "History and resume points", o.history),
+                                    Triple("settings", "Theme, clock, teams and other settings", o.settings),
+                                ),
+                                note = b.summary + (if (!o.login) ". Without the login, favourites that exist on this stick's own provider are kept; this stick keeps its own transfer code." else ". With the login, this stick joins the other stick's code and stays in step with it."),
+                                onToggle = { k -> restoreOpts = when (k) { "login" -> o.copy(login = !o.login); "fav" -> o.copy(favourites = !o.favourites); "groups" -> o.copy(groups = !o.groups); "history" -> o.copy(history = !o.history); else -> o.copy(settings = !o.settings) } },
+                                doneLabel = "Transfer",
+                                onCancel = { pendingBundle = null },
+                                onDone = {
+                                    pendingBundle = null; busy = true
+                                    scope.launch {
+                                        runCatching { vm.applyBundle(b, restoreCode, o) }
+                                            .onSuccess { vm.toast("Brought over: $it"); restoreCode = "" }
+                                            .onFailure { vm.toast(tv.sloopy.TLog.userMessage(it)) }
+                                        busy = false
+                                    }
+                                },
+                            )
                         }
                     }
                     else -> {

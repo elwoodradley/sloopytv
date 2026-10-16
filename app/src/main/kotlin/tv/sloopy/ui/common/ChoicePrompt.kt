@@ -72,3 +72,48 @@ fun ChoicePrompt(title: String, options: List<Pair<String, String>>, current: St
         }
     }
 }
+
+/** Like [ChoicePrompt], but every row is a switch: OK flips it, and the last row carries [doneLabel]. */
+@Composable
+fun CheckPrompt(title: String, items: List<Triple<String, String, Boolean>>, onToggle: (String) -> Unit, doneLabel: String, onDone: () -> Unit, onCancel: () -> Unit, note: String? = null) {
+    val count = items.size + 1
+    val requesters = remember(count) { List(count) { FocusRequester() } }
+    var idx by remember { mutableStateOf(0) }
+    var hasFocus by remember { mutableStateOf(false) }
+    LaunchedEffect(idx) { delay(30); runCatching { requesters[idx].requestFocus() } }
+    LaunchedEffect(Unit) { while (true) { delay(250); if (!hasFocus) runCatching { requesters[idx].requestFocus() } } }
+    var okArmed by remember { mutableStateOf(false) }
+    val openedAt = remember { System.currentTimeMillis() }
+    Box(
+        Modifier.fillMaxSize().background(Color(0x99000000))
+            .onFocusChanged { hasFocus = it.hasFocus }
+            .onPreviewKeyEvent {
+                when {
+                    it.inKeys(BACK_KEYS) -> { if (!it.isDown) onCancel(); true }
+                    it.inKeys(OK_KEYS) -> {
+                        val fresh = it.nativeKeyEvent.repeatCount == 0 && System.currentTimeMillis() - openedAt > 400
+                        if (it.isDown) { if (fresh) okArmed = true; !fresh } else !okArmed
+                    }
+                    it.isKey(Key.DirectionUp) -> { if (it.isDown && idx > 0) idx--; true }
+                    it.isKey(Key.DirectionDown) -> { if (it.isDown && idx < count - 1) idx++; true }
+                    it.isKey(Key.DirectionLeft, Key.DirectionRight) -> true
+                    else -> false
+                }
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Column(Modifier.background(Sloopy.ground).padding(40.dp).width(560.dp)) {
+            Text(title, style = Sloopy.titleBig)
+            if (note != null) Text(note, style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 8.dp))
+            Spacer(Modifier.height(24.dp))
+            items.forEachIndexed { i, (key, label, on) ->
+                SloopyButton(label + "  ·  " + (if (on) "ON" else "OFF"), onClick = { onToggle(key) }, primary = on,
+                    modifier = Modifier.focusRequester(requesters[i]).onFocusChanged { if (it.isFocused) idx = i })
+                Spacer(Modifier.height(8.dp))
+            }
+            Spacer(Modifier.height(8.dp))
+            SloopyButton(doneLabel, onClick = onDone, enabled = items.any { it.third },
+                modifier = Modifier.focusRequester(requesters[items.size]).onFocusChanged { if (it.isFocused) idx = items.size })
+        }
+    }
+}

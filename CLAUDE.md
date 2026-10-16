@@ -93,6 +93,15 @@ a grabbed group.
   nothing lit. `GuideRow` now paints a focus band across the visible row, "No listings here ·
   <channel>", whenever the cursor is on the row and its cell is not in view; the no-data cell
   names the channel while the cursor is on it.
+- 0.6.7 (2026-10-16): Transfer picks what comes over. `SyncManager.apply(b, RestoreOptions)`:
+  login, favourites, groups, history, settings as switches; with login off every per-provider map
+  is re-keyed from the bundle's active provider to this stick's own, favourites not on this login
+  are skipped (same panel = same ids), and the stick keeps its own transfer code (joining the
+  other's would let this stick's backup overwrite theirs). Settings › Transfer › Restore fetches
+  first (`vm.fetchBundle`) and shows `CheckPrompt` (ui/common, the multi-select twin of
+  ChoicePrompt), default login off when a provider exists; the fresh-stick path in ProviderScreen
+  still copies everything. VOD bar: the hide timer counts four seconds of actual playback, so a
+  bar raised while buffering no longer stays up for the whole film.
 - 0.6.6 (2026-10-16): Tonight on a big lineup. `buildTonight` read the guide with a LIKE per
   trending title and per sport word (minutes on a million rows); now one indexed range read of
   everything on tonight (`ProgrammeDao.betweenBlocking` → `catalog.programmesBetween`) and title

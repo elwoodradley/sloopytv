@@ -1110,14 +1110,18 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     fun enableSync() = viewModelScope.launch { prefs.setSyncCode(tv.sloopy.sync.SyncClient.newCode()); _syncStatus.value = null; syncNow(announce = true) }
     fun disableSync() = viewModelScope.launch { prefs.setSyncCode(null); prefs.setSyncedAt(0); _syncStatus.value = "Sync is off. The last backup stays on the server under the old code until it is replaced." }
     /** Pulls the bundle behind [code] onto this stick and joins that code. */
-    suspend fun restoreFromCode(code: String): String {
-        val bytes = tv.sloopy.sync.SyncClient.download(codeServer.value, code)
-        val bundle = syncManager.decode(bytes)
-        syncManager.apply(bundle)
-        prefs.setSyncCode(tv.sloopy.sync.SyncClient.normalise(code))
-        prefs.setSyncedAt(bundle.at)
+    suspend fun restoreFromCode(code: String): String = applyBundle(fetchBundle(code), code, tv.sloopy.sync.SyncManager.RestoreOptions())
+    /** Downloads and decrypts the other stick's backup so the viewer can choose what to bring over. */
+    suspend fun fetchBundle(code: String): tv.sloopy.sync.SyncBundle = syncManager.decode(tv.sloopy.sync.SyncClient.download(codeServer.value, code))
+    /**
+     * Applies what was chosen. Only a full copy (login included) joins the other stick's code; a
+     * partial one keeps this stick's own code, or its own backup would overwrite the other stick's.
+     */
+    suspend fun applyBundle(bundle: tv.sloopy.sync.SyncBundle, code: String, opts: tv.sloopy.sync.SyncManager.RestoreOptions): String {
+        val note = syncManager.apply(bundle, opts)
+        if (opts.login) { prefs.setSyncCode(tv.sloopy.sync.SyncClient.normalise(code)); prefs.setSyncedAt(bundle.at) }
         active.value?.let { refresh(it) }
-        return bundle.summary
+        return note.ifBlank { bundle.summary }
     }
     init {
         // Re-upload a few seconds after anything in the bundle changes.

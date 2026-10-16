@@ -82,36 +82,68 @@ class SyncManager(private val db: SloopyDb, private val prefs: Prefs, private va
     fun encode(b: SyncBundle): ByteArray = json.encodeToString(SyncBundle.serializer(), b).toByteArray()
     fun decode(bytes: ByteArray): SyncBundle = json.decodeFromString(SyncBundle.serializer(), bytes.decodeToString())
 
-    /** Lays the bundle over this device. Existing rows with the same keys are replaced, nothing else is removed. */
-    suspend fun apply(b: SyncBundle) {
-        b.providers.forEach { providers.upsert(it) }
-        b.favourites.forEach { (p, ids) -> ids.forEach { db.favourites().add(FavouriteEntity(p, it, System.currentTimeMillis())) } }
-        b.favouriteItems.forEach { (p, items) -> items.forEach { db.favouriteItems().add(FavouriteItemEntity(p, it.kind, it.id, System.currentTimeMillis())) } }
-        b.progress.forEach { r ->
-            val mine = db.progress().get(r.providerId, r.kind, r.itemId)
-            if (mine == null || mine.updatedAt < r.updatedAt) db.progress().upsert(ProgressEntity(r.providerId, r.kind, r.itemId, r.parentId, r.positionMs, r.durationMs, r.updatedAt, r.title, r.subtitle, r.image, r.container))
+    /** What a restore brings over. With [login] off, the other stick's choices are laid over this stick's own provider. */
+    data class RestoreOptions(val login: Boolean = true, val favourites: Boolean = true, val groups: Boolean = true, val history: Boolean = true, val settings: Boolean = true)
+
+    /**
+     * Lays the bundle over this device. Existing rows with the same keys are replaced, nothing else
+     * is removed. Without the login, every per-provider piece is re-keyed from the bundle's active
+     * provider to this stick's, and favourites that do not exist on this login are skipped (same
+     * panel, same ids; a different service cannot be mapped). Returns a short note of what landed.
+     */
+    suspend fun apply(b: SyncBundle, o: RestoreOptions = RestoreOptions()): String {
+        val src = b.activeProvider ?: b.providers.firstOrNull()?.id
+        val target: String? = if (o.login) null else prefs.activeProviderId.first()
+        if (!o.login && target == null) throw IllegalStateException("Add a provider on this stick first, then bring the other stick's choices over.")
+        fun <T> per(m: Map<String, T>): Map<String, T> = if (target == null) m else (src?.let { m[it] }?.let { mapOf(target to it) } ?: emptyMap())
+        val notes = ArrayList<String>()
+        if (o.login) b.providers.forEach { providers.upsert(it) }
+        if (o.favourites) {
+            var n = 0; var skipped = 0
+            per(b.favourites).forEach { (p, ids) -> ids.forEach { if (target == null || db.channels().byId(p, it) != null) { db.favourites().add(FavouriteEntity(p, it, System.currentTimeMillis())); n++ } else skipped++ } }
+            per(b.favouriteItems).forEach { (p, items) -> items.forEach { db.favouriteItems().add(FavouriteItemEntity(p, it.kind, it.id, System.currentTimeMillis())); n++ } }
+            notes.add("$n favourites" + (if (skipped > 0) " ($skipped not on this login)" else ""))
         }
-        b.groupOrder.forEach { (p, o) -> if (o.isNotEmpty()) prefs.setGroupOrder(p, o) }
-        b.lockedGroups.forEach { (p, l) -> prefs.setLockedGroups(p, l.toSet()) }
-        b.hiddenGroups.forEach { (p, l) -> prefs.setHiddenGroups(p, l.toSet()) }
-        b.hiddenChannels.forEach { (p, l) -> prefs.setHiddenChannels(p, l.toSet()) }
-        b.dupSplit.forEach { (p, l) -> prefs.setDupSplit(p, l.toSet()) }
-        b.dupMerged.forEach { (p, l) -> prefs.setDupMerged(p, l.toSet()) }
-        b.dupDismissed.forEach { (p, l) -> prefs.setDupDismissed(p, l.toSet()) }
-        b.dupPreferred.forEach { (p, m) -> prefs.setDupPreferred(p, m) }
-        prefs.setCollapseDupes(b.collapseDupes)
-        prefs.restoreChannelSorts(b.channelSorts)
-        b.lastChannel.forEach { (p, c) -> prefs.setLastChannel(p, c) }
-        b.lastGroup.forEach { (p, g) -> prefs.setLastGroup(p, g) }
-        b.recents.forEach { (p, l) -> l.reversed().forEach { prefs.pushRecent(p, it) } }
-        if (b.pinHash != null) prefs.setPin(b.pinSalt, b.pinHash)
-        prefs.setTheme(b.theme); prefs.setClock12(b.clock12); prefs.setFrameRateMatch(b.frameRateMatch)
-        prefs.setIntroEnabled(b.intro); prefs.setOsdSeconds(b.osdSeconds)
-        if (b.followedTeams.isNotEmpty()) prefs.setFollowedTeams((prefs.followedTeams.first() + b.followedTeams).distinct())
-        prefs.setHideScores(b.hideScores)
-        if (!b.codeServer.isNullOrBlank()) prefs.setCodeServer(b.codeServer)
-        b.searchHistory.reversed().forEach { prefs.pushSearch(it) }
-        if (!b.license.isNullOrBlank()) prefs.setLicense(b.license)
-        (b.activeProvider ?: b.providers.firstOrNull()?.id)?.let { prefs.setActiveProvider(it) }
+        if (o.history) {
+            var n = 0
+            b.progress.filter { target == null || it.providerId == src }.forEach { r ->
+                val pid = target ?: r.providerId
+                val mine = db.progress().get(pid, r.kind, r.itemId)
+                if (mine == null || mine.updatedAt < r.updatedAt) { db.progress().upsert(ProgressEntity(pid, r.kind, r.itemId, r.parentId, r.positionMs, r.durationMs, r.updatedAt, r.title, r.subtitle, r.image, r.container)); n++ }
+            }
+            per(b.recents).forEach { (p, l) -> l.reversed().forEach { prefs.pushRecent(p, it) } }
+            notes.add("$n in History")
+        }
+        if (o.groups) {
+            per(b.groupOrder).forEach { (p, l) -> if (l.isNotEmpty()) prefs.setGroupOrder(p, l) }
+            per(b.lockedGroups).forEach { (p, l) -> prefs.setLockedGroups(p, l.toSet()) }
+            per(b.hiddenGroups).forEach { (p, l) -> prefs.setHiddenGroups(p, l.toSet()) }
+            per(b.hiddenChannels).forEach { (p, l) -> prefs.setHiddenChannels(p, l.toSet()) }
+            per(b.dupSplit).forEach { (p, l) -> prefs.setDupSplit(p, l.toSet()) }
+            per(b.dupMerged).forEach { (p, l) -> prefs.setDupMerged(p, l.toSet()) }
+            per(b.dupDismissed).forEach { (p, l) -> prefs.setDupDismissed(p, l.toSet()) }
+            per(b.dupPreferred).forEach { (p, m) -> prefs.setDupPreferred(p, m) }
+            per(b.lastGroup).forEach { (p, g) -> prefs.setLastGroup(p, g) }
+            if (target == null) prefs.restoreChannelSorts(b.channelSorts)
+            notes.add("group order and hidden groups")
+        }
+        if (o.settings) {
+            prefs.setCollapseDupes(b.collapseDupes)
+            if (b.pinHash != null) prefs.setPin(b.pinSalt, b.pinHash)
+            prefs.setTheme(b.theme); prefs.setClock12(b.clock12); prefs.setFrameRateMatch(b.frameRateMatch)
+            prefs.setIntroEnabled(b.intro); prefs.setOsdSeconds(b.osdSeconds)
+            if (!b.codeServer.isNullOrBlank()) prefs.setCodeServer(b.codeServer)
+            b.searchHistory.reversed().forEach { prefs.pushSearch(it) }
+            if (!b.license.isNullOrBlank()) prefs.setLicense(b.license)
+            if (b.followedTeams.isNotEmpty()) prefs.setFollowedTeams((prefs.followedTeams.first() + b.followedTeams).distinct())
+            prefs.setHideScores(b.hideScores)
+            notes.add("settings")
+        }
+        if (o.login) {
+            b.lastChannel.forEach { (p, c) -> prefs.setLastChannel(p, c) }
+            (b.activeProvider ?: b.providers.firstOrNull()?.id)?.let { prefs.setActiveProvider(it) }
+            notes.add(0, "${b.providers.size} provider login${if (b.providers.size == 1) "" else "s"}")
+        }
+        return notes.joinToString(", ")
     }
 }

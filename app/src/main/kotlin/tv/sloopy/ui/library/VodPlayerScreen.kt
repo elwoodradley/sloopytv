@@ -80,7 +80,14 @@ fun VodPlayerScreen(vm: SloopyViewModel, onBack: () -> Unit) {
         }
     }
     LaunchedEffect(Unit) { while (true) { pos = vm.player.position(); dur = vm.player.duration(); delay(500) } }
-    LaunchedEffect(tick, showBar) { if (showBar && vm.player.player.isPlaying) { delay(4000); showBar = false } }
+    // Counts four seconds of actual playback before hiding, so a bar shown while the stream was
+    // still buffering (or paused) still goes away once it plays, instead of staying up for the film.
+    LaunchedEffect(tick, showBar) {
+        if (!showBar) return@LaunchedEffect
+        var played = 0
+        while (played < 4000) { delay(250); if (vm.player.player.isPlaying) played += 250 }
+        showBar = false
+    }
 
     val leave = {
         vm.saveProgress()
