@@ -29,7 +29,7 @@ import tv.sloopy.ui.theme.Sloopy
 
 /** A short list of choices over the screen. Back cancels (both halves of the key consumed). */
 @Composable
-fun ChoicePrompt(title: String, options: List<Pair<String, String>>, current: String? = null, onPick: (String) -> Unit, onCancel: () -> Unit) {
+fun ChoicePrompt(title: String, options: List<Pair<String, String>>, current: String? = null, onPick: (String) -> Unit, onCancel: () -> Unit, note: String? = null) {
     // The prompt moves its own cursor: Up/Down pick the row, Left/Right are swallowed, so focus
     // can never wander into the screen behind it.
     val requesters = remember(options.size) { List(options.size) { FocusRequester() } }
@@ -63,6 +63,7 @@ fun ChoicePrompt(title: String, options: List<Pair<String, String>>, current: St
     ) {
         Column(Modifier.background(Sloopy.ground).padding(40.dp).width(520.dp)) {
             Text(title, style = Sloopy.titleBig)
+            if (note != null) Text(note, style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 8.dp))
             Spacer(Modifier.height(24.dp))
             options.forEachIndexed { i, (key, label) ->
                 SloopyButton(label + (if (key == current) "  ·  now" else ""), onClick = { onPick(key) }, primary = key == current,

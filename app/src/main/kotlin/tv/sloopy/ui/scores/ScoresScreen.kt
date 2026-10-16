@@ -101,6 +101,10 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit) 
     val stripFocus = remember { FocusRequester() }
     val contentFocus = remember { FocusRequester() }
     var inContent by remember { mutableStateOf(false) }
+    // OK or Right on a day before its games have arrived: hold the cursor on the rail and move it
+    // over when the tiles exist. Asking for focus on tiles that are not there yet sent the cursor
+    // off to the strip.
+    var wantContent by remember { mutableStateOf(false) }
     BackHandler { when { pickLeague != null -> { pickLeague = null; scope.launch { delay(100); runCatching { railFocus.requestFocus() } } }; inContent -> runCatching { railFocus.requestFocus() }; else -> onBack() } }
 
     val today = remember { LocalDate.now() }
@@ -126,6 +130,16 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit) 
         }
     }
     val card = focusedRow?.takeIf { f -> shown.any { it.game.id == f.game.id } } ?: shown.firstOrNull()
+    fun enterContent() {
+        val ready = page == "teams" || page.startsWith("st:") || (!busy && shown.isNotEmpty())
+        if (ready) scope.launch { repeat(10) { delay(40); if (runCatching { contentFocus.requestFocus() }.getOrDefault(false)) return@launch } }
+        else wantContent = true
+    }
+    LaunchedEffect(busy, shown.size, page) {
+        if (!wantContent || busy) return@LaunchedEffect
+        wantContent = false
+        if (shown.isNotEmpty()) repeat(15) { delay(60); if (runCatching { contentFocus.requestFocus() }.getOrDefault(false)) return@LaunchedEffect }
+    }
 
     Column(
         Modifier.fillMaxSize().background(Sloopy.ground).onPreviewKeyEvent { ev ->
@@ -138,7 +152,7 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit) 
             Spacer(Modifier.width(16.dp))
             // Rail rows cancel Right themselves; the screen decides: Right or OK goes into the content.
             Column(Modifier.width(RAIL_W).fillMaxHeight().onFocusChanged { if (it.hasFocus) inContent = false }
-                .onPreviewKeyEvent { ev -> if (ev.isDown && ev.isKey(Key.DirectionRight)) { scope.launch { delay(30); runCatching { contentFocus.requestFocus() } }; true } else false }) {
+                .onPreviewKeyEvent { ev -> if (ev.isDown && ev.isKey(Key.DirectionRight)) { enterContent(); true } else false }) {
                 RailHeader("Sports")
                 val state = rememberLazyListState()
                 LazyColumn(state = state, modifier = Modifier.fillMaxSize()) {
@@ -147,7 +161,9 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit) 
                         // cursor merely resting back on the same row leaves the picker up.
                         Box(Modifier.onFocusChanged { if (it.hasFocus && page != key) { page = key; pickLeague = null } }) {
                             RailItem(name + (if (key == "live" && rows.any { it.game.state == "in" }) "  ·  ${rows.count { it.game.state == "in" }}" else ""), selected = key == page, requester = if (key == page) railFocus else null, first = i == 0, last = i == pages.lastIndex, leftTarget = stripFocus) {
-                                scope.launch { delay(50); runCatching { contentFocus.requestFocus() } }
+                                // OK fetches the day at once (no resting delay) and moves over when it is in.
+                                if (key == "live" || key.startsWith("d") || key == "teams") vm.setScoresDay(dayOf(key))
+                                enterContent()
                             }
                         }
                     }

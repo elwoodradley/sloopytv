@@ -339,12 +339,16 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val updater get() = graph.updater
     val updateState: StateFlow<tv.sloopy.update.UpdateState> = graph.updater.state
     private var announcedUpdate: String? = null
+    /** An update the viewer has not answered yet: the root shows it as a prompt with Install now. */
+    private val _updatePrompt = MutableStateFlow<tv.sloopy.update.UpdateInfo?>(null)
+    val updatePrompt: StateFlow<tv.sloopy.update.UpdateInfo?> = _updatePrompt
+    fun dismissUpdatePrompt() { _updatePrompt.value = null }
 
     fun checkForUpdate(force: Boolean = false) = viewModelScope.launch {
         val r = updater.check(force)
         if (r is tv.sloopy.update.UpdateState.Available && announcedUpdate != r.info.version) {
             announcedUpdate = r.info.version
-            _toast.value = "SloopyTV ${r.info.version} is ready. Settings › About to install."
+            _updatePrompt.value = r.info
         }
     }
     fun installUpdate() = viewModelScope.launch {

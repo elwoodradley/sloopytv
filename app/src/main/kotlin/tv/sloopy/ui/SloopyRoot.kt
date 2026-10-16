@@ -53,7 +53,9 @@ fun SloopyRoot(vm: SloopyViewModel, onQuit: () -> Unit) {
     val announcement by vm.announcement.collectAsState()
     val incoming by vm.incoming.collectAsState()
     LaunchedEffect(Unit) { vm.ensureRemote(); vm.refreshToad() }
-    LaunchedEffect(announcement, due, incoming) { vm.modalUp = announcement != null || due != null || incoming != null }
+    val updatePrompt by vm.updatePrompt.collectAsState()
+    val updateState by vm.updateState.collectAsState()
+    LaunchedEffect(announcement, due, incoming, updatePrompt) { vm.modalUp = announcement != null || due != null || incoming != null || updatePrompt != null }
     val operator by vm.operatorName.collectAsState()
     // The maker's mark rides the power-on and leaves once the picture is up.
     var brand by remember { mutableStateOf(introEnabled) }
@@ -72,6 +74,34 @@ fun SloopyRoot(vm: SloopyViewModel, onQuit: () -> Unit) {
             if (locked) tv.sloopy.ui.pay.UnlockScreen(vm) else SloopyNav(vm, startAtProviders = providers.isEmpty(), onQuit = { quitting = true })
             androidx.compose.animation.AnimatedVisibility(visible = brand, enter = androidx.compose.animation.EnterTransition.None, exit = androidx.compose.animation.fadeOut(androidx.compose.animation.core.tween(600)), modifier = Modifier.align(Alignment.BottomStart).padding(start = 72.dp, bottom = 56.dp)) {
                 tv.sloopy.ui.common.StoneToadCredit(operator = operator.takeIf { it.isNotBlank() }, color = Sloopy.textSoft)
+            }
+            updatePrompt?.let { info ->
+                // The whole update runs from here: Install now downloads, checks the signature and
+                // opens the system installer; the prompt reports progress and any snag until then.
+                val st = updateState
+                val notes = info.notes?.lineSequence()?.map { it.trim() }?.filter { it.isNotBlank() }?.joinToString(" ")?.take(220)
+                when (st) {
+                    is tv.sloopy.update.UpdateState.Downloading -> tv.sloopy.ui.common.ChoicePrompt(
+                        "HANG ON", listOf("wait" to "Downloading SloopyTV ${st.info.version} · ${st.percent}%"),
+                        note = "The install screen opens by itself when it is down.", onCancel = { vm.dismissUpdatePrompt() }, onPick = {},
+                    )
+                    is tv.sloopy.update.UpdateState.Ready -> tv.sloopy.ui.common.ChoicePrompt(
+                        "READY TO INSTALL", listOf("show" to "Show the install screen", "later" to "Later"),
+                        note = "Press Install on the screen that opens. SloopyTV comes back on its own.", onCancel = { vm.dismissUpdatePrompt() }, onPick = { if (it == "show") vm.installUpdate() else vm.dismissUpdatePrompt() },
+                    )
+                    is tv.sloopy.update.UpdateState.NeedsPermission -> tv.sloopy.ui.common.ChoicePrompt(
+                        "ONE PERMISSION FIRST", listOf("go" to "Install now", "later" to "Later"),
+                        note = "Allow SloopyTV to install updates on the screen that opened (once, for all future updates), then press Install now.", onCancel = { vm.dismissUpdatePrompt() }, onPick = { if (it == "go") vm.installUpdate() else vm.dismissUpdatePrompt() },
+                    )
+                    is tv.sloopy.update.UpdateState.Failed -> tv.sloopy.ui.common.ChoicePrompt(
+                        "UPDATE DID NOT GO THROUGH", listOf("retry" to "Try again", "later" to "Later"),
+                        note = st.message, onCancel = { vm.dismissUpdatePrompt() }, onPick = { if (it == "retry") vm.installUpdate() else vm.dismissUpdatePrompt() },
+                    )
+                    else -> tv.sloopy.ui.common.ChoicePrompt(
+                        "SLOOPYTV ${info.version} IS READY", listOf("go" to "Install now", "later" to "Later"),
+                        note = notes?.ifBlank { null } ?: "Takes under a minute. The app comes back on its own.", onCancel = { vm.dismissUpdatePrompt() }, onPick = { if (it == "go") vm.installUpdate() else vm.dismissUpdatePrompt() },
+                    )
+                }
             }
             announcement?.let { a ->
                 tv.sloopy.ui.common.ChoicePrompt(

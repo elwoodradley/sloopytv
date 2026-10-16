@@ -93,6 +93,14 @@ a grabbed group.
   nothing lit. `GuideRow` now paints a focus band across the visible row, "No listings here ·
   <channel>", whenever the cursor is on the row and its cell is not in view; the no-data cell
   names the channel while the cursor is on it.
+- 0.6.8 (2026-10-16): an update found at launch (or on the 6-hour check) is a prompt over any
+  screen (`vm.updatePrompt`, shown in `SloopyRoot`), not a toast: Install now runs
+  `vm.installUpdate()` from there and the prompt follows `updateState` (Downloading with
+  percent, NeedsPermission, Ready, Failed with Try again); Later dismisses until the next launch.
+  `ChoicePrompt` gained an optional `note`. Sports rail: OK/Right on a day whose games were still
+  loading asked for focus on tiles that did not exist and the cursor fell to the strip;
+  `enterContent()` moves over only when the page is ready (`wantContent` waits for `busy` to
+  clear), and OK fetches the day at once instead of after the 250 ms rest.
 - 0.6.7 (2026-10-16): Transfer picks what comes over. `SyncManager.apply(b, RestoreOptions)`:
   login, favourites, groups, history, settings as switches; with login off every per-provider map
   is re-keyed from the bundle's active provider to this stick's own, favourites not on this login
