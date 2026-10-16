@@ -200,6 +200,7 @@ class PlayerHolder(context: Context) {
 
     fun stop() {
         currentUrl = null
+        RecordTee.playingUrl = null      // a recording riding this stream switches to its own download
         player.stop()
         player.clearMediaItems()
         _state.value = PlayerState()

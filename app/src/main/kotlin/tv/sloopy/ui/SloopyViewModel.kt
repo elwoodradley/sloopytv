@@ -1449,12 +1449,16 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Called when leaving the VOD player to remember position. */
-    fun saveProgress() = viewModelScope.launch {
-        val p = active.value ?: return@launch
-        val v = _playing.value as? Playing.Vod ?: return@launch
+    // Written on a scope of its own: the activity calls this on its way out, when viewModelScope is
+    // about to be cancelled, and a resume point that never lands is the bug nobody can reproduce.
+    private val detachedScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+    fun saveProgress() {
+        val p = active.value ?: return
+        val v = _playing.value as? Playing.Vod ?: return
         val pos = player.position()
         val dur = player.duration()
-        if (dur <= 0) return@launch
+        if (dur <= 0) return
+        detachedScope.launch {
         if (pos > dur - 60_000 || pos < 15_000) {
             if (pos > dur - 60_000) graph.db.progress().remove(p.id, v.kind, v.id)
             return@launch
@@ -1462,6 +1466,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         graph.db.progress().upsert(
             tv.sloopy.data.db.ProgressEntity(p.id, v.kind, v.id, v.parentId, pos, dur, System.currentTimeMillis(), v.title, v.subtitle, v.image, v.container)
         )
+        }
     }
 
     fun resumeLastChannel() {

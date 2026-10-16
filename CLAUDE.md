@@ -88,6 +88,15 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
   Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
   viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
+- 0.5.5 (2026-10-15): leaving the app switches it off. `MainActivity.onStop` stops playback and
+  `finishAndRemoveTask()` unless one of the app's own child windows was just started (the
+  activity notes the time in `startActivity`/`startActivityForResult`: speech recogniser, folder
+  picker, VLC, installer), in which case it only pauses. `ACTION_SCREEN_OFF` does the same, so
+  the box going to sleep ends the sound at once. `saveProgress` writes on a detached scope so
+  the resume point lands after the view model is cleared. `PlayerHolder.stop` clears
+  `RecordTee.playingUrl`, so a recording that rode the stream falls to its own download.
+  Reminders only fire while the app is open (they never showed from the background anyway);
+  recordings are a foreground service and keep going.
 - 0.5.4 (2026-10-15): the 0.5.3 store loaded whole groups (a quarter-million rows for "All
   channels" on a 10k-channel provider) and the sweep ran three-wide over everything, rebuilding
   the store per channel: slower than before on the user's box. Now `ensureGuide(group, channels,
