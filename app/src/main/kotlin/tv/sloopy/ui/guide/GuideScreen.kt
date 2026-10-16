@@ -570,9 +570,25 @@ private fun GuideRow(
                 }
                 if (cache.size > 600) cache.clear()
                 val list = progs
+                // The cursor is on this row but its cell is not in view (listings that ended hours ago,
+                // or a gap): light the whole row and name the channel, so the viewer always sees
+                // where the cursor is. Cells paint over the band where they exist.
+                if (cursorOn && !list.isNullOrEmpty()) {
+                    val visible = cursor != null && xOf(minOf(cursor.stopEpoch, winEnd)) - gap > 0f && xOf(maxOf(cursor.startEpoch, winStart)) < size.width
+                    if (!visible) {
+                        drawRect(colFocus, Offset(0f, padY), Size(size.width, cellH))
+                        drawRect(Color.White.copy(alpha = 0.55f), Offset(0.5f * d, padY + 0.5f * d), Size(size.width - d, cellH - d), style = Stroke(d))
+                        val label = "No listings here  ·  " + tv.sloopy.core.model.Names.clean(channel.name)
+                        val maxW = (size.width - 2 * padX).toInt()
+                        if (maxW > 8 * d) {
+                            val tl = cache.getOrPut("band|$maxW|$label") { measurer.measure(label, titleStyle, overflow = TextOverflow.Ellipsis, maxLines = 1, constraints = Constraints(maxWidth = maxW)) }
+                            drawText(tl, color = Color.White, topLeft = Offset(padX, padY + (cellH - tl.size.height) / 2f))
+                        }
+                    }
+                }
                 if (list == null || list.isEmpty()) {
                     val a = maxOf(nowEpoch - 1800, winStart)
-                    val label = if (list == null) "" else if (pending) "Loading listings…" else "No guide data"
+                    val label = if (list == null) "" else (if (pending) "Loading listings…" else "No guide data") + (if (cursorOn) "  ·  " + tv.sloopy.core.model.Names.clean(channel.name) else "")
                     paint(a, winEnd, label, "", past = true, isNow = false, archive = false, selected = cursorOn)
                 } else {
                     for (p in list) {

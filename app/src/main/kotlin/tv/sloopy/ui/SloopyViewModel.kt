@@ -986,21 +986,33 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val live = channels.value.filter { it.id !in hiddenCh && it.categoryId !in hiddenG }
         val byEpg = live.filter { it.epgId != null }.groupBy { it.epgId!! }
         val onNow = if (list.any { it.state == "in" || kotlin.math.abs(it.startEpoch - now) < 2 * 3600 }) runCatching { catalog.nowPlaying(p.id, byEpg.keys.toList(), now) }.getOrDefault(emptyMap()) else emptyMap()
-        fun last(n: String) = n.trim().substringAfterLast(' ').lowercase()
-        return list.map { g ->
-            gameChannelCache[g.id]?.let { (id, at) -> if (now - at < 600) return@map GameRow(g, live.firstOrNull { it.id == id }, "cached") }
-            val h = last(g.home); val a = last(g.away)
-            val fromGuide = onNow.entries.filter { (_, nn) -> val t = nn.title.lowercase(); t.contains(h) && t.contains(a) }
-                .flatMap { byEpg[it.key] ?: emptyList() }.maxByOrNull { tv.sloopy.core.model.Dupes.quality(it.name) }
-            if (fromGuide != null) { gameChannelCache[g.id] = fromGuide.id to now; return@map GameRow(g, dupes.value.byChannel[fromGuide.id]?.primary ?: fromGuide, "guide") }
-            for (net in g.networks) {
-                networkMap.value[net]?.let { id -> live.firstOrNull { it.id == id }?.let { gameChannelCache[g.id] = it.id to now; return@map GameRow(g, it, net) } }
-                val cands = channelsForNetwork(net)
-                val guess = cands.firstOrNull { c -> c.categoryId?.let { gid -> liveCategories.value.firstOrNull { it.id == gid }?.name?.uppercase()?.contains("US") == true } == true } ?: cands.firstOrNull()
-                if (guess != null) { gameChannelCache[g.id] = guess.id to now; return@map GameRow(g, guess, "$net?") }
+        // Off the main thread: a Saturday has eighty games, and the name scan below walks every
+        // channel. Each channel's key is computed once, and each network's candidates once, per refresh.
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
+            val keyOf = HashMap<Long, String>(live.size * 2)
+            live.forEach { keyOf[it.id] = tv.sloopy.core.model.Dupes.key(it.name) }
+            val usCats = liveCategories.value.filter { it.name.uppercase().contains("US") }.map { it.id }.toSet()
+            val candidates = HashMap<String, List<ChannelEntity>>()
+            fun forNetwork(net: String): List<ChannelEntity> = candidates.getOrPut(net) {
+                val words = tv.sloopy.core.sports.Scores.NETWORK_WORDS[net] ?: listOf(net)
+                collapse(live.filter { c -> val k = keyOf[c.id] ?: ""; words.any { w -> k == w || k.startsWith("$w ") || k.endsWith(" $w") || k.contains(" $w ") } }).take(30)
             }
-            gameChannelCache[g.id] = null to now
-            GameRow(g, null, "")
+            fun last(n: String) = n.trim().substringAfterLast(' ').lowercase()
+            list.map { g ->
+                gameChannelCache[g.id]?.let { (id, at) -> if (now - at < 600) return@map GameRow(g, live.firstOrNull { it.id == id }, "cached") }
+                val h = last(g.home); val a = last(g.away)
+                val fromGuide = onNow.entries.filter { (_, nn) -> val t = nn.title.lowercase(); t.contains(h) && t.contains(a) }
+                    .flatMap { byEpg[it.key] ?: emptyList() }.maxByOrNull { tv.sloopy.core.model.Dupes.quality(it.name) }
+                if (fromGuide != null) { gameChannelCache[g.id] = fromGuide.id to now; return@map GameRow(g, dupes.value.byChannel[fromGuide.id]?.primary ?: fromGuide, "guide") }
+                for (net in g.networks.take(3)) {
+                    networkMap.value[net]?.let { id -> live.firstOrNull { it.id == id }?.let { gameChannelCache[g.id] = it.id to now; return@map GameRow(g, it, net) } }
+                    val cands = forNetwork(net)
+                    val guess = cands.firstOrNull { it.categoryId in usCats } ?: cands.firstOrNull()
+                    if (guess != null) { gameChannelCache[g.id] = guess.id to now; return@map GameRow(g, guess, "$net?") }
+                }
+                gameChannelCache[g.id] = null to now
+                GameRow(g, null, "")
+            }
         }
     }
     /** A league's teams, kept a week on the stick. */

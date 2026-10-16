@@ -88,6 +88,17 @@ a grabbed group.
   TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
   Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
   viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
+- 0.6.5 (2026-10-16): buddy's note, "no way to see which channel you're on in a folder with no
+  listings": a row whose only programmes ended hours ago had its cursor cell off the left edge, so
+  nothing lit. `GuideRow` now paints a focus band across the visible row, "No listings here ·
+  <channel>", whenever the cursor is on the row and its cell is not in view; the no-data cell
+  names the channel while the cursor is on it.
+- 0.6.5 (2026-10-16): buddy was "kicked out" opening Sports › Tomorrow: `resolveGameChannels`
+  ran on Main and called `channelsForNetwork` (a `Dupes.key` over every channel) per network
+  per game, so a Saturday slate on a 10k-channel lineup froze the app long enough to be killed.
+  Now it runs on Dispatchers.Default, keys each channel once and each network once per refresh,
+  and looks at a game's first three networks only. No crash on the demo, which is why the
+  emulator never showed it.
 - 0.6.4 (2026-10-16): Sports rebuilt in the rail shape (`ui/scores/ScoresScreen`): rail = Live
   now, Today, Tomorrow, Yesterday, the next five weekdays, My teams, Standings per league; the
   content shows the game under the cursor as a card ("OK to watch · On <channel>") and the day's
