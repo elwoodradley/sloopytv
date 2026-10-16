@@ -11,7 +11,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import tv.sloopy.data.AndroidHttp
 import java.io.IOException
-import java.util.Base64
+import tv.sloopy.core.util.B64
 import javax.crypto.Cipher
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
@@ -69,5 +69,5 @@ object CodeClient {
     } catch (e: Exception) { null }
 
     private fun JsonObject.str(k: String) = (this[k] as? JsonPrimitive)?.contentOrNull
-    private fun b64(s: String?): ByteArray? = s?.let { runCatching { Base64.getDecoder().decode(it) }.getOrNull() }
+    private fun b64(s: String?): ByteArray? = s?.let { runCatching { B64.decode(it) }.getOrNull() }
 }

@@ -14,7 +14,7 @@ import tv.sloopy.core.crypto.SecretBox
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.security.SecureRandom
-import java.util.Base64
+import tv.sloopy.core.util.B64
 
 /** What the phone sent. Secrets inside; never log it. */
 class PairPayload(val name: String, val url: String, val user: String, val pass: String)
@@ -78,8 +78,8 @@ class PairingServer(private val context: Context, port: Int) : NanoHTTPD("0.0.0.
         val body = json.parseToJsonElement(buf.decodeToString()) as? JsonObject ?: return jsonResponse(Response.Status.BAD_REQUEST, false, "Bad request")
         val sentCode = body.str("code") ?: ""
         val mode = body.str("mode") ?: "code"
-        val nonce = runCatching { Base64.getDecoder().decode(body.str("nonce") ?: "") }.getOrNull()
-        val box = runCatching { Base64.getDecoder().decode(body.str("box") ?: "") }.getOrNull()
+        val nonce = runCatching { B64.decode(body.str("nonce") ?: "") }.getOrNull()
+        val box = runCatching { B64.decode(body.str("box") ?: "") }.getOrNull()
         if (nonce == null || box == null || nonce.size != SecretBox.NONCE_BYTES) return jsonResponse(Response.Status.BAD_REQUEST, false, "Bad request")
 
         if (!constantTimeEquals(sentCode, code)) {
@@ -120,7 +120,7 @@ class PairingServer(private val context: Context, port: Int) : NanoHTTPD("0.0.0.
     }
 
     private fun ByteArray.hex() = joinToString("") { "%02x".format(it) }
-    private fun b64url(b: ByteArray) = Base64.getUrlEncoder().withoutPadding().encodeToString(b)
+    private fun b64url(b: ByteArray) = B64.urlNoPad(b)
 
     companion object {
         const val DEFAULT_PORT = 8765

@@ -3,7 +3,7 @@ package tv.sloopy.sync
 import java.io.IOException
 import java.security.MessageDigest
 import java.security.SecureRandom
-import java.util.Base64
+import tv.sloopy.core.util.B64
 import javax.crypto.Cipher
 import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
@@ -51,8 +51,7 @@ object SyncClient {
         val salt = ByteArray(16).also { SecureRandom().nextBytes(it) }
         val iv = ByteArray(12).also { SecureRandom().nextBytes(it) }
         val ct = Cipher.getInstance("AES/GCM/NoPadding").run { init(Cipher.ENCRYPT_MODE, key(c, salt), GCMParameterSpec(128, iv)); doFinal(plain) }
-        val b = Base64.getEncoder()
-        val body = """{"id":"${id(c)}","salt":"${b.encodeToString(salt)}","iv":"${b.encodeToString(iv)}","ct":"${b.encodeToString(ct)}"}"""
+        val body = """{"id":"${id(c)}","salt":"${B64.encode(salt)}","iv":"${B64.encode(iv)}","ct":"${B64.encode(ct)}"}"""
         val root = call(Request.Builder().url(base(server) + "/sync/put").post(body.toRequestBody("application/json".toMediaType())).build())
         (root["at"] as? JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: System.currentTimeMillis()
     }
@@ -61,8 +60,7 @@ object SyncClient {
         val c = normalise(code)
         if (c.length != 8) throw SyncException("A transfer code is eight letters and numbers")
         val root = call(Request.Builder().url(base(server) + "/sync/get?id=" + id(c)).get().build())
-        val d = Base64.getDecoder()
-        val salt = root.str("salt")?.let { d.decode(it) }; val iv = root.str("iv")?.let { d.decode(it) }; val ct = root.str("ct")?.let { d.decode(it) }
+        val salt = root.str("salt")?.let { B64.decode(it) }; val iv = root.str("iv")?.let { B64.decode(it) }; val ct = root.str("ct")?.let { B64.decode(it) }
         if (salt == null || iv == null || ct == null) throw SyncException("The server sent something unexpected")
         try {
             Cipher.getInstance("AES/GCM/NoPadding").run { init(Cipher.DECRYPT_MODE, key(c, salt), GCMParameterSpec(128, iv)); doFinal(ct) }

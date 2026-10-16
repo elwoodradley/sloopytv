@@ -153,6 +153,14 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.9 (2026-10-16): older Fire Sticks. A friend's stick installed the app but it went black and
+  back to home at launch. `minSdk` is 24 and Fire OS 6 (Fire TV Stick 4K 2018, Cube 1st gen) is
+  Android 7.1, where `java.time` and `java.util.Base64` do not exist. Core library desugaring is on
+  (`isCoreLibraryDesugaringEnabled` + `desugar_jdk_libs` 2.1.5) so the time classes ship inside the
+  APK, and Base64 goes through `core/util/B64` (Kotlin's own encoder, tolerant of missing padding).
+  Never import `java.util.Base64` or anything else that first appeared in API 26 without a guard;
+  `NotificationChannel` is guarded in `Recorder`. There is no API 25 emulator image installed, so
+  this is verified only by the dex contents (`j$/time` present, no `java/util/Base64`).
 - 0.6.1 (2026-10-15): the user's About line read "100 rows in 28585 ms": the IN-list window query
   let SQLite choose a plan that walked far more than it returned. DB v5 adds the index
   (providerId, gen, epgId, stopEpoch); the store reads one channel at a time through
