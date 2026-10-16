@@ -268,6 +268,13 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
 
     suspend fun programmeCount(p: String): Int = db.programmes().count(p, epgGen(p))
 
+    /** The guide store's read: blocking, on the caller's IO thread, so it is never queued behind writes. */
+    suspend fun programmesManyDirect(p: String, epgIds: List<String>, from: Long, to: Long): List<ProgrammeEntity> {
+        if (epgIds.isEmpty()) return emptyList()
+        val gen = epgGen(p)
+        return withContext(Dispatchers.IO) { db.programmes().windowManyBlocking(p, gen, epgIds, from, to) }
+    }
+
     suspend fun programmesMany(p: String, epgIds: List<String>, from: Long, to: Long): List<ProgrammeEntity> =
         if (epgIds.isEmpty()) emptyList() else db.programmes().windowMany(p, epgGen(p), epgIds, from, to)
 

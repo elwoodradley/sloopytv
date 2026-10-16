@@ -88,6 +88,14 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
   Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
   viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
+- 0.5.8 (2026-10-15): the 0.5.4–0.5.7 store had two callers (the screen and the watch-time
+  warm-up) sharing one job, last writer wins, so the screen's rows could be cancelled by the
+  warm-up's and sit on placeholders; and its reads queued behind the sweep's writes on Room's
+  4-thread executor. Now `ensureGuide` merges every request for the same group into
+  `guideQueue` and one `drainGuideQueue` loader drains it nearest-first (only a different group
+  cancels); reads go through `programmesManyDirect` → `windowManyBlocking` on Dispatchers.IO;
+  the database is WAL with an 8-thread query executor; the sweep waits while `guideLoading`
+  and runs two-wide when the guide file is fine (six-wide only when it was refused).
 - 0.5.7 (2026-10-15): sweep order is current channel → rows on screen → favourites → the
   rest; six-wide for the urgent set with no pause; a channel whose table came back empty is
   remembered in `meta` as `nolist:<id>` for a day so launches stop re-asking. `Catalog.epgNote`

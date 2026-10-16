@@ -52,6 +52,8 @@ abstract class SloopyDb : RoomDatabase() {
             Room.databaseBuilder(context, SloopyDb::class.java, "sloopy.db")
                 .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                 .fallbackToDestructiveMigration(dropAllTables = true)   // cache only; credentials live in the vault
+                .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)   // readers never wait on the sweep's writes
+                .setQueryExecutor(java.util.concurrent.Executors.newFixedThreadPool(8))
                 .build()
     }
 }

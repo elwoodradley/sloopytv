@@ -1255,7 +1255,14 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     }
     private val _groupGuide = MutableStateFlow<GroupGuide?>(null)
     val groupGuide: StateFlow<GroupGuide?> = _groupGuide
+    // One loader per group. Requests (the screen's rows, the warm-up's rows, a wider band) are
+    // merged into a queue the loader drains nearest-first; they never cancel each other. Only a
+    // different group cancels, which is what makes flicking through groups cheap.
     private var guideJob: Job? = null
+    private var loadingGroup: String? = null
+    private val guideQueue = LinkedHashSet<String>()
+    private var bandLo = 0L; private var bandHi = 0L
+    @Volatile var guideLoading = false; private set
     /** The channels the guide last asked for, so the sweep can fill what is on screen first. */
     @Volatile private var guideWanted: List<ChannelEntity> = emptyList()
     fun ensureGuide(groupKey: String, list: List<ChannelEntity>, rowLo: Int, rowHi: Int, lo: Long, hi: Long, near: Int = rowLo + 40) {
@@ -1265,32 +1272,58 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val slice = (a until b).sortedBy { kotlin.math.abs(it - near) }.map { list[it] }
         val wantList = (slice + list.take(40)).distinctBy { it.id }
         guideWanted = wantList
-        val want = wantList.mapTo(LinkedHashSet()) { tv.sloopy.data.channelEpgKey(it) }
-        val cur = synchronized(guides) { guides[groupKey] }
-        if (cur != null && cur.covers(lo, hi) && cur.rows.keys.containsAll(want)) { if (_groupGuide.value !== cur) _groupGuide.value = cur; return }
-        // Same group: keep showing what it has while the rest loads. Another group: placeholders.
-        _groupGuide.value = if (cur != null && cur.covers(lo, hi)) cur else if (_groupGuide.value?.key == groupKey) _groupGuide.value else null
-        guideJob?.cancel()
-        guideJob = viewModelScope.launch {
-            val p = active.value ?: return@launch
-            val widen = cur == null || !cur.covers(lo, hi)
-            val nlo = if (cur != null) minOf(lo, cur.lo) else lo
-            val nhi = if (cur != null) maxOf(hi, cur.hi) else hi
-            // When the band widens, the rows already held are reloaded for the wider band; the set
-            // is kept to what is near the view plus a few hundred so a long scroll cannot pile up.
-            val keep = if (cur == null) emptySet() else if (widen) cur.rows.keys.filter { it in want }.toSet() + cur.rows.keys.take(300) else cur.rows.keys
-            val toLoad = (if (widen) keep + want else want - keep).toList()
-            val rows = HashMap<String, List<tv.sloopy.data.db.ProgrammeEntity>>()
-            if (!widen) cur?.rows?.let { rows.putAll(it) }
-            for (chunk in toLoad.chunked(300)) {
-                val got = runCatching { catalog.programmesMany(p.id, chunk, nlo, nhi) }.getOrDefault(emptyList()).groupBy { it.epgId }
-                chunk.forEach { rows[it] = got[it] ?: emptyList() }
+        val want = wantList.map { tv.sloopy.data.channelEpgKey(it) }.distinct()
+        synchronized(guideQueue) {
+            val cur = guides[groupKey]
+            val sameGroup = loadingGroup == groupKey
+            val widen = cur != null && !cur.covers(lo, hi)
+            if (cur != null && !widen && cur.rows.keys.containsAll(want)) {
+                if (_groupGuide.value !== cur) _groupGuide.value = cur
+                if (!sameGroup) return
+                if (guideQueue.isEmpty()) return
+            }
+            if (!sameGroup) {
+                guideJob?.cancel(); guideQueue.clear(); loadingGroup = groupKey
+                bandLo = if (cur != null) minOf(lo, cur.lo) else lo; bandHi = if (cur != null) maxOf(hi, cur.hi) else hi
+                // Another group: placeholders until its rows arrive. Same group: keep what it has.
+                _groupGuide.value = if (cur != null && !widen) cur else if (_groupGuide.value?.key == groupKey) _groupGuide.value else null
+                if (widen && cur != null) { guideQueue.addAll(cur.rows.keys.take(400)); guides[groupKey] = GroupGuide(groupKey, bandLo, bandHi, emptyMap()) }
+                guideQueue.addAll(want)
+            } else {
+                if (widen && cur != null) {
+                    bandLo = minOf(bandLo, lo); bandHi = maxOf(bandHi, hi)
+                    guideQueue.addAll(cur.rows.keys.take(400)); guides[groupKey] = GroupGuide(groupKey, bandLo, bandHi, emptyMap())
+                }
+                val have = guides[groupKey]?.rows?.keys ?: emptySet()
+                guideQueue.addAll(want.filter { it !in have })
+            }
+            if (guideJob?.isActive != true) guideJob = viewModelScope.launch { drainGuideQueue(groupKey) }
+        }
+    }
+    private suspend fun drainGuideQueue(groupKey: String) {
+        val p = active.value ?: return
+        guideLoading = true
+        try {
+            while (true) {
+                val chunk = synchronized(guideQueue) {
+                    val have = guides[groupKey]?.rows?.keys ?: emptySet()
+                    guideQueue.removeAll(have)
+                    val c = guideQueue.take(200); guideQueue.removeAll(c.toSet()); c
+                }
+                if (chunk.isEmpty()) break
+                val lo = bandLo; val hi = bandHi
+                val got = runCatching { catalog.programmesManyDirect(p.id, chunk, lo, hi) }.getOrDefault(emptyList()).groupBy { it.epgId }
+                synchronized(guideQueue) {
+                    val cur = guides[groupKey]
+                    val rows = HashMap(cur?.rows ?: emptyMap())
+                    chunk.forEach { rows[it] = got[it] ?: emptyList() }
+                    val g = GroupGuide(groupKey, lo, hi, rows)
+                    guides[groupKey] = g
+                    _groupGuide.value = g
+                }
                 kotlinx.coroutines.yield()
             }
-            val g = GroupGuide(groupKey, nlo, nhi, rows)
-            synchronized(guides) { guides[groupKey] = g }
-            _groupGuide.value = g
-        }
+        } finally { guideLoading = false }
     }
     // Channels the sweep filled are folded into the store a few at a time, not one rebuild each.
     private val changedKeys = java.util.Collections.synchronizedSet(LinkedHashSet<String>())
@@ -1298,22 +1331,25 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val keys = synchronized(changedKeys) { val k = changedKeys.toList(); changedKeys.clear(); k }
         if (keys.isEmpty()) return
         val p = active.value ?: return
-        synchronized(guides) { guides.entries.removeAll { e -> e.value !== _groupGuide.value && keys.any { it in e.value.rows } } }
+        synchronized(guideQueue) { guides.entries.removeAll { e -> e.value !== _groupGuide.value && keys.any { it in e.value.rows } } }
         val g = _groupGuide.value ?: return
         val mine = keys.filter { it in g.rows }
         if (mine.isEmpty()) return
-        val got = runCatching { catalog.programmesMany(p.id, mine, g.lo, g.hi) }.getOrDefault(emptyList()).groupBy { it.epgId }
-        val rows = HashMap(g.rows); mine.forEach { rows[it] = got[it] ?: emptyList() }
-        val ng = GroupGuide(g.key, g.lo, g.hi, rows)
-        synchronized(guides) { guides[g.key] = ng }
-        if (_groupGuide.value === g) _groupGuide.value = ng
+        val got = runCatching { catalog.programmesManyDirect(p.id, mine, g.lo, g.hi) }.getOrDefault(emptyList()).groupBy { it.epgId }
+        synchronized(guideQueue) {
+            val now = guides[g.key] ?: return
+            val rows = HashMap(now.rows); mine.forEach { rows[it] = got[it] ?: emptyList() }
+            val ng = GroupGuide(now.key, now.lo, now.hi, rows)
+            guides[g.key] = ng
+            if (_groupGuide.value?.key == g.key) _groupGuide.value = ng
+        }
     }
     private fun dropGuides() {
-        synchronized(guides) { guides.clear() }
-        val g = _groupGuide.value ?: return
+        val g = _groupGuide.value
+        synchronized(guideQueue) { guides.clear(); guideJob?.cancel(); guideQueue.clear(); loadingGroup = null }
+        if (g == null) return
         _groupGuide.value = null
-        val list = visibleChannels.value
-        ensureGuide(g.key, list, 0, 130, g.lo, g.hi)
+        ensureGuide(g.key, visibleChannels.value, 0, 130, g.lo, g.hi)
     }
 
     // ---- The sweep: fills listings the guide file did not carry, in the background -------------
@@ -1336,6 +1372,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         sweepJob?.cancel()
         sweepJob = viewModelScope.launch {
             val gate = kotlinx.coroutines.sync.Semaphore(6)
+            val gate2 = kotlinx.coroutines.sync.Semaphore(2)
             var done = 0; var total = 0
             while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                 val p = active.value
@@ -1356,12 +1393,14 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 if (remaining == 0) { _sweepProgress.value = null; done = 0; total = 0; val k = sweepKick.value; kotlinx.coroutines.withTimeoutOrNull(600_000) { sweepKick.first { it != k } }; continue }
                 total = maxOf(total, remaining + done)
                 _sweepProgress.value = done to total
-                val batch = if (urgent.isNotEmpty()) urgent.take(18) else rest.take(1)
+                val batch = if (urgent.isNotEmpty()) urgent.take(if (wide) 18 else 4) else rest.take(1)
                 val gentle = urgent.isEmpty()
+                // The guide is reading: let it finish before the next round of writes.
+                var waited = 0; while (guideLoading && waited < 40) { delay(50); waited++ }
                 val nowS = now / 1000
                 batch.map { c ->
                     launch {
-                        gate.withPermit {
+                        (if (wide) gate else gate2).withPermit {
                             val key = tv.sloopy.data.channelEpgKey(c)
                             val have = runCatching { catalog.programmes(p.id, key, nowS - 6 * 3600, nowS + 6 * 3600) }.getOrDefault(emptyList())
                             if (have.isNotEmpty()) { sweptAt[c.id] = now; return@withPermit }
