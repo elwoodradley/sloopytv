@@ -356,6 +356,7 @@ fun Field(
     placeholder: String = "",
     keyboard: KeyboardType = KeyboardType.Text,
     backLeaves: Boolean = false,
+    onDone: (() -> Unit)? = null,
 ) {
     // Two-stage focus for the remote: the row takes D-pad focus like any other item; OK opens
     // the keyboard on the inner text field; Back or Next hands focus back to the row.
@@ -407,7 +408,7 @@ fun Field(
                         cursorBrush = SolidColor(Sloopy.amber),
                         visualTransformation = if (password) PasswordVisualTransformation() else VisualTransformation.None,
                         keyboardOptions = KeyboardOptions(keyboardType = if (password) KeyboardType.Password else keyboard, imeAction = ImeAction.Done, autoCorrectEnabled = false),
-                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { stopEditing() }),
+                        keyboardActions = androidx.compose.foundation.text.KeyboardActions(onDone = { stopEditing(); onDone?.invoke() }),
                         modifier = Modifier.fillMaxWidth().focusRequester(inner).padding(vertical = 8.dp)
                             .onFocusChanged { st ->
                                 if (st.isFocused) innerHadFocus = true

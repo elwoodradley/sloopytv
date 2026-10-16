@@ -30,6 +30,9 @@ export default {
       if (request.method === "POST" && path === "/report") return report(request, env);
       if (request.method === "GET" && path === "/poster") return poster(request, env, url);
       if (request.method === "GET" && path === "/trending") return trending(request, env);
+      if (request.method === "GET" && path === "/toad/status") return toadStatus(env, url);
+      if (request.method === "POST" && path === "/toad/ask") return toadAsk(request, env);
+      if (request.method === "POST" && path === "/toad/tags") return toadTags(request, env);
       if (request.method === "POST" && path === "/friends/me") return friendMe(request, env);
       if (request.method === "GET" && path === "/friends/list") return friendList(env, url);
       if (request.method === "POST" && path === "/friends/send") return friendSend(request, env);
@@ -40,6 +43,7 @@ export default {
         if (request.method === "POST" && path === "/admin/config") return setConfig(request, env);
         if (request.method === "GET" && path === "/admin/config") return json({ ok: true, ...adminConfig((await env.CODES.get("config", "json")) || {}) });
         if (request.method === "GET" && path === "/admin/reports") return listReports(env);
+        if (request.method === "GET" && path === "/admin/toad") return toadAdmin(env);
         if (request.method === "DELETE" && path.startsWith("/admin/report/")) { await env.CODES.delete("r:" + path.slice("/admin/report/".length)); return json({ ok: true }); }
         if (request.method === "POST" && path === "/admin/report-test") return reportTest(env);
         if (request.method === "GET" && path === "/admin/list") return list(env);
@@ -206,7 +210,10 @@ function publicConfig(c) {
   };
 }
 function adminConfig(c) {
-  return { ...publicConfig(c), telegramToken: c.telegramToken ? "set" : "", telegramChat: c.telegramChat || "", discordWebhook: c.discordWebhook ? "set" : "" };
+  return {
+    ...publicConfig(c), telegramToken: c.telegramToken ? "set" : "", telegramChat: c.telegramChat || "", discordWebhook: c.discordWebhook ? "set" : "",
+    toadEnabled: !!c.toadEnabled, toadSticks: c.toadSticks || "", toadDailyCap: c.toadDailyCap || TOAD_DEFAULT_CAP, toadModel: c.toadModel || TOAD_DEFAULT_MODEL,
+  };
 }
 
 async function setConfig(request, env) {
@@ -219,6 +226,10 @@ async function setConfig(request, env) {
     price: String(body?.price ?? prev.price ?? "").trim().slice(0, 40),
     operatorName: String(body?.operatorName ?? prev.operatorName ?? "").trim().slice(0, 60),
     reportsEnabled: body?.reportsEnabled === undefined ? !!prev.reportsEnabled : !!body.reportsEnabled,
+    toadEnabled: body?.toadEnabled === undefined ? !!prev.toadEnabled : !!body.toadEnabled,
+    toadSticks: typeof body?.toadSticks === "string" ? body.toadSticks.toUpperCase().replace(/[^A-Z2-9\s,]/g, "").split(/[\s,]+/).filter((x) => FRIEND_RE.test(x)).join(" ") : (prev.toadSticks || ""),
+    toadDailyCap: body?.toadDailyCap === undefined ? (prev.toadDailyCap || TOAD_DEFAULT_CAP) : Math.max(1, Math.min(1000, parseInt(body.toadDailyCap, 10) || TOAD_DEFAULT_CAP)),
+    toadModel: TOAD_MODELS[body?.toadModel] ? body.toadModel : (TOAD_MODELS[prev.toadModel] ? prev.toadModel : TOAD_DEFAULT_MODEL),
   };
   // Secrets only change when a real value is sent; "set" means leave it alone, "" clears it.
   if (typeof body?.telegramToken === "string" && body.telegramToken !== "set") cfg.telegramToken = body.telegramToken.trim().slice(0, 120);
@@ -344,6 +355,145 @@ async function trending(request, env) {
   return new Response(body, { headers: { "content-type": "application/json" } });
 }
 
+// ---- the Toad: one Claude key for every allowed stick, with a daily cap and a spend line ------
+// The TV never holds the key. A stick is known by its friend code; the operator lists the codes
+// that may use the Toad (empty list = every stick, once it is switched on). Each stick gets a
+// daily cap, and every call adds its estimated cost to this month's spend line.
+
+const TOAD_DEFAULT_CAP = 50;
+const TOAD_DEFAULT_MODEL = "claude-haiku-5-5";
+// Price per million tokens, in and out, for the spend estimate.
+const TOAD_MODELS = { "claude-haiku-5-5": [0.10, 0.50], "claude-sonnet-5-5": [2, 10], "claude-opus-5-5": [4, 20] };
+const TOAD_TAGS = ["sports", "news", "kids", "movies", "series", "music", "adult", "foreign", "general"];
+
+function toadCode(x) { return String(x || "").toUpperCase().replace(/[^A-Z2-9]/g, "").slice(0, 8); }
+function dayKey() { return new Date().toISOString().slice(0, 10); }
+function monthKey() { return new Date().toISOString().slice(0, 7); }
+
+async function toadGate(env, code) {
+  const cfg = (await env.CODES.get("config", "json")) || {};
+  if (!env.ANTHROPIC_KEY || !cfg.toadEnabled) return { ok: false, enabled: false, allowed: false, left: 0, cfg };
+  const sticks = (cfg.toadSticks || "").split(" ").filter(Boolean);
+  const allowed = FRIEND_RE.test(code) && (sticks.length === 0 || sticks.includes(code));
+  const cap = cfg.toadDailyCap || TOAD_DEFAULT_CAP;
+  const used = parseInt((await env.CODES.get("toad:use:" + code + ":" + dayKey())) || "0", 10);
+  return { ok: allowed && used < cap, enabled: true, allowed, left: Math.max(0, cap - used), used, cap, cfg };
+}
+
+async function toadStatus(env, url) {
+  const g = await toadGate(env, toadCode(url.searchParams.get("id")));
+  return json({ ok: true, enabled: g.enabled, allowed: g.allowed, left: g.left });
+}
+
+async function toadSpend(env, code, model, usage) {
+  const price = TOAD_MODELS[model] || TOAD_MODELS[TOAD_DEFAULT_MODEL];
+  const cost = ((usage?.input_tokens || 0) * price[0] + (usage?.output_tokens || 0) * price[1]) / 1e6;
+  const mk = "toad:spend:" + monthKey();
+  const cur = (await env.CODES.get(mk, "json")) || { usd: 0, calls: 0 };
+  await env.CODES.put(mk, JSON.stringify({ usd: cur.usd + cost, calls: cur.calls + 1 }), { expirationTtl: 400 * 24 * 3600 });
+  const uk = "toad:use:" + code + ":" + dayKey();
+  const used = parseInt((await env.CODES.get(uk)) || "0", 10);
+  await env.CODES.put(uk, String(used + 1), { expirationTtl: 2 * 24 * 3600 });
+}
+
+// One call to Claude. Returns the text and the usage, or throws with a short message.
+async function claude(env, model, system, user, maxTokens) {
+  const r = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: { "x-api-key": env.ANTHROPIC_KEY, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+    body: JSON.stringify({ model, max_tokens: maxTokens, system, messages: [{ role: "user", content: user }] }),
+  });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j?.error?.message || ("Claude answered HTTP " + r.status));
+  if (j.stop_reason === "refusal") throw new Error("The Toad would rather not answer that.");
+  const text = (j.content || []).filter((b) => b.type === "text").map((b) => b.text).join("");
+  return { text, usage: j.usage || {} };
+}
+
+function jsonFromText(t) {
+  const m = String(t || "").replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "");
+  const a = m.indexOf("{"), b = m.lastIndexOf("}");
+  if (a < 0 || b < a) return null;
+  try { return JSON.parse(m.slice(a, b + 1)); } catch (e) { return null; }
+}
+
+const TOAD_ACTIONS = ["favourite_add", "favourite_remove", "hide_group", "show_group", "hide_channel", "show_channel", "tune", "remind", "record", "search", "nothing"];
+
+const TOAD_SYSTEM = `You are the Toad, the helper inside SloopyTV, a TV app. The viewer typed or spoke one request. Turn it into actions the TV can run. Answer with JSON only, no prose around it:
+{"say": "<one short plain sentence, what you are about to do or why you cannot>", "actions": [{"type": "<action>", "names": ["<channel or group names as the viewer said them>"], "title": "<programme or team, for remind/record>", "query": "<search text, for search>"}]}
+Actions: favourite_add, favourite_remove (channels), hide_group, show_group (groups), hide_channel, show_channel (channels), tune (one channel), remind (title on a channel, or a team), record (title on a channel, or a team, or the channel that is on now), search (a question about what is on, or anything you cannot do), nothing.
+Rules: Use the viewer's own channel names in "names", one entry per channel. For group actions use names from the group list given, and you may use several, for example every group that is foreign-language. "all foreign groups" means every group not in English for an American viewer. Never invent channels. If the request is unclear, use "nothing" and ask in "say". Keep "say" under 20 words. No markdown.`;
+
+async function toadAsk(request, env) {
+  if (await syncLimited(request, env)) return json({ ok: false, error: "Too many requests. Wait ten minutes." }, 429);
+  const b = await request.json().catch(() => null);
+  const code = toadCode(b?.id);
+  const g = await toadGate(env, code);
+  if (!g.enabled) return json({ ok: false, error: "The Toad is switched off" }, 403);
+  if (!g.allowed) return json({ ok: false, error: "This stick is not on the Toad's list" }, 403);
+  if (!g.ok) return json({ ok: false, error: "That is all the Toad can do today. Tomorrow it is fresh." }, 429);
+  const text = String(b?.text || "").trim().slice(0, 300);
+  if (!text) return json({ ok: false, error: "Say something first" }, 400);
+  const groups = (Array.isArray(b?.groups) ? b.groups : []).slice(0, 400).map((x) => String(x).slice(0, 60));
+  const favourites = (Array.isArray(b?.favourites) ? b.favourites : []).slice(0, 100).map((x) => String(x).slice(0, 60));
+  const user = "Viewer's request: " + text
+    + "\n\nGroups on this service: " + (groups.length ? groups.join(" | ") : "(none sent)")
+    + "\n\nViewer's favourites now: " + (favourites.length ? favourites.join(" | ") : "(none)")
+    + (b?.current ? "\n\nOn the TV now: " + String(b.current).slice(0, 80) : "")
+    + "\n\nLocal time: " + String(b?.now || "").slice(0, 40);
+  const model = g.cfg.toadModel || TOAD_DEFAULT_MODEL;
+  try {
+    const r = await claude(env, model, TOAD_SYSTEM, user, 600);
+    await toadSpend(env, code, model, r.usage);
+    const plan = jsonFromText(r.text);
+    if (!plan) return json({ ok: false, error: "The Toad mumbled. Try again." }, 502);
+    const actions = (Array.isArray(plan.actions) ? plan.actions : []).filter((a) => TOAD_ACTIONS.includes(a?.type)).slice(0, 12).map((a) => ({
+      type: a.type,
+      names: (Array.isArray(a.names) ? a.names : []).slice(0, 40).map((x) => String(x).slice(0, 60)),
+      title: a.title ? String(a.title).slice(0, 80) : "",
+      query: a.query ? String(a.query).slice(0, 120) : "",
+    }));
+    return json({ ok: true, say: String(plan.say || "").slice(0, 200), actions, left: g.left - 1 });
+  } catch (e) {
+    return json({ ok: false, error: String(e.message || e).slice(0, 160) }, 502);
+  }
+}
+
+const TAGS_SYSTEM = `You tag channel-group names from an IPTV service. For each group name, pick exactly one tag from: ${TOAD_TAGS.join(", ")}. "foreign" means a non-English-language group for an American viewer (Spanish-language US groups count as foreign). "adult" is XXX or similar. "general" is anything else (entertainment, networks, local). Answer with JSON only: {"tags": {"<group name exactly as given>": "<tag>"}}. Every group given must appear.`;
+
+async function toadTags(request, env) {
+  if (await syncLimited(request, env)) return json({ ok: false, error: "Too many requests" }, 429);
+  const b = await request.json().catch(() => null);
+  const code = toadCode(b?.id);
+  const g = await toadGate(env, code);
+  if (!g.enabled || !g.allowed) return json({ ok: false, error: "The Toad is off for this stick" }, 403);
+  const groups = Array.from(new Set((Array.isArray(b?.groups) ? b.groups : []).map((x) => String(x).trim().slice(0, 60)).filter(Boolean))).slice(0, 400);
+  if (!groups.length) return json({ ok: true, tags: {} });
+  // Same set of names = same answer, for every stick on that service, for a month.
+  const digest = Array.from(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(groups.slice().sort().join("\n"))))).map((x) => x.toString(16).padStart(2, "0")).join("");
+  const key = "toad:tags:" + digest;
+  const cached = await env.CODES.get(key, "json");
+  if (cached) return json({ ok: true, tags: cached, cached: true });
+  if (!g.ok) return json({ ok: false, error: "Daily cap reached" }, 429);
+  const model = g.cfg.toadModel || TOAD_DEFAULT_MODEL;
+  try {
+    const r = await claude(env, model, TAGS_SYSTEM, groups.join("\n"), 4000);
+    await toadSpend(env, code, model, r.usage);
+    const got = jsonFromText(r.text)?.tags || {};
+    const tags = {};
+    for (const name of groups) { const t = String(got[name] || "").toLowerCase(); tags[name] = TOAD_TAGS.includes(t) ? t : "general"; }
+    await env.CODES.put(key, JSON.stringify(tags), { expirationTtl: 30 * 24 * 3600 });
+    return json({ ok: true, tags });
+  } catch (e) {
+    return json({ ok: false, error: String(e.message || e).slice(0, 160) }, 502);
+  }
+}
+
+async function toadAdmin(env) {
+  const m = (await env.CODES.get("toad:spend:" + monthKey(), "json")) || { usd: 0, calls: 0 };
+  return json({ ok: true, month: monthKey(), usd: Math.round(m.usd * 10000) / 10000, calls: m.calls, keySet: !!env.ANTHROPIC_KEY });
+}
+
 // ---- friends: opt-in presence and send-to-TV --------------------------------------------------
 // A friend code identifies a stick. Presence lives three minutes; a sent channel waits a day.
 
@@ -395,7 +545,8 @@ main{max-width:720px;margin:0 auto;padding:28px 20px 80px}
 h1{font-size:30px;line-height:1;margin:0 0 4px;text-transform:uppercase;letter-spacing:.01em}
 .k{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:#8d8a84}
 label{display:block;margin-top:18px}
-input{width:100%;box-sizing:border-box;background:none;border:0;border-bottom:1px solid #2e2e32;color:#ebe9e4;font:inherit;font-size:18px;padding:9px 0;outline:none;border-radius:0}
+input,select{width:100%;box-sizing:border-box;background:none;border:0;border-bottom:1px solid #2e2e32;color:#ebe9e4;font:inherit;font-size:18px;padding:9px 0;outline:none;border-radius:0}
+select option{background:#0b0b0c}
 input:focus{border-bottom:2px solid #ebe9e4}
 .mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace}
 button{margin-top:22px;height:46px;padding:0 22px;border:1px solid #3a3a3e;background:none;color:#ebe9e4;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;letter-spacing:.16em;text-transform:uppercase;border-radius:0;cursor:pointer}
@@ -455,6 +606,15 @@ textarea{width:100%;box-sizing:border-box;background:none;border:0;border-bottom
   <button class="pri" id="repsave">Save</button> <button id="reptest">Test ping</button>
   <div class="msg" id="repmsg"></div>
   <table><thead><tr><th>When</th><th>Channel</th><th>What happened</th><th>Who</th><th></th></tr></thead><tbody id="reps"></tbody></table>
+  <h1 style="margin-top:48px">The Toad</h1>
+  <p class="k">The helper on the strip: say or type "put ESPN and AMC in favourites" and it does it. Uses your Claude credit through this server; the key never leaves here.</p>
+  <div class="tog"><input type="checkbox" id="toadon"><label for="toadon" style="margin:0">Toad on</label></div>
+  <label><span class="k">Sticks allowed (friend codes, from Settings › Friends on each TV; empty = every stick)</span><input id="toadsticks" class="mono" placeholder="EMPTR2WM LQMS5BG8"></label>
+  <label><span class="k">Requests per stick per day</span><input id="toadcap" class="mono" placeholder="50" style="max-width:120px"></label>
+  <label><span class="k">Model</span><select id="toadmodel"><option value="claude-haiku-5-5">Haiku 5.5 (fast, about a tenth of a cent a request)</option><option value="claude-sonnet-5-5">Sonnet 5.5 (sharper, about a cent)</option><option value="claude-opus-5-5">Opus 5.5 (sharpest, a few cents)</option></select></label>
+  <button class="pri" id="toadsave">Save</button>
+  <div class="msg" id="toadmsg"></div>
+  <p class="k" id="toadspend"></p>
   <div class="foot">A Stone Toad joint</div>
 </div></main>
 <script>
@@ -468,11 +628,13 @@ $("go").onclick=function(){pw=$("pw").value;sessionStorage.setItem("pw",pw);api(
 $("mint").onclick=function(){$("code").textContent="";$("msg").textContent="";api("POST","/admin/mint",{url:$("url").value,user:$("user").value,pass:$("pass").value,name:$("name").value,note:$("note").value}).then(function(j){if(j.ok){$("code").textContent=j.code;$("msg").textContent="Send this code. It works once, until "+fmt(j.expiresAt)+".";$("user").value="";$("pass").value="";$("note").value="";refresh()}else $("msg").textContent=j.error})}
 $("rows").onclick=function(e){var c=e.target.getAttribute("data-c");if(c&&confirm("Delete code "+c+"?"))api("DELETE","/admin/code/"+c).then(refresh)}
 $("cfg").onclick=function(){api("POST","/admin/config",{gumroadProduct:$("gp").value,buyUrl:$("gu").value,price:$("gpr").value}).then(function(j){$("cmsg").textContent=j.ok?(j.gumroadProduct?"Paywall on.":"Paywall off, the app is free."):j.error})}
-function loadCfg(){api("GET","/admin/config").then(function(j){if(j.ok){$("gp").value=j.gumroadProduct||"";$("gu").value=j.buyUrl||"";$("gpr").value=j.price||"";$("opname").value=j.operatorName||"";$("ann").value=j.announcementText||"";$("repon").checked=!!j.reportsEnabled;$("tgtok").value=j.telegramToken||"";$("dcweb").value=j.discordWebhook||""}});loadReps()}
+function loadCfg(){api("GET","/admin/config").then(function(j){if(j.ok){$("gp").value=j.gumroadProduct||"";$("gu").value=j.buyUrl||"";$("gpr").value=j.price||"";$("opname").value=j.operatorName||"";$("ann").value=j.announcementText||"";$("repon").checked=!!j.reportsEnabled;$("toadon").checked=!!j.toadEnabled;$("toadsticks").value=j.toadSticks||"";$("toadcap").value=j.toadDailyCap||50;$("toadmodel").value=j.toadModel||"claude-haiku-5-5";loadToad();$("tgtok").value=j.telegramToken||"";$("dcweb").value=j.discordWebhook||""}});loadReps()}
 function loadReps(){api("GET","/admin/reports").then(function(j){if(!j.ok)return;var h="";j.reports.forEach(function(r){h+="<tr><td>"+fmt(r.at)+"</td><td>"+(r.number?r.number+" ":"")+r.channel+(r.group?" <span class=used>("+r.group+")</span>":"")+"</td><td>"+(r.error||"")+(r.note?"<br><span class=used>"+r.note+"</span>":"")+"</td><td>"+(r.nick||"")+"<br><span class=used>"+(r.device||"")+" v"+(r.version||"")+"</span></td><td><button class=sm data-r="+r.id+">Fixed</button></td></tr>"});$("reps").innerHTML=h||"<tr><td colspan=5 class=used>No reports.</td></tr>"})}
 $("opsave").onclick=function(){api("POST","/admin/config",{operatorName:$("opname").value}).then(function(j){$("opmsg").textContent=j.ok?"Saved.":j.error})}
 $("annsend").onclick=function(){api("POST","/admin/config",{announcementText:$("ann").value}).then(function(j){$("annmsg").textContent=j.ok?(j.announcementText?"Sent. Sticks show it on their next open.":"Cleared."):j.error})}
 $("annclear").onclick=function(){$("ann").value="";api("POST","/admin/config",{announcementText:""}).then(function(j){$("annmsg").textContent=j.ok?"Cleared.":j.error})}
+function loadToad(){api("GET","/admin/toad").then(function(j){if(j.ok)$("toadspend").textContent=(j.keySet?"":"No Claude key on the server yet. ")+"This month ("+j.month+"): "+j.calls+" requests, about $"+j.usd.toFixed(2)+"."})}
+$("toadsave").onclick=function(){api("POST","/admin/config",{toadEnabled:$("toadon").checked,toadSticks:$("toadsticks").value,toadDailyCap:$("toadcap").value,toadModel:$("toadmodel").value}).then(function(j){$("toadmsg").textContent=j.ok?(j.toadEnabled?("Toad on"+(j.toadSticks?" for "+j.toadSticks.split(" ").length+" stick(s).":" for every stick.")):"Toad off."):j.error;if(j.ok)$("toadsticks").value=j.toadSticks||""})}
 $("repsave").onclick=function(){api("POST","/admin/config",{reportsEnabled:$("repon").checked,telegramToken:$("tgtok").value,discordWebhook:$("dcweb").value}).then(function(j){$("repmsg").textContent=j.ok?(j.reportsEnabled?"Reports on.":"Reports off."):j.error;if(j.ok){$("tgtok").value=j.telegramToken||"";$("dcweb").value=j.discordWebhook||""}})}
 $("reptest").onclick=function(){$("repmsg").textContent="Sending…";api("POST","/admin/report-test").then(function(j){$("repmsg").textContent=j.ok?"Sent. Check the phone.":j.error})}
 $("reps").onclick=function(e){var r=e.target.getAttribute("data-r");if(r)api("DELETE","/admin/report/"+r).then(loadReps)}

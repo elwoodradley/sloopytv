@@ -14,6 +14,7 @@ import java.security.SecureRandom
 sealed class RemoteEvent {
     data class Type(val text: String, val submit: Boolean) : RemoteEvent()
     data class Tune(val channelId: Long) : RemoteEvent()
+    data class Toad(val text: String) : RemoteEvent()
 }
 
 /**
@@ -37,6 +38,7 @@ class RemoteServer(private val context: Context, port: Int, private val channels
                 session.method == Method.GET && session.uri == "/channels" -> newFixedLengthResponse(Response.Status.OK, "application/json", channelsJson())
                 session.method == Method.GET && session.uri == "/state" -> newFixedLengthResponse(Response.Status.OK, "application/json", stateJson())
                 session.method == Method.POST && session.uri == "/type" -> { val b = body(session); events.tryEmit(RemoteEvent.Type(b.str("text").orEmpty().take(200), b.str("submit") == "true")); okJson() }
+                session.method == Method.POST && session.uri == "/toad" -> { val b = body(session); b.str("text")?.takeIf { it.isNotBlank() }?.let { events.tryEmit(RemoteEvent.Toad(it.take(300))) }; okJson() }
                 session.method == Method.POST && session.uri == "/tune" -> { val b = body(session); b.str("id")?.toLongOrNull()?.let { events.tryEmit(RemoteEvent.Tune(it)) }; okJson() }
                 else -> newFixedLengthResponse(Response.Status.NOT_FOUND, "text/plain", "")
             }
@@ -93,6 +95,12 @@ object RemotePage {
   <input id="t" placeholder="Search channels, movies, series" autocapitalize="off" autocorrect="off">
   <div class="row"><button class="pri" id="go">Search</button><button id="clr">Clear</button></div>
   <div class="msg" id="m"></div>
+  <div id="toad" style="display:none;margin-top:26px">
+    <div class="k">The Toad</div>
+    <input id="tt" placeholder="Put ESPN and AMC in my favourites" autocapitalize="sentences">
+    <div class="row"><button class="pri" id="tgo">Ask the Toad</button></div>
+    <div class="msg" id="tm"></div>
+  </div>
   <div class="now" id="now"></div>
   <input id="f" placeholder="Filter channels" style="font-size:16px">
   <div id="list"></div>
@@ -111,7 +119,11 @@ object RemotePage {
   function render(){ var q = f.value.toLowerCase(); var h = ""; all.filter(function(c){ return !q || c.name.toLowerCase().indexOf(q) >= 0 }).slice(0, 300).forEach(function(c){ h += '<div class="ch'+(c.on?' on':'')+'" data-id="'+c.id+'"><span class="n">'+c.number+'</span><span class="t">'+c.name+'</span></div>' }); list.innerHTML = h }
   f.addEventListener("input", render);
   list.onclick = function(e){ var el = e.target.closest(".ch"); if (!el) return; api("POST","/tune",{id: el.getAttribute("data-id")}).then(refresh) };
-  function refresh(){ api("GET","/state").then(function(s){ document.getElementById("now").textContent = s.now ? "On the TV: " + s.now : ""; all.forEach(function(c){ c.on = (c.id == s.id) }); render() }).catch(function(){}) }
+  var tt = document.getElementById("tt"), tm = document.getElementById("tm");
+  function askToad(){ if (!tt.value.trim()) return; api("POST","/toad",{text: tt.value}).then(function(j){ tm.textContent = j.ok ? "Sent. The TV shows what it will do; OK there runs it." : (j.message||"Not connected"); if (j.ok) tt.value = "" }).catch(function(){ tm.textContent = "Couldn't reach the TV. Same Wi-Fi?" }) }
+  tt.addEventListener("keydown", function(e){ if (e.key === "Enter") { e.preventDefault(); askToad() } });
+  document.getElementById("tgo").onclick = askToad;
+  function refresh(){ api("GET","/state").then(function(s){ document.getElementById("now").textContent = s.now ? "On the TV: " + s.now : ""; document.getElementById("toad").style.display = s.toad ? "block" : "none"; all.forEach(function(c){ c.on = (c.id == s.id) }); render() }).catch(function(){}) }
   api("GET","/channels").then(function(j){ all = j.channels || []; render(); refresh() }).catch(function(){ m.textContent = "Scan the code on the TV again." });
   setInterval(refresh, 8000);
 })();

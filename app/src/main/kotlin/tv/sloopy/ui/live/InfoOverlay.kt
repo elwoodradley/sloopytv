@@ -134,6 +134,8 @@ fun InfoOverlay(
                 if (healed != null) { SloopyButton("Original copy", onClick = { vm.undoHeal(); onClose() }); Spacer(Modifier.width(8.dp)) }
                 if (vm.clusterOf(channel) != null) { SloopyButton("Copies", onClick = { onClose(); openCopies() }); Spacer(Modifier.width(8.dp)) }
                 if (friends.isNotEmpty()) { SloopyButton("Send to friend", onClick = { sendTo = true }); Spacer(Modifier.width(8.dp)) }
+                val toadOn by vm.toadAllowed.collectAsState()
+                if (toadOn) { SloopyButton("Toad", onClick = { onClose(); go("toad") }); Spacer(Modifier.width(8.dp)) }
                 SloopyButton("Guide", onClick = { onClose(); go("guide") })
                 Spacer(Modifier.width(8.dp))
                 SloopyButton("Menu", onClick = { onClose(); vm.guideOpensAtSections = true; go("guide") })

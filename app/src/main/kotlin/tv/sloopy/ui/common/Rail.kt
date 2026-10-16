@@ -113,6 +113,11 @@ val STRIP_ITEMS = listOf(
 )
 val STRIP_W = 56.dp
 
+/** Whether this stick may use the Toad; set by the view model after asking the code server. */
+object ToadFlag { val on = mutableStateOf(false) }
+/** The strip's rows: the fixed seven, plus the Toad above Settings when this stick is allowed. */
+fun stripItems(): List<Pair<String, String>> = if (ToadFlag.on.value) STRIP_ITEMS.toMutableList().apply { add(size - 1, "toad" to "Toad") } else STRIP_ITEMS
+
 /**
  * The thin column of icons at the far left of every screen, TiviMate-style. Landing on it opens
  * a label panel over whatever sits to its right; leaving closes it. [requester] attaches to the
@@ -128,13 +133,14 @@ fun NavStrip(
 ) {
     var focusedRoute by remember { mutableStateOf<String?>(null) }
     var expanded by remember { mutableStateOf(false) }
+    val items = stripItems()
     Box(
         Modifier.width(STRIP_W).fillMaxHeight().zIndex(2f)
             .focusProperties { this.canFocus = canFocus }
             .onFocusChanged { expanded = it.hasFocus; onFocusChange(it.hasFocus) },
     ) {
         Column(Modifier.padding(top = RAIL_HEADER_H + 1.dp)) {
-            STRIP_ITEMS.forEachIndexed { i, (route, label) ->
+            items.forEachIndexed { i, (route, label) ->
                 var fc by remember { mutableStateOf(false) }
                 Surface(
                     onClick = { go(route) },
@@ -147,7 +153,7 @@ fun NavStrip(
                         .focusProperties {
                             left = FocusRequester.Cancel
                             if (i == 0) up = FocusRequester.Cancel
-                            if (i == STRIP_ITEMS.lastIndex) down = FocusRequester.Cancel
+                            if (i == items.lastIndex) down = FocusRequester.Cancel
                         }
                         .onFocusChanged { fc = it.isFocused; if (it.isFocused) focusedRoute = route },
                 ) {
@@ -163,7 +169,7 @@ fun NavStrip(
                     .drawBehind { drawRect(Sloopy.hair, Offset(size.width - 1.dp.toPx(), 0f), Size(1.dp.toPx(), size.height)) }
                     .padding(top = RAIL_HEADER_H + 1.dp),
             ) {
-                STRIP_ITEMS.forEach { (route, label) ->
+                items.forEach { (route, label) ->
                     Box(Modifier.height(RAIL_ROW_H).fillMaxWidth().padding(start = 18.dp), contentAlignment = Alignment.CenterStart) {
                         Text(label.uppercase(), style = Sloopy.titleRow.copy(color = when { route == focusedRoute -> Color.White; route == current -> Sloopy.text; else -> Sloopy.muted }))
                     }
@@ -214,6 +220,13 @@ fun NavIcon(route: String, color: Color, size: androidx.compose.ui.unit.Dp = 22.
                 drawRect(color, Offset(sw / 2, h * 0.56f), Size(w - sw, h * 0.26f), style = st)
                 drawRect(color, Offset(sw / 2, h * 0.18f), Size(w * 0.62f, h * 0.26f))
                 drawRect(color, Offset(sw / 2, h * 0.56f), Size(w * 0.38f, h * 0.26f))
+            }
+            "toad" -> {
+                // A toad's footprint, like the ones in the Stone Toad wordmark: a pad and three toes.
+                drawOval(color, Offset(w * 0.22f, h * 0.46f), Size(w * 0.56f, h * 0.5f), style = st)
+                drawOval(color, Offset(w * 0.04f, h * 0.2f), Size(w * 0.22f, h * 0.3f), style = st)
+                drawOval(color, Offset(w * 0.39f, h * 0.02f), Size(w * 0.22f, h * 0.3f), style = st)
+                drawOval(color, Offset(w * 0.74f, h * 0.2f), Size(w * 0.22f, h * 0.3f), style = st)
             }
             "search" -> {
                 drawCircle(color, radius = w * 0.3f, center = Offset(w * 0.42f, h * 0.42f), style = st)

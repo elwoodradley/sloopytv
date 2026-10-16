@@ -453,7 +453,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 val list = visibleChannels.value.ifEmpty { collapse(channels.value) }
                 buildString { append("{\"channels\":["); list.forEachIndexed { i, c -> if (i > 0) append(','); append("{\"id\":${c.id},\"number\":${c.number},\"name\":${kotlinx.serialization.json.JsonPrimitive(tv.sloopy.core.model.Names.clean(c.name))}}") }; append("]}") }
             },
-            stateJson = { val c = currentChannel.value; "{\"id\":${c?.id ?: 0},\"now\":${kotlinx.serialization.json.JsonPrimitive(c?.let { tv.sloopy.core.model.Names.clean(it.name) } ?: "")}}" },
+            stateJson = { val c = currentChannel.value; "{\"id\":${c?.id ?: 0},\"toad\":${_toadAllowed.value},\"now\":${kotlinx.serialization.json.JsonPrimitive(c?.let { tv.sloopy.core.model.Names.clean(it.name) } ?: "")}}" },
         ) ?: return
         remote = s; _remoteAddress.value = s.address
         viewModelScope.launch {
@@ -461,6 +461,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 when (ev) {
                     is tv.sloopy.pair.RemoteEvent.Type -> remoteText.tryEmit(ev.text to ev.submit)
                     is tv.sloopy.pair.RemoteEvent.Tune -> channels.value.firstOrNull { it.id == ev.channelId }?.let { tune(it); goHome() }
+                    is tv.sloopy.pair.RemoteEvent.Toad -> { toadAsk(ev.text); toadEvents.tryEmit("toad") }
                 }
             }
         }
@@ -653,6 +654,170 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         posterCache[k] = url ?: ""
         return url
     }
+
+    // ---- The Toad --------------------------------------------------------------------------------
+    // One sentence from the viewer becomes a plan from a fixed menu of actions; the TV resolves the
+    // names itself, shows the plan, and runs it only after OK. The Claude key lives on the code
+    // server; this stick is known there by its friend code.
+    data class ToadAction(val type: String, val names: List<String>, val title: String, val query: String)
+    data class ToadPlan(val asked: String, val say: String, val lines: List<String>, val runnable: Boolean)
+    private class ToadStep(val line: String, val run: suspend () -> Unit)
+    private val _toadAllowed = MutableStateFlow(false)
+    val toadAllowed: StateFlow<Boolean> = _toadAllowed
+    private val _toadBusy = MutableStateFlow(false)
+    val toadBusy: StateFlow<Boolean> = _toadBusy
+    private val _toadPlan = MutableStateFlow<ToadPlan?>(null)
+    val toadPlan: StateFlow<ToadPlan?> = _toadPlan
+    private val _toadError = MutableStateFlow<String?>(null)
+    val toadError: StateFlow<String?> = _toadError
+    /** A route to open because the phone or a plan asked for it ("toad", "search"). */
+    val toadEvents = MutableSharedFlow<String>(extraBufferCapacity = 2)
+    private var toadSteps: List<ToadStep> = emptyList()
+    val groupTags: StateFlow<Map<String, String>> = perProvider({ prefs.groupTags(it) }, emptyMap())
+
+    private suspend fun toadPost(path: String, body: kotlinx.serialization.json.JsonObject): kotlinx.serialization.json.JsonObject? {
+        val server = codeServer.value; if (!server.startsWith("http")) return null
+        return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                val req = okhttp3.Request.Builder().url(server.trimEnd('/') + path)
+                    .post(okhttp3.RequestBody.create("application/json".toMediaTypeOrNull(), body.toString())).build()
+                tv.sloopy.data.AndroidHttp.client.newCall(req).execute().use { r ->
+                    kotlinx.serialization.json.Json.parseToJsonElement(r.body?.string() ?: "") as? kotlinx.serialization.json.JsonObject
+                }
+            }.getOrNull()
+        }
+    }
+    private fun kotlinx.serialization.json.JsonObject.str(k: String) = (this[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+    private fun kotlinx.serialization.json.JsonObject.bool(k: String) = (this[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull == "true"
+
+    /** Asks the code server whether this stick may use the Toad; shows the strip icon when it may. */
+    fun refreshToad() = viewModelScope.launch {
+        ensureFriendCode()
+        val code = kotlinx.coroutines.withTimeoutOrNull(5_000) { friendCode.first { it != null } } ?: return@launch
+        val server = codeServer.value; if (!server.startsWith("http")) return@launch
+        val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
+            runCatching {
+                tv.sloopy.data.AndroidHttp.client.newCall(okhttp3.Request.Builder().url(server.trimEnd('/') + "/toad/status?id=" + code).get().build()).execute().use { res ->
+                    kotlinx.serialization.json.Json.parseToJsonElement(res.body?.string() ?: "") as? kotlinx.serialization.json.JsonObject
+                }
+            }.getOrNull()
+        } ?: return@launch
+        val on = r.bool("enabled") && r.bool("allowed")
+        _toadAllowed.value = on
+        tv.sloopy.ui.common.ToadFlag.on.value = on
+        if (on) refreshGroupTags()
+    }
+
+    /** One Claude call tags every live group (sports, kids, adult, foreign, ...). Cached per name set. */
+    fun refreshGroupTags() = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val cats = kotlinx.coroutines.withTimeoutOrNull(60_000) { allLiveCategories.first { it.isNotEmpty() } } ?: return@launch
+        val names = cats.map { tv.sloopy.core.model.Names.clean(it.name) }.distinct()
+        val digest = names.sorted().joinToString("\n").hashCode().toString()
+        if (prefs.groupTagsDigest(p.id).first() == digest) return@launch
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("id", kotlinx.serialization.json.JsonPrimitive(friendCode.value ?: ""))
+            put("groups", kotlinx.serialization.json.JsonArray(names.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+        }
+        val r = toadPost("/toad/tags", body) ?: return@launch
+        if (!r.bool("ok")) return@launch
+        val got = r["tags"] as? kotlinx.serialization.json.JsonObject ?: return@launch
+        val byId = cats.associate { c -> c.id to (got.str(tv.sloopy.core.model.Names.clean(c.name)) ?: "general") }
+        prefs.setGroupTags(p.id, byId, digest)
+    }
+    fun groupsTagged(tag: String): List<CategoryEntity> = allLiveCategories.value.filter { groupTags.value[it.id] == tag }
+    fun hideTagged(tag: String, hide: Boolean) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val cur = hiddenGroups.value.toMutableSet()
+        val ids = groupsTagged(tag).map { it.id }
+        if (hide) cur.addAll(ids) else cur.removeAll(ids.toSet())
+        prefs.setHiddenGroups(p.id, cur)
+        if (hide && _group.value in ids) selectGroup(Groups.ALL)
+    }
+
+    private fun toadFindChannel(name: String): ChannelEntity? {
+        val hiddenG = hiddenGroups.value; val hiddenCh = hiddenChannels.value
+        val pool = channels.value.filter { it.categoryId !in hiddenG && it.id !in hiddenCh }
+        val want = name.trim().lowercase()
+        fun clean(c: ChannelEntity) = tv.sloopy.core.model.Names.clean(c.name).lowercase()
+        val exact = pool.filter { clean(it) == want }
+        val tagged = if (exact.isNotEmpty()) exact else pool.filter { tv.sloopy.core.model.Names.sameTitle(clean(it), want) }
+        val loose = if (tagged.isNotEmpty()) tagged else pool.filter { c -> val n = clean(c); n.contains(want) && (n.indexOf(want) == 0 || !n[n.indexOf(want) - 1].isLetterOrDigit()) }
+        return collapse(loose).minByOrNull { clean(it).length }
+    }
+    private fun toadFindGroup(name: String): CategoryEntity? {
+        val want = name.trim().lowercase()
+        val cats = allLiveCategories.value
+        return cats.firstOrNull { tv.sloopy.core.model.Names.clean(it.name).equals(want, true) }
+            ?: cats.firstOrNull { tv.sloopy.core.model.Names.clean(it.name).lowercase().contains(want) }
+    }
+
+    fun toadAsk(text: String) = viewModelScope.launch {
+        val t = text.trim(); if (t.isEmpty()) return@launch
+        _toadBusy.value = true; _toadError.value = null; _toadPlan.value = null; toadSteps = emptyList()
+        prefs.pushToad(t)
+        val favs = favouriteIds.value
+        val favNames = channels.value.filter { it.id in favs }.map { tv.sloopy.core.model.Names.clean(it.name) }.distinct().take(60)
+        val groups = allLiveCategories.value.map { tv.sloopy.core.model.Names.clean(it.name) }.distinct()
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("id", kotlinx.serialization.json.JsonPrimitive(friendCode.value ?: ""))
+            put("text", kotlinx.serialization.json.JsonPrimitive(t))
+            put("groups", kotlinx.serialization.json.JsonArray(groups.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+            put("favourites", kotlinx.serialization.json.JsonArray(favNames.map { kotlinx.serialization.json.JsonPrimitive(it) }))
+            put("current", kotlinx.serialization.json.JsonPrimitive(currentChannel.value?.let { tv.sloopy.core.model.Names.clean(it.name) } ?: ""))
+            put("now", kotlinx.serialization.json.JsonPrimitive(tv.sloopy.ui.common.TimeFmt.dateTime(System.currentTimeMillis())))
+        }
+        val r = toadPost("/toad/ask", body)
+        _toadBusy.value = false
+        if (r == null) { _toadError.value = "Could not reach the Toad. Check the connection."; return@launch }
+        if (!r.bool("ok")) { _toadError.value = r.str("error") ?: "The Toad mumbled. Try again."; return@launch }
+        val actions = (r["actions"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { e ->
+            val o = e as? kotlinx.serialization.json.JsonObject ?: return@mapNotNull null
+            ToadAction(o.str("type") ?: "nothing", (o["names"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull } ?: emptyList(), o.str("title") ?: "", o.str("query") ?: "")
+        } ?: emptyList()
+        val steps = ArrayList<ToadStep>(); val lines = ArrayList<String>()
+        val now = System.currentTimeMillis() / 1000
+        val p = active.value
+        fun channelsFor(a: ToadAction, verb: String): List<ChannelEntity> {
+            val found = ArrayList<ChannelEntity>()
+            for (n in a.names) { val c = toadFindChannel(n); if (c != null) found.add(c) else lines.add("$n: not on this service") }
+            if (found.isNotEmpty()) lines.add(verb + " " + found.joinToString(", ") { tv.sloopy.core.model.Names.clean(it.name) })
+            return found
+        }
+        for (a in actions) when (a.type) {
+            "favourite_add" -> { val cs = channelsFor(a, "Add to Favourites:").filter { it.id !in favs }; if (cs.isNotEmpty()) steps.add(ToadStep("", { cs.forEach { toggleFavourite(it) } })) }
+            "favourite_remove" -> { val cs = channelsFor(a, "Remove from Favourites:").filter { it.id in favs }; if (cs.isNotEmpty()) steps.add(ToadStep("", { cs.forEach { toggleFavourite(it) } })) }
+            "hide_channel", "show_channel" -> { val hide = a.type == "hide_channel"; val cs = channelsFor(a, if (hide) "Hide:" else "Show:"); if (cs.isNotEmpty()) steps.add(ToadStep("", { cs.forEach { setChannelHidden(it.id, hide) } })) }
+            "hide_group", "show_group" -> {
+                val hide = a.type == "hide_group"
+                val gs = a.names.mapNotNull { n -> toadFindGroup(n).also { if (it == null) lines.add("$n: no such group") } }.distinctBy { it.id }
+                if (gs.isNotEmpty()) { lines.add((if (hide) "Hide " else "Show ") + gs.size + (if (gs.size == 1) " group: " else " groups: ") + gs.take(8).joinToString(", ") { tv.sloopy.core.model.Names.clean(it.name) } + (if (gs.size > 8) "…" else "")); steps.add(ToadStep("", { gs.forEach { setHidden(it.id, hide) } })) }
+            }
+            "tune" -> { val c = a.names.firstOrNull()?.let { toadFindChannel(it) }; if (c != null) { lines.add("Switch to " + tv.sloopy.core.model.Names.clean(c.name)); steps.add(ToadStep("", { tune(c); goHome() })) } else lines.add((a.names.firstOrNull() ?: "That channel") + ": not on this service") }
+            "remind", "record" -> {
+                val title = a.title.ifBlank { a.names.firstOrNull() ?: "" }
+                val pr = if (p != null && title.isNotBlank()) runCatching { catalog.searchProgrammes(p.id, title, now) }.getOrDefault(emptyList())
+                    .filter { it.stopEpoch > now }.sortedBy { it.startEpoch }.firstOrNull { pr -> channels.value.any { it.epgId == pr.epgId && it.categoryId !in hiddenGroups.value } } else null
+                val c = pr?.let { pr2 -> channels.value.firstOrNull { it.epgId == pr2.epgId && it.categoryId !in hiddenGroups.value } }
+                when {
+                    pr != null && c != null && a.type == "remind" -> { lines.add("Remind: " + pr.title + " · " + tv.sloopy.core.model.Names.clean(c.name) + " · " + tv.sloopy.ui.common.TimeFmt.dateTime(pr.startEpoch * 1000)); steps.add(ToadStep("", { addReminder(c, pr.title, pr.startEpoch, pr.stopEpoch) })) }
+                    pr != null && c != null -> { lines.add("Record: " + pr.title + " · " + tv.sloopy.core.model.Names.clean(c.name) + " · " + tv.sloopy.ui.common.TimeFmt.dateTime(pr.startEpoch * 1000)); steps.add(ToadStep("", { scheduleRecording(c, pr.title, pr.startEpoch, pr.stopEpoch) })) }
+                    a.type == "record" && title.isBlank() && currentChannel.value != null -> { val cc = currentChannel.value!!; lines.add("Record what is on " + tv.sloopy.core.model.Names.clean(cc.name) + " now"); steps.add(ToadStep("", { recordNow(cc) })) }
+                    else -> lines.add((title.ifBlank { "That" }) + ": nothing in the guide yet")
+                }
+            }
+            "search" -> { val q = a.query.ifBlank { t }; lines.add("Search for \"" + q + "\""); steps.add(ToadStep("", { lastSearch = q; toadEvents.tryEmit("search") })) }
+            else -> {}
+        }
+        toadSteps = steps
+        _toadPlan.value = ToadPlan(t, r.str("say") ?: "", lines, steps.isNotEmpty())
+    }
+    fun toadRun() = viewModelScope.launch {
+        val steps = toadSteps; toadSteps = emptyList(); _toadPlan.value = null
+        for (st in steps) runCatching { st.run() }
+        if (steps.isNotEmpty() && steps.none { it.line == "nav" }) toast("Done.")
+    }
+    fun toadDismiss() { toadSteps = emptyList(); _toadPlan.value = null; _toadError.value = null }
 
     // ---- Friends ---------------------------------------------------------------------------------
     data class Presence(val code: String, val name: String, val channel: String?, val at: Long)

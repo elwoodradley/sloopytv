@@ -209,6 +209,18 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                             Section("Hidden groups")
                             hiddenCats.forEach { c -> SettingRow(tv.sloopy.core.model.Names.clean(c.name), "SHOW") { vm.setHidden(c.id, false) } }
                         }
+                        val tags by vm.groupTags.collectAsState()
+                        if (tags.isNotEmpty()) {
+                            Section("Groups by kind")
+                            Text("The Toad read this service's group names and sorted them. One switch hides a whole kind; Hidden groups above shows them one by one.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.width(760.dp).padding(bottom = 6.dp))
+                            listOf("adult" to "Adult groups", "foreign" to "Foreign-language groups", "sports" to "Sports groups", "kids" to "Kids groups", "music" to "Music groups").forEach { (tag, label) ->
+                                val gs = vm.groupsTagged(tag)
+                                if (gs.isNotEmpty()) {
+                                    val allHidden = gs.all { it.id in hidden }
+                                    SettingRow("$label · ${gs.size}", if (allHidden) "HIDDEN" else "SHOWN") { vm.hideTagged(tag, !allHidden) }
+                                }
+                            }
+                        }
                         val hiddenCh by vm.hiddenChannels.collectAsState()
                         val allCh by vm.channels.collectAsState()
                         val hiddenChans = allCh.filter { it.id in hiddenCh }
@@ -379,6 +391,8 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                                 Section("Editing ${pr.name}")
                                 Box(Modifier.width(420.dp)) { Field("Name", name, { name = it }) }
                                 Label("Groups this profile may watch", modifier = Modifier.padding(top = 16.dp, bottom = 6.dp))
+                                val kidsGroups = vm.groupsTagged("kids")
+                                if (kidsGroups.isNotEmpty()) Row(Modifier.padding(bottom = 8.dp)) { SloopyButton("Tick the kids groups (${kidsGroups.size})", onClick = { groups = groups + kidsGroups.map { it.id } }) }
                                 allCats.forEach { c -> SettingRow(tv.sloopy.core.model.Names.clean(c.name), if (c.id in groups) "ALLOWED" else "OFF") { groups = if (c.id in groups) groups - c.id else groups + c.id } }
                                 Row(Modifier.padding(top = 14.dp)) {
                                     SloopyButton("Save profile", primary = true, enabled = name.isNotBlank() && groups.isNotEmpty(), onClick = { vm.saveProfile(pr.copy(name = name.trim(), groups = groups.toList())); editing = null })

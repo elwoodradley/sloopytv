@@ -142,6 +142,17 @@ class Prefs(private val context: Context) {
         .filterKeys { it.name.startsWith("channel_sort_") }.map { (k, v) -> k.name.removePrefix("channel_sort_") to v.toString() }.toMap()
     suspend fun restoreChannelSorts(m: Map<String, String>) = ds.edit { p -> m.forEach { (k, v) -> p[stringPreferencesKey("channel_sort_$k")] = v } }
 
+    // The Toad: the last few things asked, and the group tags it gave this provider.
+    val toadRecent: Flow<List<String>> = ds.data.map { p -> p[stringPreferencesKey("toad_recent")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
+    suspend fun pushToad(q: String) = ds.edit { p -> val cur = p[stringPreferencesKey("toad_recent")]?.split('\u0001')?.filter { it.isNotBlank() && !it.equals(q, true) } ?: emptyList(); p[stringPreferencesKey("toad_recent")] = (listOf(q) + cur).take(8).joinToString("\u0001") }
+    fun groupTags(providerId: String): Flow<Map<String, String>> = ds.data.map { p ->
+        p[stringPreferencesKey("toad_tags_$providerId")]?.split('\u0001')?.mapNotNull { e -> val i = e.indexOf('\u0002'); if (i <= 0) null else e.substring(0, i) to e.substring(i + 1) }?.toMap() ?: emptyMap()
+    }
+    fun groupTagsDigest(providerId: String): Flow<String?> = ds.data.map { it[stringPreferencesKey("toad_tags_digest_$providerId")] }
+    suspend fun setGroupTags(providerId: String, tags: Map<String, String>, digest: String) = ds.edit { p ->
+        p[stringPreferencesKey("toad_tags_$providerId")] = tags.entries.joinToString("\u0001") { it.key + "\u0002" + it.value }
+        p[stringPreferencesKey("toad_tags_digest_$providerId")] = digest
+    }
     val searchHistory: Flow<List<String>> = ds.data.map { p -> p[stringPreferencesKey("search_history")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
     suspend fun pushSearch(q: String) = ds.edit { p ->
         val cur = p[stringPreferencesKey("search_history")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList()

@@ -52,7 +52,7 @@ fun SloopyRoot(vm: SloopyViewModel, onQuit: () -> Unit) {
     val due by vm.dueReminder.collectAsState()
     val announcement by vm.announcement.collectAsState()
     val incoming by vm.incoming.collectAsState()
-    LaunchedEffect(Unit) { vm.ensureRemote() }
+    LaunchedEffect(Unit) { vm.ensureRemote(); vm.refreshToad() }
     LaunchedEffect(announcement, due, incoming) { vm.modalUp = announcement != null || due != null || incoming != null }
     val operator by vm.operatorName.collectAsState()
     // The maker's mark rides the power-on and leaves once the picture is up.
@@ -120,6 +120,7 @@ private fun SloopyNav(vm: SloopyViewModel, startAtProviders: Boolean, onQuit: ()
     LaunchedEffect(Unit) {
         vm.homeEvents.collect { nav.navigate("live") { popUpTo("live") { inclusive = true }; launchSingleTop = true } }
     }
+    LaunchedEffect(Unit) { vm.toadEvents.collect { r -> nav.navigate(r) { launchSingleTop = true } } }
     // Hard cuts between screens, no cross-fade: the design language allows motion only for the tube.
     NavHost(
         nav, startDestination = if (startAtProviders) "provider/new" else "live",
@@ -132,6 +133,7 @@ private fun SloopyNav(vm: SloopyViewModel, startAtProviders: Boolean, onQuit: ()
         }
         composable("guide") { GuideScreen(vm, go = go, onQuit = onQuit) }
         composable("tonight") { tv.sloopy.ui.tonight.TonightScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onOpen = { kind, id -> nav.navigate("details/$kind/$id") }) }
+        composable("toad") { tv.sloopy.ui.toad.ToadScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }) }
         composable("scores") { tv.sloopy.ui.scores.ScoresScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }) }
         composable("recordings") { tv.sloopy.ui.record.RecordingsScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onPlay = { nav.navigate("vodplayer") }) }
         composable("history") { HistoryScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onPlay = { nav.navigate("vodplayer") }) }

@@ -87,6 +87,26 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
   Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
   viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
+- 0.5.2 (2026-10-15): the Toad, the app's Claude helper. The Anthropic key is the Worker secret
+  `ANTHROPIC_KEY` (local copy in `keystore/anthropic-key.txt`, never in the APK). Worker routes:
+  `GET /toad/status?id=<friend code>` (enabled + allowed + requests left today), `POST /toad/ask`
+  (one sentence + the group names and favourites → `{say, actions[]}` from a fixed menu:
+  favourite_add/remove, hide/show_group, hide/show_channel, tune, remind, record, search,
+  nothing), `POST /toad/tags` (every live group name → sports/news/kids/movies/series/music/
+  adult/foreign/general, cached in KV by the sorted name set for 30 days). Admin page "The Toad":
+  on/off, allowed friend codes (empty = every stick), per-stick daily cap (50), model (default
+  Haiku 5.5; spend estimate per model in `TOAD_MODELS`), this month's calls and dollars
+  (`toad:spend:YYYY-MM`). The TV: `vm.refreshToad()` at root sets `ToadFlag.on`, which adds the
+  footprint icon above Settings in `NavStrip` (`stripItems()`); `ui/toad/ToadScreen` (Speak,
+  typed field whose keyboard Done asks, phone QR, recent asks, the plan with Do it / Not now);
+  `vm.toadAsk` resolves names locally (`toadFindChannel`: exact → `Names.sameTitle` → word
+  match, collapsed through Dupes; groups by cleaned name) and builds steps that run only on
+  `toadRun`. Phone remote page shows a "The Toad" box when `/state` says `toad:true` → `POST
+  /toad` → `RemoteEvent.Toad` → the TV opens the Toad page with the plan (`vm.toadEvents`).
+  Group tags land in Prefs per provider (`groupTags`, keyed by category id) and drive Settings ›
+  Listings › "Groups by kind" (hide a whole kind) and "Tick the kids groups" in the profile
+  editor. Dead-channel reports stay off. Testing: the emulator's friend code must be on the
+  allow-list for the icon to appear; take it off again afterwards.
 - 0.5.1 (2026-10-15), buddy's notes. Tonight adds "Popular": the code server's `/trending`
   (TMDB trending TV + films for the day, cached in KV six hours, no key on the TV) and
   `buildTonight` keeps a title only when the service carries it (guide programme tonight via
