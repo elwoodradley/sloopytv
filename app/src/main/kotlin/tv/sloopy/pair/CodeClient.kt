@@ -12,10 +12,9 @@ import okhttp3.RequestBody.Companion.toRequestBody
 import tv.sloopy.data.AndroidHttp
 import java.io.IOException
 import tv.sloopy.core.util.B64
+import tv.sloopy.core.crypto.Pbkdf2
 import javax.crypto.Cipher
-import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
@@ -60,8 +59,7 @@ object CodeClient {
 
     /** PBKDF2-SHA256 (100k rounds) from the code and salt, then AES-256-GCM. Mirrors the Worker exactly. */
     fun decrypt(code: String, salt: ByteArray, iv: ByteArray, ct: ByteArray): ByteArray? = try {
-        val keyBytes = SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256")
-            .generateSecret(PBEKeySpec(code.toCharArray(), salt, 100_000, 256)).encoded
+        val keyBytes = Pbkdf2.aesKey(code, salt)
         Cipher.getInstance("AES/GCM/NoPadding").run {
             init(Cipher.DECRYPT_MODE, SecretKeySpec(keyBytes, "AES"), GCMParameterSpec(128, iv))
             doFinal(ct)

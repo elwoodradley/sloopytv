@@ -4,10 +4,9 @@ import java.io.IOException
 import java.security.MessageDigest
 import java.security.SecureRandom
 import tv.sloopy.core.util.B64
+import tv.sloopy.core.crypto.Pbkdf2
 import javax.crypto.Cipher
-import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -42,7 +41,7 @@ object SyncClient {
         .joinToString("") { "%02x".format(it) }.take(24)
 
     private fun key(code: String, salt: ByteArray): SecretKeySpec = SecretKeySpec(
-        SecretKeyFactory.getInstance("PBKDF2WithHmacSHA256").generateSecret(PBEKeySpec(normalise(code).toCharArray(), salt, 100_000, 256)).encoded, "AES",
+        Pbkdf2.aesKey(normalise(code), salt), "AES",
     )
 
     suspend fun upload(server: String, code: String, plain: ByteArray): Long = withContext(Dispatchers.IO) {

@@ -153,6 +153,14 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.11 (2026-10-16): login and transfer codes on Fire OS 6. Both derived their AES key through
+  `SecretKeyFactory("PBKDF2WithHmacSHA256")`, which Android only ships from API 26, so on the
+  friend's Fire OS 6.7.1.1 stick (Android 7.1) `decrypt` returned null, "That code didn't unlock
+  the login", and the server had already burned the code. `core/crypto/Pbkdf2` is a hand-written
+  PBKDF2-HMAC-SHA256 (RFC 7914 vectors + JDK-equality test) and `CodeClient`/`SyncClient` use
+  `Pbkdf2.aesKey`. Rule: nothing in the crypto path may depend on a provider algorithm newer
+  than API 24; HmacSHA256, SHA-256/512 and AES/GCM are safe. Open: `/redeem` marks a code used
+  before the TV has unlocked it, so a failed unlock still costs a code.
 - 0.6.10 (2026-10-16): the same friend's stick opened the app but showed Fire TV's placeholder
   tile. The banner was only on `<application>`; older Fire OS launchers read `android:banner`
   from the launcher `<activity>`, so it is set on both now, with banner.png at every density
