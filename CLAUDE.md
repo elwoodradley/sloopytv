@@ -94,7 +94,10 @@ a grabbed group.
   `windowBlocking` (`INDEXED BY` that index: equality on three columns, a short range on
   stopEpoch). The sweep runs `PRAGMA wal_checkpoint(TRUNCATE)` when it goes idle. The About
   line now also shows the programme count and the WAL size. If a read is still slow, suspect
-  the log file size or a guide import in progress.
+  the log file size or a guide import in progress. Measured on the user's Shield, 2026-10-15:
+  before, 100 rows in 28,585 ms; after, 100 rows in 207 ms with 953,893 programmes in the table
+  and a 0 MB log. The index build itself froze the first launch for about a minute (a migration
+  on a ~1M-row table); any future schema change needs a "preparing the guide" screen in front.
 - 0.6.0 (2026-10-15): the grid is drawn, not composed. `GuideRow` keeps the channel column as
   composables and paints the cells on one `Canvas` per row (`TextMeasurer`, layouts cached per
   title+width); the whole grid is one focusable node (`gridFocus`) and the cursor is state
