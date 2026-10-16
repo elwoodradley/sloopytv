@@ -114,7 +114,8 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit) 
     }
     // The day a page needs: the live page is today's feed filtered to games in play.
     fun dayOf(p: String): Int = if (p.startsWith("d")) p.drop(1).toIntOrNull() ?: 0 else 0
-    LaunchedEffect(page) { if (page == "live" || page.startsWith("d") || page == "teams") vm.setScoresDay(dayOf(page)) }
+    // Resting on a day for a moment fetches it; flicking down the rail does not fetch every day on the way.
+    LaunchedEffect(page) { if (page == "live" || page.startsWith("d") || page == "teams") { delay(250); vm.setScoresDay(dayOf(page)) } }
     LaunchedEffect(Unit) { vm.refreshScores(); delay(300); runCatching { railFocus.requestFocus() }; while (true) { delay(45_000); if (vm.scoresDay.value == 0) vm.refreshScores() } }
 
     val shown: List<SloopyViewModel.GameRow> = remember(rows, page, followed) {
