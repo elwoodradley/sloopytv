@@ -83,6 +83,15 @@ interface ProgrammeDao {
     @Query("SELECT * FROM programmes WHERE providerId = :p AND gen = :gen AND epgId IN (:ids) AND stopEpoch > :from AND startEpoch < :to ORDER BY startEpoch")
     fun windowManyBlocking(p: String, gen: Int, ids: List<String>, from: Long, to: Long): List<ProgrammeEntity>
 
+    /**
+     * One channel's rows that have not ended by [from] and start before [to], through the
+     * (providerId, gen, epgId, stopEpoch) index: a range scan of a few dozen rows. The guide
+     * store reads this way, one channel at a time, because the IN-list form let SQLite pick a
+     * plan that walked far more than it returned.
+     */
+    @Query("SELECT * FROM programmes INDEXED BY index_programmes_providerId_gen_epgId_stopEpoch WHERE providerId = :p AND gen = :gen AND epgId = :epgId AND stopEpoch > :from AND startEpoch < :to ORDER BY startEpoch")
+    fun windowBlocking(p: String, gen: Int, epgId: String, from: Long, to: Long): List<ProgrammeEntity>
+
     @Query("SELECT * FROM programmes WHERE providerId = :p AND gen = :gen AND epgId IN (:ids) AND stopEpoch > :now ORDER BY startEpoch")
     suspend fun fromNow(p: String, gen: Int, ids: List<String>, now: Long): List<ProgrammeEntity>
 

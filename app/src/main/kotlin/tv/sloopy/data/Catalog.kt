@@ -272,8 +272,19 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
     suspend fun programmesManyDirect(p: String, epgIds: List<String>, from: Long, to: Long): List<ProgrammeEntity> {
         if (epgIds.isEmpty()) return emptyList()
         val gen = epgGen(p)
-        return withContext(Dispatchers.IO) { db.programmes().windowManyBlocking(p, gen, epgIds, from, to) }
+        return withContext(Dispatchers.IO) {
+            val dao = db.programmes()
+            val out = ArrayList<ProgrammeEntity>(epgIds.size * 24)
+            for (id in epgIds) out.addAll(dao.windowBlocking(p, gen, id, from, to))
+            out
+        }
     }
+
+    /** Folds the write-ahead log back into the file. Called when the sweep goes quiet, so a busy stretch of writes cannot leave readers wading through a huge log. */
+    suspend fun checkpoint() = withContext(Dispatchers.IO) {
+        runCatching { db.openHelper.writableDatabase.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() } }
+    }
+    fun walBytes(context: android.content.Context): Long = runCatching { java.io.File(context.getDatabasePath("sloopy.db").path + "-wal").length() }.getOrDefault(0L)
 
     suspend fun programmesMany(p: String, epgIds: List<String>, from: Long, to: Long): List<ProgrammeEntity> =
         if (epgIds.isEmpty()) emptyList() else db.programmes().windowMany(p, epgGen(p), epgIds, from, to)

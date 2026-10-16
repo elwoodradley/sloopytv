@@ -10,7 +10,7 @@ import androidx.room.RoomDatabase
         ChannelEntity::class, CategoryEntity::class, ProgrammeEntity::class, EpgChannelEntity::class,
         FavouriteEntity::class, FavouriteItemEntity::class, ProgressEntity::class, VodEntity::class, SeriesEntity::class, MetaEntity::class, RecordingEntity::class, ReminderEntity::class,
     ],
-    version = 4,
+    version = 5,
     exportSchema = true,
 )
 abstract class SloopyDb : RoomDatabase() {
@@ -41,6 +41,13 @@ abstract class SloopyDb : RoomDatabase() {
             }
         }
 
+        // The guide asks "this channel, rows not yet ended": an index in that order answers it with
+        // a short range scan instead of a walk through the channel's whole history.
+        private val MIGRATION_4_5 = object : androidx.room.migration.Migration(4, 5) {
+            override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
+                db.execSQL("CREATE INDEX IF NOT EXISTS `index_programmes_providerId_gen_epgId_stopEpoch` ON `programmes` (`providerId`, `gen`, `epgId`, `stopEpoch`)")
+            }
+        }
         private val MIGRATION_3_4 = object : androidx.room.migration.Migration(3, 4) {
             override fun migrate(db: androidx.sqlite.db.SupportSQLiteDatabase) {
                 db.execSQL("CREATE TABLE IF NOT EXISTS `reminders` (`id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL, `providerId` TEXT NOT NULL, `channelId` INTEGER NOT NULL, `channelName` TEXT NOT NULL, `title` TEXT NOT NULL, `startEpoch` INTEGER NOT NULL, `stopEpoch` INTEGER NOT NULL)")
@@ -50,7 +57,7 @@ abstract class SloopyDb : RoomDatabase() {
 
         fun open(context: Context): SloopyDb =
             Room.databaseBuilder(context, SloopyDb::class.java, "sloopy.db")
-                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                 .fallbackToDestructiveMigration(dropAllTables = true)   // cache only; credentials live in the vault
                 .setJournalMode(RoomDatabase.JournalMode.WRITE_AHEAD_LOGGING)   // readers never wait on the sweep's writes
                 .setQueryExecutor(java.util.concurrent.Executors.newFixedThreadPool(8))

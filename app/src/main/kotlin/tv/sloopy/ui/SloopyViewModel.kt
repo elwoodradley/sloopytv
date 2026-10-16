@@ -1330,7 +1330,12 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             }
         } finally {
             guideLoading = false
-            if (reads > 0) _guideStats.value = "Last guide read: $rowsRead rows in ${System.currentTimeMillis() - t0} ms ($reads quer${if (reads == 1) "y" else "ies"})"
+            if (reads > 0) {
+                val ms = System.currentTimeMillis() - t0
+                val total = runCatching { catalog.programmeCount(p.id) }.getOrDefault(-1)
+                val wal = catalog.walBytes(getApplication()) / 1_000_000
+                _guideStats.value = "Last guide read: $rowsRead rows in $ms ms · ${"%,d".format(total)} programmes in the table · log file $wal MB"
+            }
         }
     }
     // Channels the sweep filled are folded into the store a few at a time, not one rebuild each.
@@ -1398,7 +1403,10 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 }.distinctBy { it.id }.filter(fresh)
                 val rest = if (wide) channels.value.filter(fresh).filter { c -> urgent.none { it.id == c.id } } else emptyList()
                 val remaining = urgent.size + rest.size
-                if (remaining == 0) { _sweepProgress.value = null; done = 0; total = 0; val k = sweepKick.value; kotlinx.coroutines.withTimeoutOrNull(600_000) { sweepKick.first { it != k } }; continue }
+                if (remaining == 0) {
+                    if (done > 0) catalog.checkpoint()
+                    _sweepProgress.value = null; done = 0; total = 0; val k = sweepKick.value; kotlinx.coroutines.withTimeoutOrNull(600_000) { sweepKick.first { it != k } }; continue
+                }
                 total = maxOf(total, remaining + done)
                 _sweepProgress.value = done to total
                 val batch = if (urgent.isNotEmpty()) urgent.take(if (wide) 18 else 4) else rest.take(1)

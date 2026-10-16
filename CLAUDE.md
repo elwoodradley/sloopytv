@@ -88,6 +88,13 @@ a grabbed group.
   TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
   Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
   viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
+- 0.6.1 (2026-10-15): the user's About line read "100 rows in 28585 ms": the IN-list window query
+  let SQLite choose a plan that walked far more than it returned. DB v5 adds the index
+  (providerId, gen, epgId, stopEpoch); the store reads one channel at a time through
+  `windowBlocking` (`INDEXED BY` that index: equality on three columns, a short range on
+  stopEpoch). The sweep runs `PRAGMA wal_checkpoint(TRUNCATE)` when it goes idle. The About
+  line now also shows the programme count and the WAL size. If a read is still slow, suspect
+  the log file size or a guide import in progress.
 - 0.6.0 (2026-10-15): the grid is drawn, not composed. `GuideRow` keeps the channel column as
   composables and paints the cells on one `Canvas` per row (`TextMeasurer`, layouts cached per
   title+width); the whole grid is one focusable node (`gridFocus`) and the cursor is state

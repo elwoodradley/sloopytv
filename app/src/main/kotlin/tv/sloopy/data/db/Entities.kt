@@ -35,7 +35,7 @@ data class CategoryEntity(
 
 @Entity(
     tableName = "programmes",
-    indices = [Index("providerId", "gen", "epgId", "startEpoch"), Index("providerId", "gen", "stopEpoch")]
+    indices = [Index("providerId", "gen", "epgId", "startEpoch"), Index("providerId", "gen", "stopEpoch"), Index("providerId", "gen", "epgId", "stopEpoch")]
 )
 data class ProgrammeEntity(
     @PrimaryKey(autoGenerate = true) val rowId: Long = 0,
