@@ -46,6 +46,9 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
     private val lock = Mutex()
     private val _refresh = MutableStateFlow<RefreshState>(RefreshState.Idle)
     val refresh: StateFlow<RefreshState> = _refresh
+    private val _epgNote = kotlinx.coroutines.flow.MutableStateFlow("")
+    /** What happened on the last guide-file attempt, for the guide header: which identity got through, or every answer. */
+    val epgNote: StateFlow<String> = _epgNote
 
     private val gens = HashMap<String, Int>()
 
@@ -192,16 +195,19 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
         val agents = (listOfNotNull(remembered) + EPG_AGENTS).distinct()
         var lastCode = 0
         var got = false
+        val answers = ArrayList<String>()
         for (ua in agents) {
-            val r = AndroidHttp.core.get(url, headers = mapOf("User-Agent" to ua), timeoutMs = 120_000)
-            if (!r.ok) { lastCode = r.code; r.close(); if (r.code in listOf(401, 403, 404, 406, 429, 451)) continue else break }
+            val name = EPG_AGENT_NAMES[EPG_AGENTS.indexOf(ua).coerceAtLeast(0)]
+            val r = try { AndroidHttp.core.get(url, headers = mapOf("User-Agent" to ua), timeoutMs = 120_000) } catch (e: IOException) { answers.add("$name: no answer"); lastCode = 0; continue }
+            if (!r.ok) { lastCode = r.code; r.close(); answers.add("$name: HTTP ${r.code}"); if (r.code in listOf(401, 403, 404, 406, 429, 451)) continue else break }
             r.use { XmltvParser(parserFactory = { android.util.Xml.newPullParser() }, defaultZone = ZoneId.systemDefault()).parse(LimitedInputStream(it.body, Limits.XMLTV_BYTES), sink) }
             if (ua != remembered) prefs.setEpgUserAgent(p, ua)
-            TLog.i { "guide file accepted with agent #${agents.indexOf(ua)}" }
+            _epgNote.value = "Guide file accepted as $name"
+            TLog.i { "guide file accepted as $name" }
             got = true
             break
         }
-        if (!got) { if (remembered != null) prefs.setEpgUserAgent(p, null); throw IOException("Guide server answered HTTP $lastCode") }
+        if (!got) { if (remembered != null) prefs.setEpgUserAgent(p, null); _epgNote.value = answers.joinToString(" · "); throw IOException("Guide server answered HTTP $lastCode") }
         if (chans.isNotEmpty()) cdao.insertBatchBlocking(chans)
         if (batch.isNotEmpty()) { dao.insertBatchBlocking(batch); total += batch.size }
         return total
@@ -303,6 +309,7 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
 
     companion object {
         private const val BATCH = 2000
+        private val EPG_AGENT_NAMES = listOf("SloopyTV", "TiviMate", "VLC", "Chrome", "okhttp")
         /** Agents tried for the guide file, in order; the app's own first. */
         private val EPG_AGENTS = listOf(
             AndroidHttp.USER_AGENT,

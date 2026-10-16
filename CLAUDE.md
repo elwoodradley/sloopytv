@@ -88,6 +88,11 @@ long press's own key-up must not count as the OK that drops a grabbed group.
   TTL), `/friends/list`, send-to-TV (`/friends/send` + `/friends/inbox`, polled every 45 s).
   Scores: strip entry, ESPN NFL/CFB/NBA/NHL/MLB, channel by guide title match first, then the
   viewer's network map / name guess (`channelsForNetwork`), hold OK to confirm.
+- 0.5.7 (2026-10-15): sweep order is current channel → rows on screen → favourites → the
+  rest; six-wide for the urgent set with no pause; a channel whose table came back empty is
+  remembered in `meta` as `nolist:<id>` for a day so launches stop re-asking. `Catalog.epgNote`
+  says which identity the guide file was accepted as, or every answer ("TiviMate: HTTP 451 ·
+  ..."), and the guide header shows it next to the refusal.
 - 0.5.6 (2026-10-15): the guide file is retried with other User-Agents when the panel refuses
   it (`Catalog.EPG_AGENTS`: ours, TiviMate, VLC, Chrome, okhttp; 401/403/404/406/429/451 move to
   the next; the one that worked is remembered in `prefs.epgUserAgent`). The OkHttp agent

@@ -1335,7 +1335,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     private fun startSweep() {
         sweepJob?.cancel()
         sweepJob = viewModelScope.launch {
-            val gate = kotlinx.coroutines.sync.Semaphore(4)
+            val gate = kotlinx.coroutines.sync.Semaphore(6)
             var done = 0; var total = 0
             while (kotlinx.coroutines.currentCoroutineContext().isActive) {
                 val p = active.value
@@ -1345,17 +1345,18 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 val now = System.currentTimeMillis()
                 val favs = favouriteIds.value; val hiddenG = hiddenGroups.value
                 val fresh = { c: ChannelEntity -> c.categoryId !in hiddenG && now - (sweptAt[c.id] ?: 0L) > 6 * 3600_000L }
+                // The rows on screen come before favourites: the viewer is looking at them now.
                 val urgent = buildList {
                     currentChannel.value?.let { add(it) }
-                    addAll(channels.value.filter { it.id in favs })
                     addAll(guideWanted)
+                    addAll(channels.value.filter { it.id in favs })
                 }.distinctBy { it.id }.filter(fresh)
                 val rest = if (wide) channels.value.filter(fresh).filter { c -> urgent.none { it.id == c.id } } else emptyList()
                 val remaining = urgent.size + rest.size
                 if (remaining == 0) { _sweepProgress.value = null; done = 0; total = 0; val k = sweepKick.value; kotlinx.coroutines.withTimeoutOrNull(600_000) { sweepKick.first { it != k } }; continue }
                 total = maxOf(total, remaining + done)
                 _sweepProgress.value = done to total
-                val batch = if (urgent.isNotEmpty()) urgent.take(8) else rest.take(1)
+                val batch = if (urgent.isNotEmpty()) urgent.take(18) else rest.take(1)
                 val gentle = urgent.isEmpty()
                 val nowS = now / 1000
                 batch.map { c ->
@@ -1364,14 +1365,19 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                             val key = tv.sloopy.data.channelEpgKey(c)
                             val have = runCatching { catalog.programmes(p.id, key, nowS - 6 * 3600, nowS + 6 * 3600) }.getOrDefault(emptyList())
                             if (have.isNotEmpty()) { sweptAt[c.id] = now; return@withPermit }
+                            // A channel the panel had nothing for is remembered for a day, so every launch
+                            // does not spend its first seconds re-asking about the same empty ones.
+                            val emptyAt = runCatching { graph.db.meta().get(p.id, "nolist:${c.id}")?.toLongOrNull() }.getOrNull() ?: 0L
+                            if (now - emptyAt < 24 * 3600_000L) { sweptAt[c.id] = now; changedKeys.add(key); return@withPermit }
                             val n = try { catalog.fetchChannelEpg(p, c) } catch (e: kotlinx.coroutines.CancellationException) { throw e } catch (e: Exception) { TLog.w { "sweep: ${TLog.userMessage(e)}" }; -1 }
                             sweptAt[c.id] = if (n < 0) now - 6 * 3600_000L + 900_000L else now   // refused: try again in fifteen minutes
+                            if (n == 0) runCatching { graph.db.meta().set(tv.sloopy.data.db.MetaEntity(p.id, "nolist:${c.id}", now.toString())) }
                             if (n >= 0) { epgCache.keys.removeAll { it.endsWith("|$key") }; changedKeys.add(key) }
                         }
                     }
                 }.forEach { it.join() }
                 done += batch.size
-                delay(if (gentle) 400 else 30)
+                if (gentle) delay(400)
             }
         }
     }

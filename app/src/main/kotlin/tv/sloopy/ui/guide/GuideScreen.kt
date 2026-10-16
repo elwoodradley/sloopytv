@@ -342,7 +342,8 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             )
             Label("Guide  ·  " + dayLabel(nowEpoch), bright = true)
             val epgError by vm.epgError.collectAsState()
-            if (epgError != null) { Spacer(Modifier.width(28.dp)); Text("Guide feed refused ($epgError) · using the provider's channel guide instead", style = Sloopy.label.copy(color = Sloopy.amber), maxLines = 1, overflow = TextOverflow.Ellipsis) }
+            val epgNote by vm.catalog.epgNote.collectAsState()
+            if (epgError != null) { Spacer(Modifier.width(28.dp)); Text("Guide file refused · " + epgNote.ifBlank { epgError!! } + " · filling from the provider's channel tables", style = Sloopy.label.copy(color = Sloopy.amber), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(1100.dp)) }
             Spacer(Modifier.weight(1f))
             // Listings still filling in: a small line and a bar, gone when the sweep is done.
             val sweep by vm.sweepProgress.collectAsState()
