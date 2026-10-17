@@ -22,8 +22,8 @@ android {
         applicationId = "tv.sloopy"
         minSdk = 24
         targetSdk = 35
-        versionCode = 619
-        versionName = "0.6.19"
+        versionCode = 620
+        versionName = "0.6.20"
         vectorDrawables.useSupportLibrary = true
         // Default code server for "I have a code". Empty hides the feature; Settings can override.
         buildConfigField("String", "CODE_SERVER", "\"https://sloopytv-codes.sloopytv.workers.dev\"")
