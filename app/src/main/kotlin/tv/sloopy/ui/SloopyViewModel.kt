@@ -22,6 +22,7 @@ import kotlinx.coroutines.flow.flatMapLatest
 import kotlinx.coroutines.flow.flowOf
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
@@ -1138,13 +1139,19 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         return note.ifBlank { bundle.summary }
     }
     init {
-        // Re-upload a few seconds after anything in the bundle changes.
+        // Re-upload a few seconds after anything in the bundle changes. Every source is
+        // distinctUntilChanged: the raw Prefs flows emit on any DataStore edit (including the
+        // synced-at stamp an upload writes) and Room re-emits on any table write, which until
+        // 0.6.13 made each upload schedule the next one a minute later, all evening (the flat
+        // 60-writes-an-hour line on the KV chart, 2026-10-16).
         viewModelScope.launch {
             val progressTick = active.flatMapLatest { p -> if (p == null) flowOf(emptyList()) else graph.db.progress().recent(p.id, 1) }
-            kotlinx.coroutines.flow.merge(
+            val sources: List<kotlinx.coroutines.flow.Flow<Any?>> = listOf(
                 favouriteIds, favouriteVodIds, favouriteSeriesIds, groupOrder, lockedGroups, hiddenGroups, hiddenChannels, providerList, progressTick, prefs.collapseDupes, dupSplit, dupMerged, dupDismissed, dupPreferred,
                 prefs.theme, prefs.clock12, prefs.frameRateMatch, prefs.introEnabled, prefs.osdSeconds, prefs.searchHistory, prefs.license,
-            ).map { }.drop(1).debounce(8_000).collect { if (syncCode.value != null) syncNow() }
+            )
+            val ticks: kotlinx.coroutines.flow.Flow<Unit> = kotlinx.coroutines.flow.merge(*sources.map { it.distinctUntilChanged() }.toTypedArray()).map { }
+            ticks.drop(sources.size).debounce(8_000).collect { if (syncCode.value != null) syncNow() }
         }
     }
 

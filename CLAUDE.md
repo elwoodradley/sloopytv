@@ -352,7 +352,13 @@ backup up to once a minute all evening, plus presence every two minutes. Since 0
 backup uploads are 15 minutes apart (`SYNC_GAP_MS`; a pending one is flushed from `onCleared`
 on `detachedScope` so switch-off never loses it) and presence is rewritten only when four minutes
 old, or ninety seconds old and the channel changed (TTL 600). Budget: a stick costs at most ~4
-backups + ~15–40 presence writes an hour while on. Cloudflare warned at 50% on 2026-10-16 with ~550 requests/day:
+backups + ~15–40 presence writes an hour while on. The KV Metrics chart (dash → Workers KV →
+CODES → Metrics, "Request count") showed the real loop on 2026-10-17: a flat 60 writes/hour with
+no reads from 6 pm to 1 am. The change watcher merged raw `Prefs` flows, which emit on every
+DataStore edit, and each upload's `setSyncedAt` was such an edit, so every upload scheduled the
+next. 0.6.13 wraps every source in `distinctUntilChanged()` and drops the initial emissions, so
+only a real change uploads. Rule: never put a raw `ds.data.map` flow or a Room flow into a
+trigger without `distinctUntilChanged()`. Cloudflare warned at 50% on 2026-10-16 with ~550 requests/day:
 the rate limiters wrote a KV mark per request. Since then (`memLimited`) limits live in isolate
 memory, presence (`/friends/me`) is rewritten only on a channel change or after two minutes
 (TTL 300 s), and every counter/cache put is `.catch(() => null)` so a quota miss degrades instead
