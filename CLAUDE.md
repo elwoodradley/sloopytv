@@ -153,6 +153,16 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.21 (2026-10-17): the strip, after TiviMate. `STRIP_BANDS` in `ui/common/Rail.kt`: Guide ·
+  Tonight · Sports / Movies · Series · History · Recordings · Search / (Toad ·) Settings, the
+  last band pinned to the foot, a 16dp hairline centred in each gap (`STRIP_GAP_H`), rows
+  `STRIP_ROW_H` (50dp, separate from `RAIL_ROW_H`), icons 24dp. `StripColumn` lays out both the
+  icon column and the label panel so they line up. Settings is a proper eight-tooth gear path;
+  the Toad is a front-facing toad (two eyes on top, mouth). "Scores" is labelled Sports on the
+  strip and the screen header reads "Sports hub"; the route stays `scores`. Settings › Listings
+  › "Groups panel folds away after a pick" (`prefs.foldGroups`, default off): with it on, the
+  guide composes the groups column only while `rail != Rail.NONE`, so the grid takes the width
+  after a pick and Left off the grid or Back brings the panel back (the 0.3.1 behaviour).
 - 0.6.20 (2026-10-17): game day. Sports opening calls `vm.refreshChannelsIfStale()`: channel
   list over an hour old → `catalog.refreshAll(p, includeLibrary = false, includeEpg = false)` and
   the games resolve again (providers rename event feeds to the matchup on the day; the usual

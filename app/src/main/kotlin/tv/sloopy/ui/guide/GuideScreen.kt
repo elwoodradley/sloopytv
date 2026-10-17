@@ -324,6 +324,10 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
         Row(Modifier.fillMaxSize().padding(horizontal = 72.dp)) {
         NavStrip("guide", go = { route -> if (route == "guide") setRail(Rail.GROUPS) else go(route) }, requester = stripFocus, canFocus = rail == Rail.STRIP)
         Spacer(Modifier.width(16.dp))
+        // Settings › Listings can fold the groups panel away once a group is picked (the
+        // original layout); Left off the grid or Back brings it back, as always.
+        val foldGroups by vm.foldGroups.collectAsState()
+        if (!foldGroups || rail != Rail.NONE) {
         Column(Modifier.width(RAIL_W).fillMaxHeight().focusProperties { canFocus = rail == Rail.GROUPS }) {
             RailHeader(
                 when { grabbed != null -> "Moving · Up/Down · OK drops"; rail == Rail.GROUPS -> "Groups · hold OK for more · Menu sorts"; else -> "Groups · Left or Back to change" },
@@ -335,6 +339,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             }
         }
         Spacer(Modifier.width(24.dp))
+        }
         // The grid: one focusable node. Nothing inside it takes focus; the cursor is drawn.
         Column(
             Modifier.fillMaxSize().clipToBounds()

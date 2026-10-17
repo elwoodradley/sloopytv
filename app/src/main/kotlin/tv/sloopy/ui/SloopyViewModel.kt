@@ -209,6 +209,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     data class Dupes(val byChannel: Map<Long, Cluster>, val possible: List<Pair<ChannelEntity, ChannelEntity>>)
 
     val collapseDupes: StateFlow<Boolean> = prefs.collapseDupes.stateIn(viewModelScope, SharingStarted.Eagerly, true)
+    val foldGroups: StateFlow<Boolean> = prefs.foldGroups.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     private fun <T> perProvider(f: (String) -> kotlinx.coroutines.flow.Flow<T>, empty: T): StateFlow<T> =
         active.flatMapLatest { p -> if (p == null) flowOf(empty) else f(p.id) }.stateIn(viewModelScope, SharingStarted.Eagerly, empty)
     val dupSplit: StateFlow<Set<String>> = perProvider({ prefs.dupSplit(it) }, emptySet())

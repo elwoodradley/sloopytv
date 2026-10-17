@@ -202,6 +202,9 @@ class Prefs(private val context: Context) {
 
     // Duplicate channels: one row per channel unless the viewer splits a cluster; confirmed and
     // dismissed "possible" pairs; the copy the viewer prefers per cluster.
+    /** Guide: the groups panel folds away after a pick (the original behaviour) instead of staying beside the grid. */
+    val foldGroups: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("fold_groups")] ?: false }
+    suspend fun setFoldGroups(v: Boolean) = ds.edit { it[booleanPreferencesKey("fold_groups")] = v }
     val collapseDupes: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("collapse_dupes")] ?: true }
     suspend fun setCollapseDupes(v: Boolean) = ds.edit { it[booleanPreferencesKey("collapse_dupes")] = v }
     private fun dupKey(providerId: String, what: String) = stringPreferencesKey("dup_${what}_$providerId")

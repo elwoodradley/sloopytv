@@ -177,6 +177,8 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                         val collapse by vm.collapseDupes.collectAsState()
                         SettingRow("Collapse duplicate channels", if (collapse) "ON" else "OFF") { scope.launch { vm.prefs.setCollapseDupes(!collapse) } }
                         Text("Copies of a channel (HD, FHD, 4K, backup) show as one row. Only names that match exactly once the tags are stripped are treated as copies; hold OK on a channel to pick a copy or split them.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 4.dp, bottom = 10.dp).width(760.dp))
+                        val fold by vm.foldGroups.collectAsState()
+                        SettingRow("Groups panel folds away after a pick", if (fold) "ON" else "OFF") { scope.launch { vm.prefs.setFoldGroups(!fold) } }
                         val dupes by vm.dupes.collectAsState()
                         if (dupes.possible.isNotEmpty()) {
                             Section("Possible duplicates · ${dupes.possible.size}")

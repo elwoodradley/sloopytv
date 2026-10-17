@@ -155,7 +155,7 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
             // Rail rows cancel Right themselves; the screen decides: Right or OK goes into the content.
             Column(Modifier.width(RAIL_W).fillMaxHeight().onFocusChanged { if (it.hasFocus) inContent = false }
                 .onPreviewKeyEvent { ev -> if (ev.isDown && ev.isKey(Key.DirectionRight)) { enterContent(); true } else false }) {
-                RailHeader("Sports")
+                RailHeader("Sports hub")
                 val state = rememberLazyListState()
                 LazyColumn(state = state, modifier = Modifier.fillMaxSize()) {
                     itemsIndexed(pages, key = { _, p -> p.first }) { i, (key, name) ->
