@@ -970,10 +970,17 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val m = networkMap.value.toMutableMap(); if (c == null) m.remove(network) else m[network] = c.id
         prefs.setNetworkMap(p.id, m); gameChannelCache.clear(); refreshScores()
     }
-    /** Channels whose name carries the network's word: the picker's candidates. */
-    fun channelsForNetwork(network: String): List<ChannelEntity> {
+    /**
+     * Channels that carry the network, best first: local affiliates (city and state) over the
+     * bare national feed, look-alikes such as FOX SOUL or ABC NEWS left out (`Affiliates`).
+     * The picker's list and the guess share this order.
+     */
+    fun channelsForNetwork(network: String, from: List<ChannelEntity> = channels.value, keyOf: (ChannelEntity) -> String = { tv.sloopy.core.model.Dupes.key(it.name) }): List<ChannelEntity> {
         val words = tv.sloopy.core.sports.Scores.NETWORK_WORDS[network] ?: listOf(network)
-        return collapse(channels.value.filter { c -> val k = tv.sloopy.core.model.Dupes.key(c.name); words.any { w -> k == w || k.startsWith("$w ") || k.endsWith(" $w") || k.contains(" $w ") } }).take(30)
+        val ranked = from.mapNotNull { c -> tv.sloopy.core.sports.Affiliates.rank(network, keyOf(c), words)?.let { c to it } }
+        val usCats = liveCategories.value.filter { it.name.uppercase().contains("US") }.map { it.id }.toSet()
+        val order = ranked.sortedWith(compareByDescending<Pair<ChannelEntity, Int>> { it.second }.thenByDescending { it.first.categoryId in usCats })
+        return collapse(order.map { it.first }).take(30)
     }
     fun setScoresDay(d: Int) { if (scoresDay.value != d) { scoresDay.value = d; refreshScores() } }
     private var scoresJob: Job? = null
@@ -1005,12 +1012,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             val keyOf = HashMap<Long, String>(live.size * 2)
             live.forEach { keyOf[it.id] = tv.sloopy.core.model.Dupes.key(it.name) }
-            val usCats = liveCategories.value.filter { it.name.uppercase().contains("US") }.map { it.id }.toSet()
             val candidates = HashMap<String, List<ChannelEntity>>()
-            fun forNetwork(net: String): List<ChannelEntity> = candidates.getOrPut(net) {
-                val words = tv.sloopy.core.sports.Scores.NETWORK_WORDS[net] ?: listOf(net)
-                collapse(live.filter { c -> val k = keyOf[c.id] ?: ""; words.any { w -> k == w || k.startsWith("$w ") || k.endsWith(" $w") || k.contains(" $w ") } }).take(30)
-            }
+            fun forNetwork(net: String): List<ChannelEntity> = candidates.getOrPut(net) { channelsForNetwork(net, live) { keyOf[it.id] ?: "" } }
             fun last(n: String) = n.trim().substringAfterLast(' ').lowercase()
             list.map { g ->
                 gameChannelCache[g.id]?.let { (id, at) -> if (now - at < 600) return@map GameRow(g, live.firstOrNull { it.id == id }, "cached") }
@@ -1020,8 +1023,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 if (fromGuide != null) { gameChannelCache[g.id] = fromGuide.id to now; return@map GameRow(g, dupes.value.byChannel[fromGuide.id]?.primary ?: fromGuide, "guide") }
                 for (net in g.networks.take(3)) {
                     networkMap.value[net]?.let { id -> live.firstOrNull { it.id == id }?.let { gameChannelCache[g.id] = it.id to now; return@map GameRow(g, it, net) } }
-                    val cands = forNetwork(net)
-                    val guess = cands.firstOrNull { it.categoryId in usCats } ?: cands.firstOrNull()
+                    val guess = forNetwork(net).firstOrNull()
                     if (guess != null) { gameChannelCache[g.id] = guess.id to now; return@map GameRow(g, guess, "$net?") }
                 }
                 gameChannelCache[g.id] = null to now
