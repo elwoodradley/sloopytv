@@ -9,13 +9,14 @@ package tv.sloopy.core.sports
  * Pure string work so it is testable; the view model applies it to channel keys.
  */
 object Affiliates {
-    /** Channels that carry the network's word but are never where the game is. */
+    /** Channels that carry the network's word but are never where the game is. "PRIME" feeds
+     *  (FOX PRIME, ABC PRIME …) are the provider's own prime-time reruns, never sports. */
     private val NOT_THIS: Map<String, List<String>> = mapOf(
-        "FOX" to listOf("SOUL", "NEWS", "BUSINESS", "WEATHER", "NATION", "DEPORTES", "LIFE", "MOVIES", "CRIME", "CLASSICS", "SPORTS", "FS1", "FS2", "FXX", "FXM"),
-        "ABC" to listOf("NEWS", "AUSTRALIA", "KIDS", "FAMILY", "COMEDY", "ME"),
-        "NBC" to listOf("NEWS", "UNIVERSO", "GOLF", "NBCSN", "SPORTS", "LX", "NOW"),
-        "CBS" to listOf("NEWS", "SPORTS", "REALITY", "DRAMA", "JUSTICE", "CBSN"),
-        "CW" to listOf("SEED"),
+        "FOX" to listOf("PRIME", "SOUL", "NEWS", "BUSINESS", "WEATHER", "NATION", "DEPORTES", "LIFE", "MOVIES", "CRIME", "CLASSICS", "SPORTS", "FS1", "FS2", "FXX", "FXM"),
+        "ABC" to listOf("PRIME", "NEWS", "AUSTRALIA", "KIDS", "FAMILY", "COMEDY", "ME"),
+        "NBC" to listOf("PRIME", "NEWS", "UNIVERSO", "GOLF", "NBCSN", "SPORTS", "LX", "NOW"),
+        "CBS" to listOf("PRIME", "NEWS", "SPORTS", "REALITY", "DRAMA", "JUSTICE", "CBSN"),
+        "CW" to listOf("PRIME", "SEED"),
         "ESPN" to listOf("NEWS", "DEPORTES", "CLASSIC"),
         "USA" to listOf("TODAY"),
     )

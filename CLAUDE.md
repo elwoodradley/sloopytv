@@ -157,7 +157,8 @@ a grabbed group.
   national feed (The View, not the game). `core/sports/Affiliates.rank` (tested) ranks a channel
   key as a carrier of a network: city + state 4, call sign or city 3, bare network 2, state
   only 1 (the viewer's rule: state-only names are the national news feed), and look-alikes
-  (FOX SOUL/NEWS/SPORTS, ABC NEWS, CBS SPORTS, ESPN DEPORTES …) are out. The key's leading
+  (FOX SOUL/NEWS/SPORTS, ABC NEWS, CBS SPORTS, ESPN DEPORTES …) are out, and so is any
+  broadcast-network name with PRIME in it (0.6.15, the viewer: those feeds never show sports). The key's leading
   country prefix is dropped first. `vm.channelsForNetwork` returns that order (US groups first
   within a rank) and both the guess and the hold-OK picker use it; a mapped channel still wins.
 - 0.6.11 (2026-10-16): login and transfer codes on Fire OS 6. Both derived their AES key through

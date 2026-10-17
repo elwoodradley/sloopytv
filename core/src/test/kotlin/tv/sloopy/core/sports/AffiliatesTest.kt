@@ -27,6 +27,10 @@ class AffiliatesTest {
 
     @Test fun look_alikes_are_out() {
         assertNull(Affiliates.rank("FOX", "FOX SOUL"))
+        assertNull(Affiliates.rank("FOX", "US FOX PRIME HD"))
+        assertNull(Affiliates.rank("ABC", "ABC PRIME"))
+        assertNull(Affiliates.rank("CBS", "CBS PRIME EAST"))
+        assertEquals(2, Affiliates.rank("PRIME VIDEO", "PRIME VIDEO", listOf("PRIME VIDEO", "AMAZON")))
         assertNull(Affiliates.rank("FOX", "FOX NEWS HD"))
         assertNull(Affiliates.rank("FOX", "FOX SPORTS 1"))
         assertNull(Affiliates.rank("ABC", "ABC NEWS LIVE"))
