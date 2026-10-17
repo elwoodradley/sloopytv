@@ -721,17 +721,31 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     private fun kotlinx.serialization.json.JsonObject.bool(k: String) = (this[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull == "true"
 
     /** Asks the code server whether this stick may use the Toad; shows the strip icon when it may. */
-    fun refreshToad() = viewModelScope.launch {
+    fun refreshToad() = viewModelScope.launch { refreshToadNow() }
+    /**
+     * Keeps asking until the answer arrives: a launch with the guide downloading can lose the
+     * first request, and one lost request used to hide the Toad for the whole session. Backs
+     * off 15 s → 1 min → 4 min → 16 min, then half-hourly once it is on (admin changes land).
+     */
+    fun startToadWatch() = viewModelScope.launch {
+        var wait = 15_000L
+        while (true) {
+            refreshToadNow()
+            delay(if (tv.sloopy.ui.common.ToadFlag.on.value) 30 * 60_000L else wait)
+            wait = (wait * 4).coerceAtMost(30 * 60_000L)
+        }
+    }
+    private suspend fun refreshToadNow() {
         ensureFriendCode()
-        val code = kotlinx.coroutines.withTimeoutOrNull(5_000) { friendCode.first { it != null } } ?: return@launch
-        val server = codeServer.value; if (!server.startsWith("http")) return@launch
+        val code = kotlinx.coroutines.withTimeoutOrNull(5_000) { friendCode.first { it != null } } ?: return
+        val server = codeServer.value; if (!server.startsWith("http")) return
         val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
             runCatching {
                 tv.sloopy.data.AndroidHttp.client.newCall(okhttp3.Request.Builder().url(server.trimEnd('/') + "/toad/status?id=" + code).get().build()).execute().use { res ->
                     kotlinx.serialization.json.Json.parseToJsonElement(res.body?.string() ?: "") as? kotlinx.serialization.json.JsonObject
                 }
-            }.getOrNull()
-        } ?: return@launch
+            }.onFailure { TLog.w { "toad status: ${TLog.userMessage(it)}" } }.getOrNull()
+        } ?: return
         val on = r.bool("enabled") && r.bool("allowed")
         _toadAllowed.value = on
         tv.sloopy.ui.common.ToadFlag.on.value = on

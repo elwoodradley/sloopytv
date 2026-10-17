@@ -135,9 +135,7 @@ private fun StripColumn(modifier: Modifier, row: @Composable (index: Int, route:
     Column(modifier.fillMaxHeight().padding(top = RAIL_HEADER_H + 1.dp, bottom = 14.dp)) {
         bands.forEachIndexed { b, band ->
             if (b == bands.lastIndex) Spacer(Modifier.weight(1f))
-            else if (b > 0) Box(Modifier.height(STRIP_GAP_H).width(STRIP_W), contentAlignment = Alignment.Center) {
-                Box(Modifier.width(16.dp).height(1.dp).background(Sloopy.hair))
-            }
+            else if (b > 0) Spacer(Modifier.height(STRIP_GAP_H))   // air between bands, no mark (the hairline read as a stray line)
             band.forEach { (route, label) -> row(i, route, label); i++ }
         }
     }

@@ -52,7 +52,7 @@ fun SloopyRoot(vm: SloopyViewModel, onQuit: () -> Unit) {
     val due by vm.dueReminder.collectAsState()
     val announcement by vm.announcement.collectAsState()
     val incoming by vm.incoming.collectAsState()
-    LaunchedEffect(Unit) { vm.ensureRemote(); vm.refreshToad() }
+    LaunchedEffect(Unit) { vm.ensureRemote(); vm.startToadWatch() }
     val updatePrompt by vm.updatePrompt.collectAsState()
     val updateState by vm.updateState.collectAsState()
     LaunchedEffect(announcement, due, incoming, updatePrompt) { vm.modalUp = announcement != null || due != null || incoming != null || updatePrompt != null }
