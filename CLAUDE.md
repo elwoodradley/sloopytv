@@ -345,7 +345,14 @@ from the version and must only rise). The updater (`update/Updater.kt`) keys on 
 (`adb reverse tcp:8099`, python http.server with latest.json + a debug APK) is in the session notes.
 
 ## Code server
-KV free plan: 1,000 writes/day. Cloudflare warned at 50% on 2026-10-16 with ~550 requests/day:
+KV free plan: 1,000 writes/day; the day resets at 00:00 UTC (8 pm Eastern), so a morning
+warning covers the previous evening's viewing. Second 50% warning on 2026-10-17 at 11:20 am:
+every channel change touches History, which is in the backup bundle, so each stick uploaded a
+backup up to once a minute all evening, plus presence every two minutes. Since 0.6.12 automatic
+backup uploads are 15 minutes apart (`SYNC_GAP_MS`; a pending one is flushed from `onCleared`
+on `detachedScope` so switch-off never loses it) and presence is rewritten only when four minutes
+old, or ninety seconds old and the channel changed (TTL 600). Budget: a stick costs at most ~4
+backups + ~15–40 presence writes an hour while on. Cloudflare warned at 50% on 2026-10-16 with ~550 requests/day:
 the rate limiters wrote a KV mark per request. Since then (`memLimited`) limits live in isolate
 memory, presence (`/friends/me`) is rewritten only on a channel change or after two minutes
 (TTL 300 s), and every counter/cache put is `.catch(() => null)` so a quota miss degrades instead

@@ -1093,23 +1093,33 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val syncStatus: StateFlow<String?> = _syncStatus
     private var syncing = false
     private var lastUploadAt = 0L
+    /** A change is waiting for the gap to pass; switch-off flushes it (see [onCleared]). */
+    @Volatile private var syncPending = false
 
-    /** Uploads this stick's bundle under its code. Quiet unless [announce]; automatic uploads wait a minute between runs. */
+    /**
+     * Uploads this stick's bundle under its code. Quiet unless [announce]; automatic uploads wait
+     * [SYNC_GAP_MS] between runs (every channel change touches History, and the code server's KV
+     * has a thousand writes a day for everyone), and whatever changed meanwhile rides the next one.
+     */
     fun syncNow(announce: Boolean = false) = viewModelScope.launch {
         val code = syncCode.value ?: return@launch
-        if (syncing) return@launch
+        if (syncing) { syncPending = true; return@launch }
         syncing = true
         try {
-            if (!announce) { val wait = 60_000 - (System.currentTimeMillis() - lastUploadAt); if (wait > 0) delay(wait) }
-            lastUploadAt = System.currentTimeMillis()
-            val bundle = syncManager.build()
-            val at = tv.sloopy.sync.SyncClient.upload(codeServer.value, code, syncManager.encode(bundle))
-            prefs.setSyncedAt(at)
-            if (announce) _syncStatus.value = "Uploaded: ${bundle.summary}."
+            if (!announce) { syncPending = true; val wait = SYNC_GAP_MS - (System.currentTimeMillis() - lastUploadAt); if (wait > 0) delay(wait) }
+            uploadBundle(code)
+            if (announce) _syncStatus.value = "Uploaded: ${syncManager.build().summary}."
         } catch (e: Exception) {
             _syncStatus.value = "Upload failed: ${TLog.userMessage(e)}"
             TLog.w { "sync upload: ${TLog.userMessage(e)}" }
         } finally { syncing = false }
+    }
+
+    private suspend fun uploadBundle(code: String) {
+        syncPending = false
+        lastUploadAt = System.currentTimeMillis()
+        val at = tv.sloopy.sync.SyncClient.upload(codeServer.value, code, syncManager.encode(syncManager.build()))
+        prefs.setSyncedAt(at)
     }
     fun enableSync() = viewModelScope.launch { prefs.setSyncCode(tv.sloopy.sync.SyncClient.newCode()); _syncStatus.value = null; syncNow(announce = true) }
     fun disableSync() = viewModelScope.launch { prefs.setSyncCode(null); prefs.setSyncedAt(0); _syncStatus.value = "Sync is off. The last backup stays on the server under the old code until it is replaced." }
@@ -1674,9 +1684,14 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     override fun onCleared() {
         runCatching { remote?.stop() }
         player.release()
+        // A change still waiting for the upload gap goes now, so switch-off never loses it.
+        val code = syncCode.value
+        if (syncPending && code != null) detachedScope.launch { runCatching { uploadBundle(code) }.onFailure { TLog.w { "sync flush: ${TLog.userMessage(it)}" } } }
     }
 
     companion object {
+        /** Automatic backup uploads at most this often; a pending one is flushed at switch-off. */
+        private const val SYNC_GAP_MS = 15 * 60_000L
         private fun ByteArray.toHex() = joinToString("") { "%02x".format(it) }
         private fun hex(s: String) = ByteArray(s.length / 2) { s.substring(it * 2, it * 2 + 2).toInt(16).toByte() }
     }

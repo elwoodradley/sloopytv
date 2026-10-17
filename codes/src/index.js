@@ -509,11 +509,15 @@ async function friendMe(request, env) {
   const id = String(b?.id || "");
   if (!FRIEND_RE.test(id)) return json({ ok: false, error: "Bad code" }, 400);
   const nick = String(b?.nick || "").slice(0, 24), channel = String(b?.channel || "").slice(0, 60), at = Math.floor(Date.now() / 1000);
-  // A stick reports every 45 s; the note is rewritten only when the channel changed or it is
-  // over two minutes old (the note lives five), so a quiet evening costs a handful of writes.
+  // A stick reports every 45 s. The note (alive ten minutes) is rewritten when it is over four
+  // minutes old, or when the channel changed and the last write is over ninety seconds old, so
+  // a flipping stick costs at most forty writes an hour and a quiet one fifteen. KV allows a
+  // thousand writes a day for everyone; the 50% warnings of 2026-10-16/17 were this and backups.
   const cur = await env.CODES.get("f:" + id, "json");
-  if (cur && cur.channel === channel && cur.nick === nick && at - (cur.at || 0) < 120) return json({ ok: true });
-  await env.CODES.put("f:" + id, JSON.stringify({ nick, channel, at }), { expirationTtl: 300 }).catch(() => null);
+  const age = at - (cur?.at || 0);
+  const changed = !cur || cur.channel !== channel || cur.nick !== nick;
+  if (cur && age < 240 && !(changed && age >= 90)) return json({ ok: true });
+  await env.CODES.put("f:" + id, JSON.stringify({ nick, channel, at }), { expirationTtl: 600 }).catch(() => null);
   return json({ ok: true });
 }
 
