@@ -39,6 +39,28 @@ class AffiliatesTest {
         assertNull(Affiliates.rank("ESPN", "ESPN DEPORTES"))
     }
 
+    @Test fun cable_networks_prefer_the_plain_name() {
+        assertEquals(2, Affiliates.rank("ESPN", "US ESPN HD"))
+        assertEquals(1, Affiliates.rank("ESPN", "US ESPN ALT FEED"))
+        assertNull(Affiliates.rank("ESPN", "US ESPN PLUS 12"))
+        assertNull(Affiliates.rank("ESPN", "ESPN+ 12"))
+        assertEquals(2, Affiliates.rank("PEACOCK", "US PEACOCK 3"))
+        assertEquals(2, Affiliates.rank("PEACOCK", "PEACOCK"))
+    }
+
+    @Test fun guide_titles_name_the_teams() {
+        val g = Game(id = "1", league = "college-football", home = "Indiana Hoosiers", away = "Michigan State Spartans", homeShort = "IND", awayShort = "MSU",
+            homeScore = 0, awayScore = 0, state = "pre", detail = "", redZone = false, possession = null, networks = listOf("PEACOCK"), startEpoch = 0,
+            homeLoc = "Indiana", awayLoc = "Michigan State", homeMascot = "Hoosiers", awayMascot = "Spartans")
+        assertEquals(2, Scores.mentions("College Football: Michigan State at Indiana", g))
+        assertEquals(2, Scores.mentions("Spartans vs. Hoosiers", g))
+        assertEquals(1, Scores.mentions("Indiana Pacers at Boston", g))
+        assertEquals(0, Scores.mentions("Ohio State at Penn State", g))
+        // Without location/mascot (older rows), the display name is split instead.
+        val h = g.copy(homeLoc = "", awayLoc = "", homeMascot = "", awayMascot = "")
+        assertEquals(2, Scores.mentions("MICHIGAN STATE @ INDIANA", h))
+    }
+
     @Test fun multi_word_networks_still_match() {
         assertEquals(2, Affiliates.rank("NFL NETWORK", "NFL NETWORK HD", listOf("NFL NETWORK", "NFL NET")))
         assertEquals(2, Affiliates.rank("FS1", "FOX SPORTS 1", listOf("FS1", "FOX SPORTS 1")))

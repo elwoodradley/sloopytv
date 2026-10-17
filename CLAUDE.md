@@ -153,6 +153,15 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.18 (2026-10-17): buddy's notes, Peacock and ESPN+. `Game` carries `homeLoc/awayLoc`
+  (ESPN `location`, "Michigan State") and `homeMascot/awayMascot` (`name`, "Spartans");
+  `Scores.mentions(title, game)` scores a guide title 0–2 by those (never the bare word "state";
+  falls back to splitting the display name). `resolveGameChannels` uses it for the what's-on-now
+  pass and, when a network has several candidates (PEACOCK 1…N), reads the guide at kickoff for
+  just those channels (`byListing`, one `nowPlaying` call) and takes the one whose listing names
+  the teams. `Affiliates`: cable/streaming networks (not `BROADCAST`) rank the plain name over
+  one with extra words, and ESPN excludes PLUS/ESPN+, so an LSU game on ESPN never lands on an
+  ESPN+ event feed.
 - 0.6.17 (2026-10-17): hold menus show one "Record" row (`RecordOptions.entry`); picking it
   opens `RecordPrompt` (ui/record) with the three paddings, like the Copies row opens its picker.
   Guide, Search and Tonight each keep a `recordFor`/`recordStep` state for the second step; the

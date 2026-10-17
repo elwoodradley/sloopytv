@@ -24,6 +24,8 @@ data class Game(
     val homeId: String = "", val awayId: String = "",          // ESPN team ids: what "my teams" matches on
     val homeRecord: String = "", val awayRecord: String = "",  // "4-1"
     val homeLogo: String? = null, val awayLogo: String? = null,
+    val homeLoc: String = "", val awayLoc: String = "",        // "Michigan State": the school or city
+    val homeMascot: String = "", val awayMascot: String = "",  // "Spartans"
 ) {
     fun has(league: String, teamId: String) = this.league == league && (homeId == teamId || awayId == teamId)
 }
@@ -116,6 +118,8 @@ class Scores(private val http: Http) {
         return Game(
             id = e.str("id") ?: return null, league = league,
             home = home["team"]?.jsonObject?.str("displayName") ?: "?", away = away["team"]?.jsonObject?.str("displayName") ?: "?",
+            homeLoc = home["team"]?.jsonObject?.str("location") ?: "", awayLoc = away["team"]?.jsonObject?.str("location") ?: "",
+            homeMascot = home["team"]?.jsonObject?.str("name") ?: "", awayMascot = away["team"]?.jsonObject?.str("name") ?: "",
             homeShort = home["team"]?.jsonObject?.str("abbreviation") ?: "", awayShort = away["team"]?.jsonObject?.str("abbreviation") ?: "",
             homeScore = home.str("score")?.toIntOrNull() ?: 0, awayScore = away.str("score")?.toIntOrNull() ?: 0,
             state = type?.str("state") ?: "pre", detail = type?.str("shortDetail") ?: "",
@@ -150,6 +154,22 @@ class Scores(private val http: Http) {
             else -> stats["gamesBehind"]?.let { if (it == "-" || it == "0") "" else "$it GB" } ?: ""
         }
         /** Words a network's channel name is expected to carry, for the fallback mapping. */
+        /**
+         * How well a guide title names a game: 2 when both teams are in it, 1 for one, 0 for
+         * none. A team counts by its short name ("Michigan State") or its mascot ("Spartans");
+         * two-letter leftovers and the bare word "state" never count on their own.
+         */
+        fun mentions(title: String, g: Game): Int {
+            val t = " " + title.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim() + " "
+            fun team(full: String, loc: String, mascot: String): Boolean {
+                val l = loc.ifBlank { full.substringBeforeLast(' ', "") }.lowercase().trim()
+                val m = mascot.ifBlank { full.substringAfterLast(' ') }.lowercase().trim()
+                val names = listOf(l, m).filter { it.length >= 3 && it != "state" }
+                return names.any { t.contains(" $it ") }
+            }
+            return (if (team(g.home, g.homeLoc, g.homeMascot)) 1 else 0) + (if (team(g.away, g.awayLoc, g.awayMascot)) 1 else 0)
+        }
+
         val NETWORK_WORDS = mapOf(
             "CBS" to listOf("CBS"), "FOX" to listOf("FOX"), "NBC" to listOf("NBC"), "ABC" to listOf("ABC"), "ESPN" to listOf("ESPN"),
             "ESPN2" to listOf("ESPN2", "ESPN 2"), "ESPNU" to listOf("ESPNU", "ESPN U"), "NFL NET" to listOf("NFL NETWORK", "NFL NET"), "NFL NETWORK" to listOf("NFL NETWORK", "NFL NET"),

@@ -17,9 +17,12 @@ object Affiliates {
         "NBC" to listOf("PRIME", "NEWS", "UNIVERSO", "GOLF", "NBCSN", "SPORTS", "LX", "NOW"),
         "CBS" to listOf("PRIME", "NEWS", "SPORTS", "REALITY", "DRAMA", "JUSTICE", "CBSN"),
         "CW" to listOf("PRIME", "SEED"),
-        "ESPN" to listOf("NEWS", "DEPORTES", "CLASSIC"),
+        "ESPN" to listOf("NEWS", "DEPORTES", "CLASSIC", "PLUS", "ESPN+"),
         "USA" to listOf("TODAY"),
     )
+
+    /** The networks made of local affiliates; everything else is one channel with copies. */
+    val BROADCAST = setOf("ABC", "CBS", "NBC", "FOX", "CW")
 
     val STATES = setOf(
         "AL", "AK", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "HI", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO",
@@ -51,6 +54,12 @@ object Affiliates {
         if (!hit) return null
         val bad = NOT_THIS[network.uppercase()] ?: emptyList()
         if (tokens.any { it in bad }) return null
+        if (network.uppercase() !in BROADCAST) {
+            // Cable and streaming networks have no affiliates: the plain name wins, and extra
+            // words ("ESPN PLUS 12" is already out; "PEACOCK 3") rank below it, so the guide decides.
+            val rest = tokens.filter { it !in net.flatMap { w -> w.split(' ') } && it !in NOISE && !number.matches(it) }
+            return if (rest.isEmpty()) 2 else 1
+        }
         val netTokens = net.flatMap { it.split(' ') }.toSet()
         val rest = tokens.filter { it !in netTokens && it !in NOISE && !number.matches(it) }
         val state = rest.any { it in STATES || it in STATE_NAMES }
