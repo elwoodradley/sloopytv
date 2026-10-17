@@ -84,14 +84,15 @@ private const val COLS = 4
  */
 @UnstableApi
 @Composable
-fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit) {
+/** [onWatch] opens the picture with this screen kept beneath it, so Back from the game returns here. */
+fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, onWatch: () -> Unit = { vm.goHome() }) {
     val rows by vm.games.collectAsState()
     val busy by vm.scoresBusy.collectAsState()
     val day by vm.scoresDay.collectAsState()
     val followed by vm.followedTeams.collectAsState()
     val hide by vm.hideScores.collectAsState()
     val scope = rememberCoroutineScope()
-    var page by remember { mutableStateOf("live") }
+    var page by androidx.compose.runtime.saveable.rememberSaveable { mutableStateOf("live") }   // survives a trip to the picture and back
     var pickLeague by remember { mutableStateOf<String?>(null) }   // the team picker's league
     var leagueMenu by remember { mutableStateOf(false) }
     var gameMenu by remember { mutableStateOf<SloopyViewModel.GameRow?>(null) }
@@ -190,7 +191,7 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit) 
                             when (page) { "live" -> "Nothing in play right now."; "teams" -> if (followed.isEmpty()) "" else "No games for your teams on this day."; else -> "No games on this day, or the scores feed is unreachable." },
                             style = Sloopy.bodyBig, modifier = Modifier.padding(top = 10.dp),
                         )
-                        GameGrid(shown, hide, if (page == "teams") null else contentFocus, railFocus, onFocus = { focusedRow = it }, onOpen = { r -> r.channel?.let { vm.tune(it); vm.goHome() } ?: run { gameMenu = r } }, onHold = { gameMenu = it })
+                        GameGrid(shown, hide, if (page == "teams") null else contentFocus, railFocus, onFocus = { focusedRow = it }, onOpen = { r -> r.channel?.let { vm.tune(it); onWatch() } ?: run { gameMenu = r } }, onHold = { gameMenu = it })
                     }
                 }
             }
@@ -214,7 +215,7 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit) 
         }
         ChoicePrompt("${g.awayShort} AT ${g.homeShort}".take(28), opts, onCancel = { gameMenu = null }, onPick = { k ->
             when (k) {
-                "watch" -> r.channel?.let { vm.tune(it); vm.goHome() }
+                "watch" -> r.channel?.let { vm.tune(it); onWatch() }
                 "remind" -> r.channel?.let { vm.addReminder(it, "${g.away} at ${g.home}", g.startEpoch, g.startEpoch + 3 * 3600) }
                 "fa" -> vm.toggleFollow(SloopyViewModel.FollowedTeam(g.league, g.awayId, g.away, g.awayShort, g.awayLogo))
                 "fh" -> vm.toggleFollow(SloopyViewModel.FollowedTeam(g.league, g.homeId, g.home, g.homeShort, g.homeLogo))

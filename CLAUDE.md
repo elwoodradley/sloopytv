@@ -153,6 +153,11 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.16 (2026-10-17): Back from a game returns to Sports. `ScoresScreen(onWatch)` tunes and
+  navigates to "live" with Sports kept on the back stack (the search pattern); `SloopyRoot`'s
+  live `onBack` pops when the previous route is in `RETURN_TO` (search, scores), else opens the
+  guide. The Sports `page` is `rememberSaveable`, so the day comes back as left. Hold Back still
+  goes home and clears the stack.
 - 0.6.14 (2026-10-17): Sports channel guess. "FOX" games tuned FOX SOUL and "ABC" the bare
   national feed (The View, not the game). `core/sports/Affiliates.rank` (tested) ranks a channel
   key as a carrier of a network: city + state 4, call sign or city 3, bare network 2, state

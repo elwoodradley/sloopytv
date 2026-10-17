@@ -145,6 +145,9 @@ fun SloopyRoot(vm: SloopyViewModel, onQuit: () -> Unit) {
     }
 }
 
+/** Screens that stay under the picture when they tune a channel, so Back from the picture returns to them. */
+private val RETURN_TO = setOf("search", "scores")
+
 @UnstableApi
 @Composable
 private fun SloopyNav(vm: SloopyViewModel, startAtProviders: Boolean, onQuit: () -> Unit) {
@@ -166,13 +169,13 @@ private fun SloopyNav(vm: SloopyViewModel, startAtProviders: Boolean, onQuit: ()
         popEnterTransition = { androidx.compose.animation.EnterTransition.None }, popExitTransition = { androidx.compose.animation.ExitTransition.None },
     ) {
         composable("live") {
-            // Opened from search: Back returns to the results. Otherwise Back opens the guide.
-            LiveScreen(vm, go = go, onQuit = onQuit, onBack = { if (nav.previousBackStackEntry?.destination?.route == "search") nav.popBackStack() else go("guide") })
+            // Opened from search or Sports: Back returns there. Otherwise Back opens the guide.
+            LiveScreen(vm, go = go, onQuit = onQuit, onBack = { if (nav.previousBackStackEntry?.destination?.route in RETURN_TO) nav.popBackStack() else go("guide") })
         }
         composable("guide") { GuideScreen(vm, go = go, onQuit = onQuit) }
         composable("tonight") { tv.sloopy.ui.tonight.TonightScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onOpen = { kind, id -> nav.navigate("details/$kind/$id") }) }
         composable("toad") { tv.sloopy.ui.toad.ToadScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }) }
-        composable("scores") { tv.sloopy.ui.scores.ScoresScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }) }
+        composable("scores") { tv.sloopy.ui.scores.ScoresScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onWatch = { nav.navigate("live") { launchSingleTop = true } }) }
         composable("recordings") { tv.sloopy.ui.record.RecordingsScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onPlay = { nav.navigate("vodplayer") }) }
         composable("history") { HistoryScreen(vm, go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onPlay = { nav.navigate("vodplayer") }) }
         composable("movies") { LibraryScreen(vm, kind = "vod", go = go, onBack = { vm.guideOpensAtSections = true; go("guide") }, onOpen = { id -> nav.navigate("details/vod/$id") }) }
