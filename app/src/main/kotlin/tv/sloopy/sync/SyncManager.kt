@@ -41,6 +41,7 @@ data class SyncBundle(
     val theme: String, val clock12: Boolean, val frameRateMatch: Boolean, val intro: Boolean, val osdSeconds: Int,
     val codeServer: String?, val searchHistory: List<String>, val license: String?,
     val followedTeams: List<String> = emptyList(), val hideScores: Boolean = false,
+    val friendsLicense: String? = null,
 ) {
     val summary: String get() = "${providers.size} provider${if (providers.size == 1) "" else "s"}, ${favourites.values.sumOf { it.size }} favourite channels, ${favouriteItems.values.sumOf { it.size }} in My list, ${progress.size} in History"
 }
@@ -74,7 +75,7 @@ class SyncManager(private val db: SloopyDb, private val prefs: Prefs, private va
             pinSalt = prefs.pinSalt.first(), pinHash = prefs.pinHash.first(),
             theme = prefs.theme.first(), clock12 = prefs.clock12.first(), frameRateMatch = prefs.frameRateMatch.first(),
             intro = prefs.introEnabled.first(), osdSeconds = prefs.osdSeconds.first(),
-            followedTeams = prefs.followedTeams.first(), hideScores = prefs.hideScores.first(),
+            followedTeams = prefs.followedTeams.first(), hideScores = prefs.hideScores.first(), friendsLicense = prefs.friendsLicense.first(),
             codeServer = prefs.codeServer.first(), searchHistory = prefs.searchHistory.first(), license = prefs.license.first(),
         )
     }
@@ -135,6 +136,7 @@ class SyncManager(private val db: SloopyDb, private val prefs: Prefs, private va
             if (!b.codeServer.isNullOrBlank()) prefs.setCodeServer(b.codeServer)
             b.searchHistory.reversed().forEach { prefs.pushSearch(it) }
             if (!b.license.isNullOrBlank()) prefs.setLicense(b.license)
+            if (!b.friendsLicense.isNullOrBlank()) prefs.setFriendsLicense(b.friendsLicense)
             if (b.followedTeams.isNotEmpty()) prefs.setFollowedTeams((prefs.followedTeams.first() + b.followedTeams).distinct())
             prefs.setHideScores(b.hideScores)
             notes.add("settings")

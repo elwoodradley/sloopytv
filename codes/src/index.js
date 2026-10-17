@@ -208,6 +208,7 @@ async function syncGet(request, env, url) {
 function publicConfig(c) {
   return {
     gumroadProduct: c.gumroadProduct || "", buyUrl: c.buyUrl || "", price: c.price || "",
+    friendsProduct: c.friendsProduct || "", friendsBuyUrl: c.friendsBuyUrl || "", friendsPrice: c.friendsPrice || "",
     operatorName: c.operatorName || "",
     announcementId: c.announcementId || "", announcementText: c.announcementText || "",
     reportsEnabled: !!c.reportsEnabled,
@@ -228,6 +229,9 @@ async function setConfig(request, env) {
     gumroadProduct: String(body?.gumroadProduct ?? prev.gumroadProduct ?? "").trim().slice(0, 120),
     buyUrl: String(body?.buyUrl ?? prev.buyUrl ?? "").trim().slice(0, 300),
     price: String(body?.price ?? prev.price ?? "").trim().slice(0, 40),
+    friendsProduct: String(body?.friendsProduct ?? prev.friendsProduct ?? "").trim().slice(0, 120),
+    friendsBuyUrl: String(body?.friendsBuyUrl ?? prev.friendsBuyUrl ?? "").trim().slice(0, 300),
+    friendsPrice: String(body?.friendsPrice ?? prev.friendsPrice ?? "").trim().slice(0, 40),
     operatorName: String(body?.operatorName ?? prev.operatorName ?? "").trim().slice(0, 60),
     reportsEnabled: body?.reportsEnabled === undefined ? !!prev.reportsEnabled : !!body.reportsEnabled,
     toadEnabled: body?.toadEnabled === undefined ? !!prev.toadEnabled : !!body.toadEnabled,
@@ -245,6 +249,7 @@ async function setConfig(request, env) {
     cfg.announcementId = t ? String(Date.now()) : "";
   }
   if (cfg.buyUrl && !/^https:\/\//i.test(cfg.buyUrl)) return json({ ok: false, error: "Buy link must start with https://" }, 400);
+  if (cfg.friendsBuyUrl && !/^https:\/\//i.test(cfg.friendsBuyUrl)) return json({ ok: false, error: "Friends buy link must start with https://" }, 400);
   await env.CODES.put("config", JSON.stringify(cfg));
   return json({ ok: true, ...adminConfig(cfg) });
 }
@@ -503,9 +508,34 @@ async function toadAdmin(env) {
 
 const FRIEND_RE = /^[A-Z2-9]{8}$/;
 
+// Friends is the one feature that costs the operator money (presence writes), so it can sit
+// behind its own Gumroad product (`friendsProduct` in config). A stick sends its key as `lic`;
+// verified keys are remembered in isolate memory for a day, so Gumroad sees one call per stick
+// per day, and KV sees none.
+const licMem = new Map();
+async function friendsOk(env, lic) {
+  const cfg = (await env.CODES.get("config", "json")) || {};
+  if (!cfg.friendsProduct) return true;
+  lic = String(lic || "").trim(); if (!lic) return false;
+  const now = Date.now(); const hit = licMem.get(lic);
+  if (hit && now - hit.at < 86400e3) return hit.ok;
+  let ok = false;
+  try {
+    const r = await fetch("https://api.gumroad.com/v2/licenses/verify", { method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
+      body: new URLSearchParams({ product_id: cfg.friendsProduct, license_key: lic, increment_uses_count: "false" }) });
+    const j = await r.json().catch(() => null);
+    ok = !!(j && j.success && j.purchase && !j.purchase.refunded && !j.purchase.chargebacked);
+  } catch (e) { return hit ? hit.ok : false; }
+  if (licMem.size > 5000) licMem.clear();
+  licMem.set(lic, { ok, at: now });
+  return ok;
+}
+const LOCKED = () => json({ ok: false, locked: true, error: "Friends needs a license key" }, 402);
+
 async function friendMe(request, env) {
   if (await syncLimited(request, env)) return json({ ok: false }, 429);
   const b = await request.json().catch(() => null);
+  if (!(await friendsOk(env, b?.lic))) return LOCKED();
   const id = String(b?.id || "");
   if (!FRIEND_RE.test(id)) return json({ ok: false, error: "Bad code" }, 400);
   const nick = String(b?.nick || "").slice(0, 24), channel = String(b?.channel || "").slice(0, 60), at = Math.floor(Date.now() / 1000);
@@ -522,6 +552,7 @@ async function friendMe(request, env) {
 }
 
 async function friendList(env, url) {
+  if (!(await friendsOk(env, url.searchParams.get("lic")))) return LOCKED();
   const ids = (url.searchParams.get("ids") || "").split(",").filter((x) => FRIEND_RE.test(x)).slice(0, 50);
   const out = [];
   for (const id of ids) { const r = await env.CODES.get("f:" + id, "json"); out.push({ id, nick: r?.nick || "", channel: r?.channel || "", at: r?.at || 0 }); }
@@ -531,6 +562,7 @@ async function friendList(env, url) {
 async function friendSend(request, env) {
   if (await syncLimited(request, env)) return json({ ok: false }, 429);
   const b = await request.json().catch(() => null);
+  if (!(await friendsOk(env, b?.lic))) return LOCKED();
   const to = String(b?.to || ""), from = String(b?.from || "");
   if (!FRIEND_RE.test(to) || !FRIEND_RE.test(from)) return json({ ok: false, error: "Bad code" }, 400);
   const msg = { from, nick: String(b?.nick || "").slice(0, 24), channel: String(b?.channel || "").slice(0, 60), key: String(b?.key || "").slice(0, 80), at: Date.now() };
@@ -539,6 +571,7 @@ async function friendSend(request, env) {
 }
 
 async function friendInbox(env, url) {
+  if (!(await friendsOk(env, url.searchParams.get("lic")))) return LOCKED();
   const id = url.searchParams.get("id") || "";
   if (!FRIEND_RE.test(id)) return json({ ok: false, error: "Bad code" }, 400);
   const page = await env.CODES.list({ prefix: "m:" + id + ":" });
@@ -597,6 +630,10 @@ textarea{width:100%;box-sizing:border-box;background:none;border:0;border-bottom
   <label><span class="k">Gumroad product id (from the product's page, "Product ID")</span><input id="gp" class="mono"></label>
   <label><span class="k">Buy link shown on the TV</span><input id="gu" class="mono" placeholder="https://yourname.gumroad.com/l/sloopytv"></label>
   <label><span class="k">Price shown on the TV</span><input id="gpr" placeholder="$2"></label>
+  <p class="k" style="margin-top:14px">Friends (see what friends watch, send a channel to their TV) can be a paid extra on its own. Empty = free.</p>
+  <label><span class="k">Friends: Gumroad product id</span><input id="fgp" class="mono"></label>
+  <label><span class="k">Friends: buy link shown on the TV</span><input id="fgu" class="mono" placeholder="https://yourname.gumroad.com/l/sloopytv-friends"></label>
+  <label><span class="k">Friends: price shown on the TV</span><input id="fgpr" placeholder="$3"></label>
   <button class="pri" id="cfg">Save paywall</button>
   <div class="msg" id="cmsg"></div>
 
@@ -640,8 +677,8 @@ function show(ok){$("login").style.display=ok?"none":"block";$("app").style.disp
 $("go").onclick=function(){pw=$("pw").value;sessionStorage.setItem("pw",pw);api("GET","/admin/list").then(function(j){if(j.ok)show(true);else $("lmsg").textContent=j.error||"Wrong password"})}
 $("mint").onclick=function(){$("code").textContent="";$("msg").textContent="";api("POST","/admin/mint",{url:$("url").value,user:$("user").value,pass:$("pass").value,name:$("name").value,note:$("note").value}).then(function(j){if(j.ok){$("code").textContent=j.code;$("msg").textContent="Send this code. It works once, until "+fmt(j.expiresAt)+".";$("user").value="";$("pass").value="";$("note").value="";refresh()}else $("msg").textContent=j.error})}
 $("rows").onclick=function(e){var c=e.target.getAttribute("data-c");if(c&&confirm("Delete code "+c+"?"))api("DELETE","/admin/code/"+c).then(refresh)}
-$("cfg").onclick=function(){api("POST","/admin/config",{gumroadProduct:$("gp").value,buyUrl:$("gu").value,price:$("gpr").value}).then(function(j){$("cmsg").textContent=j.ok?(j.gumroadProduct?"Paywall on.":"Paywall off, the app is free."):j.error})}
-function loadCfg(){api("GET","/admin/config").then(function(j){if(j.ok){$("gp").value=j.gumroadProduct||"";$("gu").value=j.buyUrl||"";$("gpr").value=j.price||"";$("opname").value=j.operatorName||"";$("ann").value=j.announcementText||"";$("repon").checked=!!j.reportsEnabled;$("toadon").checked=!!j.toadEnabled;$("toadsticks").value=j.toadSticks||"";$("toadcap").value=j.toadDailyCap||50;$("toadmodel").value=j.toadModel||"claude-haiku-5-5";loadToad();$("tgtok").value=j.telegramToken||"";$("dcweb").value=j.discordWebhook||""}});loadReps()}
+$("cfg").onclick=function(){api("POST","/admin/config",{gumroadProduct:$("gp").value,buyUrl:$("gu").value,price:$("gpr").value,friendsProduct:$("fgp").value,friendsBuyUrl:$("fgu").value,friendsPrice:$("fgpr").value}).then(function(j){$("cmsg").textContent=j.ok?((j.gumroadProduct?"Paywall on.":"Paywall off, the app is free.")+(j.friendsProduct?" Friends is paid.":" Friends is free.")):j.error})}
+function loadCfg(){api("GET","/admin/config").then(function(j){if(j.ok){$("gp").value=j.gumroadProduct||"";$("gu").value=j.buyUrl||"";$("gpr").value=j.price||"";$("fgp").value=j.friendsProduct||"";$("fgu").value=j.friendsBuyUrl||"";$("fgpr").value=j.friendsPrice||"";$("opname").value=j.operatorName||"";$("ann").value=j.announcementText||"";$("repon").checked=!!j.reportsEnabled;$("toadon").checked=!!j.toadEnabled;$("toadsticks").value=j.toadSticks||"";$("toadcap").value=j.toadDailyCap||50;$("toadmodel").value=j.toadModel||"claude-haiku-5-5";loadToad();$("tgtok").value=j.telegramToken||"";$("dcweb").value=j.discordWebhook||""}});loadReps()}
 function loadReps(){api("GET","/admin/reports").then(function(j){if(!j.ok)return;var h="";j.reports.forEach(function(r){h+="<tr><td>"+fmt(r.at)+"</td><td>"+(r.number?r.number+" ":"")+r.channel+(r.group?" <span class=used>("+r.group+")</span>":"")+"</td><td>"+(r.error||"")+(r.note?"<br><span class=used>"+r.note+"</span>":"")+"</td><td>"+(r.nick||"")+"<br><span class=used>"+(r.device||"")+" v"+(r.version||"")+"</span></td><td><button class=sm data-r="+r.id+">Fixed</button></td></tr>"});$("reps").innerHTML=h||"<tr><td colspan=5 class=used>No reports.</td></tr>"})}
 $("opsave").onclick=function(){api("POST","/admin/config",{operatorName:$("opname").value}).then(function(j){$("opmsg").textContent=j.ok?"Saved.":j.error})}
 $("annsend").onclick=function(){api("POST","/admin/config",{announcementText:$("ann").value}).then(function(j){$("annmsg").textContent=j.ok?(j.announcementText?"Sent. Sticks show it on their next open.":"Cleared."):j.error})}

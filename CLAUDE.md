@@ -153,6 +153,16 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.23 (2026-10-17): Friends behind its own paywall. Config gains `friendsProduct`,
+  `friendsBuyUrl`, `friendsPrice` (admin page, under the app paywall; empty = Friends free, the
+  default, so nothing changes until the operator fills it). Server: `friendsOk(env, lic)` gates
+  `/friends/me|list|send|inbox` (402 `{locked:true}`), verifying the key against Gumroad once a
+  day per key in isolate memory (`licMem`), never KV. The key rides as `lic` (query on GET, JSON
+  field on POST; `key` was already taken by send-to-TV's channel key). App: `PayConfig.friendsPaid`,
+  `prefs.friendsLicense` (also in the sync bundle), `vm.friendsLocked`, `vm.unlockFriends`,
+  `friendsCall` appends the key, the presence/inbox loop stays quiet while locked, and Settings ›
+  Friends shows price, buy link and a key field instead of the feature. Why: presence is the one
+  feature that costs KV writes at scale (see Code server).
 - 0.6.22 (2026-10-17): the Toad was missing from the user's strip while the server said
   enabled + allowed: `refreshToad()` ran once at root, and a lost request (launch with a
   296k-row guide download) hid it for the session. `vm.startToadWatch()` retries with backoff

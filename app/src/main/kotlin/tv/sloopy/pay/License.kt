@@ -19,8 +19,11 @@ data class PayConfig(
     val announcementId: String = "", val announcementText: String = "",
     /** Dead-channel reports: nothing in the app shows until the operator turns this on. */
     val reportsEnabled: Boolean = false,
+    /** Friends as a paid extra: a second Gumroad product. Empty = Friends is free. */
+    val friendsProduct: String = "", val friendsBuyUrl: String = "", val friendsPrice: String = "",
 ) {
     val enabled: Boolean get() = gumroadProduct.isNotBlank()
+    val friendsPaid: Boolean get() = friendsProduct.isNotBlank()
 }
 
 sealed class Verdict {
@@ -44,6 +47,7 @@ object License {
                     operatorName = root.str("operatorName").orEmpty(),
                     announcementId = root.str("announcementId").orEmpty(), announcementText = root.str("announcementText").orEmpty(),
                     reportsEnabled = (root["reportsEnabled"] as? JsonPrimitive)?.booleanOrNull == true,
+                    friendsProduct = root.str("friendsProduct").orEmpty(), friendsBuyUrl = root.str("friendsBuyUrl").orEmpty(), friendsPrice = root.str("friendsPrice").orEmpty(),
                 )
             }
         }.getOrNull()

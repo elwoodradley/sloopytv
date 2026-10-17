@@ -138,6 +138,9 @@ class Prefs(private val context: Context) {
 
     val license: Flow<String?> = ds.data.map { it[stringPreferencesKey("license")] }
     suspend fun setLicense(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("license")) else it[stringPreferencesKey("license")] = v.trim() }
+    /** The key for Friends when the operator sells it separately. */
+    val friendsLicense: Flow<String?> = ds.data.map { it[stringPreferencesKey("friends_license")] }
+    suspend fun setFriendsLicense(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("friends_license")) else it[stringPreferencesKey("friends_license")] = v.trim() }
     val licenseCheckedAt: Flow<Long> = ds.data.map { it[longPreferencesKey("license_checked_at")] ?: 0L }
     suspend fun setLicenseCheckedAt(v: Long) = ds.edit { it[longPreferencesKey("license_checked_at")] = v }
 

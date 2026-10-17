@@ -310,6 +310,23 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                     }
                     "friends" -> {
                         Section("Friends")
+                        val fLocked by vm.friendsLocked.collectAsState()
+                        val pc by vm.payConfig.collectAsState()
+                        if (fLocked) {
+                            // The operator sells Friends on its own: the key goes here, nothing else shows until it is in.
+                            var fkey by remember { mutableStateOf("") }
+                            var fmsg by remember { mutableStateOf<String?>(null) }
+                            Text("Friends is a paid extra" + (pc?.friendsPrice?.takeIf { it.isNotBlank() }?.let { " · $it" } ?: "") + ". It shows which channel your friends are on and lets you send a channel to their TV.", style = Sloopy.body.copy(color = Sloopy.textSoft))
+                            pc?.friendsBuyUrl?.takeIf { it.isNotBlank() }?.let { Text("Buy a key at $it", style = Sloopy.body.copy(color = Sloopy.amber, fontFamily = Sloopy.mono), modifier = Modifier.padding(top = 8.dp)) }
+                            Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.Bottom) {
+                                Box(Modifier.width(520.dp)) { Field("License key", fkey, { fkey = it }, mono = true, placeholder = "XXXXXXXX-XXXXXXXX-XXXXXXXX-XXXXXXXX") }
+                                Spacer(Modifier.width(12.dp))
+                                SloopyButton("Unlock", primary = true, enabled = fkey.isNotBlank(), modifier = Modifier.padding(bottom = 2.dp), onClick = {
+                                    scope.launch { fmsg = runCatching { vm.unlockFriends(fkey) }.fold({ "Friends unlocked." }, { it.message ?: "That key didn't work" }) }
+                                })
+                            }
+                            fmsg?.let { Text(it, style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 8.dp)) }
+                        } else {
                         LaunchedEffect(Unit) { vm.ensureFriendCode(); vm.refreshPresence() }
                         val code by vm.friendCode.collectAsState()
                         val nick by vm.friendNick.collectAsState()
@@ -356,6 +373,7 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                                 }
                             }
                         }
+                    }
                     }
                     "parental" -> {
                         Section("Profiles")

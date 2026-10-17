@@ -368,6 +368,18 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     /** True while the operator has a product set and this stick has no key for it. */
     val locked: StateFlow<Boolean> = combine(_payConfig, license) { c, k -> c?.enabled == true && k.isNullOrBlank() }
         .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    private val friendsLicense: StateFlow<String?> = prefs.friendsLicense.stateIn(viewModelScope, SharingStarted.Eagerly, null)
+    /** True while the operator sells Friends separately and this stick has no key for it. */
+    val friendsLocked: StateFlow<Boolean> = combine(_payConfig, friendsLicense) { c, k -> c?.friendsPaid == true && k.isNullOrBlank() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+    suspend fun unlockFriends(key: String) {
+        val c = _payConfig.value ?: throw IllegalStateException("Could not read the unlock settings. Check the connection and try again.")
+        when (val v = tv.sloopy.pay.License.verify(c.friendsProduct, key)) {
+            is tv.sloopy.pay.Verdict.Valid -> { prefs.setFriendsLicense(key); _toast.value = "Friends unlocked." }
+            is tv.sloopy.pay.Verdict.Invalid -> throw IllegalStateException(v.why)
+            tv.sloopy.pay.Verdict.Unknown -> throw IllegalStateException("Could not reach the license server. Check the connection and try again.")
+        }
+    }
     suspend fun unlock(key: String) {
         val c = _payConfig.value ?: throw IllegalStateException("Could not read the unlock settings. Check the connection and try again.")
         when (val v = tv.sloopy.pay.License.verify(c.gumroadProduct, key)) {
@@ -875,9 +887,14 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val incoming: StateFlow<kotlinx.serialization.json.JsonObject?> = _incoming
     private suspend fun friendsCall(path: String, body: String?): kotlinx.serialization.json.JsonObject? = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) {
         val server = codeServer.value; if (!server.startsWith("http")) return@withContext null
+        // The Friends key rides every call as `lic` (query on GET, field on POST); the server
+        // ignores it while Friends is free and refuses with 402 when it is paid and missing.
+        val lic = friendsLicense.value?.trim().orEmpty()
+        val url = server.trimEnd('/') + path + (if (lic.isEmpty() || body != null) "" else (if ('?' in path) "&" else "?") + "lic=" + java.net.URLEncoder.encode(lic, "UTF-8"))
+        val sent = if (body != null && lic.isNotEmpty() && body.trimEnd().endsWith("}")) body.trimEnd().dropLast(1) + ",\"lic\":" + kotlinx.serialization.json.JsonPrimitive(lic).toString() + "}" else body
         runCatching {
-            val b = okhttp3.Request.Builder().url(server.trimEnd('/') + path)
-            if (body != null) b.post(okhttp3.RequestBody.create("application/json".toMediaTypeOrNull(), body)) else b.get()
+            val b = okhttp3.Request.Builder().url(url)
+            if (sent != null) b.post(okhttp3.RequestBody.create("application/json".toMediaTypeOrNull(), sent)) else b.get()
             tv.sloopy.data.AndroidHttp.client.newCall(b.build()).execute().use { r -> kotlinx.serialization.json.Json.parseToJsonElement(r.body?.string() ?: "") as? kotlinx.serialization.json.JsonObject }
         }.getOrNull()
     }
@@ -923,11 +940,11 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             while (true) {
                 delay(45_000)
                 val me = friendCode.value
-                if (me != null && shareWatching.value) {
+                if (me != null && shareWatching.value && !friendsLocked.value) {
                     val c = currentChannel.value?.let { tv.sloopy.core.model.Names.clean(it.name) } ?: ""
                     friendsCall("/friends/me", kotlinx.serialization.json.buildJsonObject { put("id", kotlinx.serialization.json.JsonPrimitive(me)); put("nick", kotlinx.serialization.json.JsonPrimitive(friendNick.value)); put("channel", kotlinx.serialization.json.JsonPrimitive(c)) }.toString())
                 }
-                if (me != null && friends.value.isNotEmpty()) {
+                if (me != null && friends.value.isNotEmpty() && !friendsLocked.value) {
                     val inbox = friendsCall("/friends/inbox?id=$me", null)
                     val first = (inbox?.get("messages") as? kotlinx.serialization.json.JsonArray)?.firstOrNull() as? kotlinx.serialization.json.JsonObject
                     if (first != null && _incoming.value == null) _incoming.value = first
