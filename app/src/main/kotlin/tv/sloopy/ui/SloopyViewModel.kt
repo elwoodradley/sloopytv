@@ -964,7 +964,23 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val hideScores: StateFlow<Boolean> = prefs.hideScores.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     fun setHideScores(v: Boolean) = viewModelScope.launch { prefs.setHideScores(v) }
     val networkMap: StateFlow<Map<String, Long>> = perProvider({ prefs.networkMap(it) }, emptyMap())
-    private val gameChannelCache = java.util.concurrent.ConcurrentHashMap<String, Pair<Long?, Long>>()
+    /** game id → (channel id, how it was found, when). */
+    private val gameChannelCache = java.util.concurrent.ConcurrentHashMap<String, Triple<Long?, String, Long>>()
+    /** Groups and channel keys that could carry a game: where the day's listings are read for the sport pass. */
+    private val SPORT_WORDS = Regex("SPORT|NFL|NBA|NHL|MLB|NCAA|COLLEGE|ESPN|PPV|EVENT|GAME|PEACOCK|\\bFOX\\b|\\bCBS\\b|\\bNBC\\b|\\bABC\\b|\\bTNT\\b|\\bTBS\\b|\\bUSA\\b|\\bBTN\\b|\\bSEC\\b|\\bACC\\b")
+    /**
+     * Sports opens: if the channel list is over an hour old, pull it again (names only, no
+     * library, no guide) and resolve the games afresh. Providers rename event feeds to the
+     * matchup on game day, and the usual refresh is once a day at launch.
+     */
+    fun refreshChannelsIfStale() = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        if (p.kind == tv.sloopy.data.ProviderKind.DEMO) return@launch
+        val age = System.currentTimeMillis() - prefs.refreshedAt(p.id, "channels")
+        if (age < 3600_000L) return@launch
+        runCatching { catalog.refreshAll(p, includeLibrary = false, includeEpg = false) }.onFailure { TLog.w { "sports channel refresh: ${TLog.userMessage(it)}" } }
+        gameChannelCache.clear(); refreshScores()
+    }
     fun setNetworkChannel(network: String, c: ChannelEntity?) = viewModelScope.launch {
         val p = active.value ?: return@launch
         val m = networkMap.value.toMutableMap(); if (c == null) m.remove(network) else m[network] = c.id
@@ -1006,7 +1022,14 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val hiddenCh = hiddenChannels.value; val hiddenG = hiddenGroups.value
         val live = channels.value.filter { it.id !in hiddenCh && it.categoryId !in hiddenG }
         val byEpg = live.filter { it.epgId != null }.groupBy { it.epgId!! }
-        val onNow = if (list.any { it.state == "in" || kotlin.math.abs(it.startEpoch - now) < 2 * 3600 }) runCatching { catalog.nowPlaying(p.id, byEpg.keys.toList(), now) }.getOrDefault(emptyMap()) else emptyMap()
+        // The guide at each kickoff (quarter-hour buckets, at least now), for the channels that
+        // could carry a game: sports groups and sports-named channels. A few indexed reads per
+        // refresh instead of one over every channel for the two hours around now.
+        val sportCats = liveCategories.value.filter { SPORT_WORDS.containsMatchIn(it.name.uppercase()) }.map { it.id }.toSet()
+        val sporty = live.filter { it.epgId != null && (it.categoryId in sportCats || SPORT_WORDS.containsMatchIn(it.name.uppercase())) }.map { it.epgId!! }.distinct()
+        fun bucket(g: tv.sloopy.core.sports.Game) = maxOf(g.startEpoch + 60, now) / 900 * 900
+        val listingAt = HashMap<Long, Map<String, tv.sloopy.data.db.NowNext>>()
+        if (sporty.isNotEmpty()) for (t in list.map { bucket(it) }.distinct().sorted().take(16)) listingAt[t] = runCatching { catalog.nowPlaying(p.id, sporty, t) }.getOrDefault(emptyMap())
         // Off the main thread: a Saturday has eighty games, and the name scan below walks every
         // channel. Each channel's key is computed once, and each network's candidates once, per refresh.
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
@@ -1031,20 +1054,20 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 }.filter { it.second > 0 }.maxByOrNull { it.second }?.first
             }
             list.map { g ->
-                gameChannelCache[g.id]?.let { (id, at) -> if (now - at < 600) return@map GameRow(g, live.firstOrNull { it.id == id }, "cached") }
-                val fromGuide = onNow.entries.filter { (_, nn) -> tv.sloopy.core.sports.Scores.mentions(nn.title, g) == 2 }
+                gameChannelCache[g.id]?.let { (id, via, at) -> if (now - at < 600) return@map GameRow(g, live.firstOrNull { it.id == id }, via) }
+                val fromGuide = (listingAt[bucket(g)] ?: emptyMap()).entries.filter { (_, nn) -> tv.sloopy.core.sports.Scores.mentions(nn.title, g) == 2 }
                     .flatMap { byEpg[it.key] ?: emptyList() }.maxByOrNull { tv.sloopy.core.model.Dupes.quality(it.name) }
-                if (fromGuide != null) { gameChannelCache[g.id] = fromGuide.id to now; return@map GameRow(g, dupes.value.byChannel[fromGuide.id]?.primary ?: fromGuide, "guide") }
+                if (fromGuide != null) { gameChannelCache[g.id] = Triple(fromGuide.id, "guide", now); return@map GameRow(g, dupes.value.byChannel[fromGuide.id]?.primary ?: fromGuide, "guide") }
                 // A channel named after both teams, anywhere in the lineup, beats any network guess.
                 val byName = live.filter { tv.sloopy.core.sports.Scores.score(nameNorm[it.id] ?: " ", g) == 2 }.maxByOrNull { tv.sloopy.core.model.Dupes.quality(it.name) }
-                if (byName != null) { gameChannelCache[g.id] = byName.id to now; return@map GameRow(g, byName, "name") }
+                if (byName != null) { gameChannelCache[g.id] = Triple(byName.id, "name", now); return@map GameRow(g, byName, "name") }
                 for (net in g.networks.take(3)) {
-                    networkMap.value[net]?.let { id -> live.firstOrNull { it.id == id }?.let { gameChannelCache[g.id] = it.id to now; return@map GameRow(g, it, net) } }
+                    networkMap.value[net]?.let { id -> live.firstOrNull { it.id == id }?.let { gameChannelCache[g.id] = Triple(it.id, net, now); return@map GameRow(g, it, net) } }
                     val cands = forNetwork(net)
                     val guess = (if (cands.size > 1) byListing(g, cands) else null) ?: cands.firstOrNull()
-                    if (guess != null) { gameChannelCache[g.id] = guess.id to now; return@map GameRow(g, guess, "$net?") }
+                    if (guess != null) { gameChannelCache[g.id] = Triple(guess.id, "$net?", now); return@map GameRow(g, guess, "$net?") }
                 }
-                gameChannelCache[g.id] = null to now
+                gameChannelCache[g.id] = Triple(null, "", now)
                 GameRow(g, null, "")
             }
         }

@@ -59,6 +59,8 @@ class AffiliatesTest {
         // Without location/mascot (older rows), the display name is split instead.
         val h = g.copy(homeLoc = "", awayLoc = "", homeMascot = "", awayMascot = "")
         assertEquals(2, Scores.mentions("MICHIGAN STATE @ INDIANA", h))
+        assertEquals(2, Scores.score(Scores.normalize("NFL 03: MSU @ IND"), g))
+        assertEquals(0, Scores.score(Scores.normalize("IND Weather"), g))   // one abbreviation alone is nothing
         // An event feed named after the matchup counts the same way.
         assertEquals(2, Scores.score(Scores.normalize("US| ESPN+ 14: Michigan State vs Indiana (CFB)"), g))
     }

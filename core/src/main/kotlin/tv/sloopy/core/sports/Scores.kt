@@ -167,6 +167,10 @@ class Scores(private val http: Http) {
 
         /** [mentions] on an already [normalize]d string: the channel-name scan calls this ten thousand times. */
         fun score(norm: String, g: Game): Int {
+            // "NFL 03: CIN @ PIT": both abbreviations together count as both teams; one alone
+            // never does ("NO", "NE" and "SF" are everyday words).
+            val ab = g.homeShort.lowercase(); val aa = g.awayShort.lowercase()
+            if (ab.length >= 2 && aa.length >= 2 && ab != aa && norm.contains(" $ab ") && norm.contains(" $aa ")) return 2
             fun team(full: String, loc: String, mascot: String): Boolean {
                 val l = loc.ifBlank { full.substringBeforeLast(' ', "") }.lowercase().trim()
                 val m = mascot.ifBlank { full.substringAfterLast(' ') }.lowercase().trim()

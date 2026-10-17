@@ -121,6 +121,7 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
     fun dayOf(p: String): Int = if (p.startsWith("d")) p.drop(1).toIntOrNull() ?: 0 else 0
     // Resting on a day for a moment fetches it; flicking down the rail does not fetch every day on the way.
     LaunchedEffect(page) { if (page == "live" || page.startsWith("d") || page == "teams") { delay(250); vm.setScoresDay(dayOf(page)) } }
+    LaunchedEffect(Unit) { vm.refreshChannelsIfStale() }
     LaunchedEffect(Unit) { vm.refreshScores(); delay(300); runCatching { railFocus.requestFocus() }; while (true) { delay(45_000); if (vm.scoresDay.value == 0) vm.refreshScores() } }
 
     val shown: List<SloopyViewModel.GameRow> = remember(rows, page, followed) {
@@ -260,7 +261,14 @@ private fun GameCard(r: SloopyViewModel.GameRow, hide: Boolean) {
             if (r.channel != null) {
                 Text("OK to watch", style = Sloopy.titleRow)
                 Text("On " + tv.sloopy.core.model.Names.clean(r.channel.name), style = Sloopy.body.copy(color = Sloopy.textSoft), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(420.dp))
-                if (r.via.endsWith("?")) Text("Guessed from the name · hold OK to confirm", style = Sloopy.label.copy(color = Sloopy.dim))
+                val why = when {
+                    r.via == "guide" -> "Matched in the guide"
+                    r.via == "name" -> "Matched by channel name"
+                    r.via.endsWith("?") -> r.via.dropLast(1) + " · best guess · hold OK to confirm"
+                    r.via.isNotEmpty() -> "Your pick for " + r.via
+                    else -> null
+                }
+                if (why != null) Text(why, style = Sloopy.label.copy(color = Sloopy.dim))
             } else {
                 Text("No channel found", style = Sloopy.titleRow.copy(color = Sloopy.muted))
                 Text(if (g.networks.isEmpty()) "No network listed for this game" else "Hold OK to pick the channel for " + g.networks.first(), style = Sloopy.body.copy(color = Sloopy.muted))

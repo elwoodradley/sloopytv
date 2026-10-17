@@ -153,6 +153,15 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.20 (2026-10-17): game day. Sports opening calls `vm.refreshChannelsIfStale()`: channel
+  list over an hour old → `catalog.refreshAll(p, includeLibrary = false, includeEpg = false)` and
+  the games resolve again (providers rename event feeds to the matchup on the day; the usual
+  refresh is daily at launch). `Scores.score` counts both abbreviations together ("CIN @ PIT"),
+  never one alone. The sport guide pass reads `nowPlaying` at each kickoff (quarter-hour
+  buckets, ≤16) for sports groups and sports-named channels (`SPORT_WORDS`) instead of every
+  channel for ±2 h around now, so a 4:25 game resolves by listing at noon. `gameChannelCache`
+  keeps the reason; the card says "Matched in the guide" / "Matched by channel name" /
+  "FOX · best guess · hold OK to confirm" / "Your pick for FOX".
 - 0.6.18 (2026-10-17): buddy's notes, Peacock and ESPN+. `Game` carries `homeLoc/awayLoc`
   (ESPN `location`, "Michigan State") and `homeMascot/awayMascot` (`name`, "Spartans");
   `Scores.mentions(title, game)` scores a guide title 0–2 by those (never the bare word "state";
