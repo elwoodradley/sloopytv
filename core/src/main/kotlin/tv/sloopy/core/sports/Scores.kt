@@ -159,13 +159,18 @@ class Scores(private val http: Http) {
          * none. A team counts by its short name ("Michigan State") or its mascot ("Spartans");
          * two-letter leftovers and the bare word "state" never count on their own.
          */
-        fun mentions(title: String, g: Game): Int {
-            val t = " " + title.lowercase().replace(Regex("[^a-z0-9]+"), " ").trim() + " "
+        fun mentions(title: String, g: Game): Int = score(normalize(title), g)
+
+        /** A title or channel name as [score] wants it: lower case, one space between words, padded. */
+        fun normalize(text: String): String = " " + text.lowercase().replace(NON_WORD, " ").trim() + " "
+        private val NON_WORD = Regex("[^a-z0-9]+")
+
+        /** [mentions] on an already [normalize]d string: the channel-name scan calls this ten thousand times. */
+        fun score(norm: String, g: Game): Int {
             fun team(full: String, loc: String, mascot: String): Boolean {
                 val l = loc.ifBlank { full.substringBeforeLast(' ', "") }.lowercase().trim()
                 val m = mascot.ifBlank { full.substringAfterLast(' ') }.lowercase().trim()
-                val names = listOf(l, m).filter { it.length >= 3 && it != "state" }
-                return names.any { t.contains(" $it ") }
+                return (l.length >= 3 && l != "state" && norm.contains(" $l ")) || (m.length >= 3 && m != "state" && norm.contains(" $m "))
             }
             return (if (team(g.home, g.homeLoc, g.homeMascot)) 1 else 0) + (if (team(g.away, g.awayLoc, g.awayMascot)) 1 else 0)
         }

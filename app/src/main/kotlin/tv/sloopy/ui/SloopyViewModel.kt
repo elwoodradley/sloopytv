@@ -1014,20 +1014,30 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             live.forEach { keyOf[it.id] = tv.sloopy.core.model.Dupes.key(it.name) }
             val candidates = HashMap<String, List<ChannelEntity>>()
             fun forNetwork(net: String): List<ChannelEntity> = candidates.getOrPut(net) { channelsForNetwork(net, live) { keyOf[it.id] ?: "" } }
+            // Channel names, normalised once: ESPN+ and PPV event feeds are named after the
+            // matchup ("ESPN+ 14: Bowling Green vs Toledo"), with no guide row behind them.
+            val nameNorm = HashMap<Long, String>(live.size * 2)
+            live.forEach { nameNorm[it.id] = tv.sloopy.core.sports.Scores.normalize(tv.sloopy.core.model.Names.clean(it.name)) }
             // The guide at the game's start, for the network's candidates: "PEACOCK 3" is the
-            // one whose listing names both teams. One small indexed read per game that needs it.
+            // one whose listing (or name) names both teams. One small indexed read per game that needs it.
             suspend fun byListing(g: tv.sloopy.core.sports.Game, cands: List<ChannelEntity>): ChannelEntity? {
-                val ids = cands.mapNotNull { it.epgId }.distinct(); if (ids.isEmpty()) return null
+                val ids = cands.mapNotNull { it.epgId }.distinct()
                 val at = maxOf(g.startEpoch + 60, now)
-                val listing = runCatching { catalog.nowPlaying(p.id, ids, at) }.getOrDefault(emptyMap())
-                return cands.map { c -> c to (listing[c.epgId]?.let { tv.sloopy.core.sports.Scores.mentions(it.title, g) } ?: 0) }
-                    .filter { it.second > 0 }.maxByOrNull { it.second }?.first
+                val listing = if (ids.isEmpty()) emptyMap() else runCatching { catalog.nowPlaying(p.id, ids, at) }.getOrDefault(emptyMap())
+                return cands.map { c ->
+                    val fromName = tv.sloopy.core.sports.Scores.score(nameNorm[c.id] ?: " ", g)
+                    val fromGuide = listing[c.epgId]?.let { tv.sloopy.core.sports.Scores.mentions(it.title, g) } ?: 0
+                    c to maxOf(fromName, fromGuide)
+                }.filter { it.second > 0 }.maxByOrNull { it.second }?.first
             }
             list.map { g ->
                 gameChannelCache[g.id]?.let { (id, at) -> if (now - at < 600) return@map GameRow(g, live.firstOrNull { it.id == id }, "cached") }
                 val fromGuide = onNow.entries.filter { (_, nn) -> tv.sloopy.core.sports.Scores.mentions(nn.title, g) == 2 }
                     .flatMap { byEpg[it.key] ?: emptyList() }.maxByOrNull { tv.sloopy.core.model.Dupes.quality(it.name) }
                 if (fromGuide != null) { gameChannelCache[g.id] = fromGuide.id to now; return@map GameRow(g, dupes.value.byChannel[fromGuide.id]?.primary ?: fromGuide, "guide") }
+                // A channel named after both teams, anywhere in the lineup, beats any network guess.
+                val byName = live.filter { tv.sloopy.core.sports.Scores.score(nameNorm[it.id] ?: " ", g) == 2 }.maxByOrNull { tv.sloopy.core.model.Dupes.quality(it.name) }
+                if (byName != null) { gameChannelCache[g.id] = byName.id to now; return@map GameRow(g, byName, "name") }
                 for (net in g.networks.take(3)) {
                     networkMap.value[net]?.let { id -> live.firstOrNull { it.id == id }?.let { gameChannelCache[g.id] = it.id to now; return@map GameRow(g, it, net) } }
                     val cands = forNetwork(net)

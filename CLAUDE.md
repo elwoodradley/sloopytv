@@ -161,7 +161,10 @@ a grabbed group.
   just those channels (`byListing`, one `nowPlaying` call) and takes the one whose listing names
   the teams. `Affiliates`: cable/streaming networks (not `BROADCAST`) rank the plain name over
   one with extra words, and ESPN excludes PLUS/ESPN+, so an LSU game on ESPN never lands on an
-  ESPN+ event feed.
+  ESPN+ event feed. 0.6.19: channel names count too (`Scores.normalize/score`, names normalised
+  once per refresh): a channel named after both teams anywhere in the lineup ("ESPN+ 14: Bowling
+  Green vs Toledo") wins outright, and among a network's copies the name scores alongside the
+  listing. Scanning 10k names × 80 games is a few hundred ms on Default.
 - 0.6.17 (2026-10-17): hold menus show one "Record" row (`RecordOptions.entry`); picking it
   opens `RecordPrompt` (ui/record) with the three paddings, like the Copies row opens its picker.
   Guide, Search and Tonight each keep a `recordFor`/`recordStep` state for the second step; the
