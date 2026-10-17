@@ -73,6 +73,7 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
     val favVod by vm.favouriteVodIds.collectAsState()
     val favSeries by vm.favouriteSeriesIds.collectAsState()
     var recordAsk by remember { mutableStateOf<Pair<ChannelEntity, ProgrammeEntity>?>(null) }
+    var recordStep by remember { mutableStateOf<Pair<ChannelEntity, ProgrammeEntity>?>(null) }   // the Record row's second step
     val scope = rememberCoroutineScope()
     var q by remember { mutableStateOf(vm.lastSearch) }
     LaunchedEffect(q) { vm.lastSearch = q }
@@ -194,12 +195,13 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
     recordAsk?.let { (c, p) ->
         val future = p.startEpoch > System.currentTimeMillis() / 1000
         val remind = if (!future) emptyList() else listOf(if (vm.hasReminder(c.id, p.startEpoch)) "unremind" to "Cancel the reminder" else "remind" to "Remind me when it starts")
-        ChoicePrompt(p.title.uppercase().take(28), remind + tv.sloopy.ui.record.RecordOptions.choices + ("no" to "Not now"), onCancel = { recordAsk = null },
+        ChoicePrompt(p.title.uppercase().take(28), remind + tv.sloopy.ui.record.RecordOptions.entry + ("no" to "Not now"), onCancel = { recordAsk = null },
             onPick = { k ->
-                when (k) { "remind" -> vm.addReminder(c, p.title, p.startEpoch, p.stopEpoch); "unremind" -> vm.removeReminder(c, p.startEpoch); else -> tv.sloopy.ui.record.RecordOptions.handle(vm, k, c, p) }
-                recordAsk = null; runCatching { field.requestFocus() }
+                when (k) { "remind" -> vm.addReminder(c, p.title, p.startEpoch, p.stopEpoch); "unremind" -> vm.removeReminder(c, p.startEpoch); "record" -> recordStep = c to p }
+                recordAsk = null; if (k != "record") runCatching { field.requestFocus() }
             })
     }
+    recordStep?.let { (c, p) -> tv.sloopy.ui.record.RecordPrompt(vm, c, p) { recordStep = null; runCatching { field.requestFocus() } } }
 }
 
 @Composable

@@ -56,6 +56,7 @@ fun TonightScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit,
     val items by vm.tonight.collectAsState()
     val busy by vm.tonightBusy.collectAsState()
     var menu by remember { mutableStateOf<SloopyViewModel.TonightItem?>(null) }
+    var recordStep by remember { mutableStateOf<Pair<tv.sloopy.data.db.ChannelEntity, tv.sloopy.data.db.ProgrammeEntity?>?>(null) }
     val first = remember { FocusRequester() }
     val hold = remember { FocusRequester() }
     BackHandler { onBack() }
@@ -97,7 +98,7 @@ fun TonightScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit,
     }
     menu?.let { item ->
         val opts = buildList {
-            if (item.channel != null && item.prog != null && item.prog.startEpoch > System.currentTimeMillis() / 1000) { add("remind" to "Remind me when it starts"); addAll(tv.sloopy.ui.record.RecordOptions.choices) }
+            if (item.channel != null && item.prog != null && item.prog.startEpoch > System.currentTimeMillis() / 1000) { add("remind" to "Remind me when it starts"); add(tv.sloopy.ui.record.RecordOptions.entry) }
             add("no_title" to "Not interested in ${item.title.take(24)}")
             add("no" to "Not now")
         }
@@ -105,11 +106,12 @@ fun TonightScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit,
             when {
                 k == "remind" && item.channel != null && item.prog != null -> vm.addReminder(item.channel, item.prog.title, item.prog.startEpoch, item.prog.stopEpoch)
                 k == "no_title" -> vm.notInterested(item.title)
-                item.channel != null -> tv.sloopy.ui.record.RecordOptions.handle(vm, k, item.channel, item.prog)
+                k == "record" && item.channel != null -> recordStep = item.channel to item.prog
             }
             menu = null
         })
     }
+    recordStep?.let { (c, p) -> tv.sloopy.ui.record.RecordPrompt(vm, c, p) { recordStep = null } }
 }
 
 @UnstableApi

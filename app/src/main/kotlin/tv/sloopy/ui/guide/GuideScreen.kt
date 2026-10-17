@@ -147,6 +147,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     var dropOnUp by remember { mutableStateOf(false) }
     var sortMenu by remember { mutableStateOf<String?>(null) }
     var cellMenu by remember { mutableStateOf<Pair<ChannelEntity, ProgrammeEntity?>?>(null) }
+    var recordFor by remember { mutableStateOf<Pair<ChannelEntity, ProgrammeEntity?>?>(null) }   // the Record row's second step
     val favIds by vm.favouriteIds.collectAsState()
     val reportsOn by vm.reportsEnabled.collectAsState()
     val dupesNow by vm.dupes.collectAsState()
@@ -252,8 +253,8 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     Column(
         Modifier.fillMaxSize().background(Sloopy.ground)
             .onPreviewKeyEvent { ev ->
-                if (sortMenu != null || cellMenu != null || groupMenu != null || copiesFor != null) {
-                    if (ev.inKeys(BACK_KEYS)) { if (!ev.isDown) { sortMenu = null; cellMenu = null; groupMenu = null; copiesFor = null }; return@onPreviewKeyEvent true }
+                if (sortMenu != null || cellMenu != null || groupMenu != null || copiesFor != null || recordFor != null) {
+                    if (ev.inKeys(BACK_KEYS)) { if (!ev.isDown) { sortMenu = null; cellMenu = null; groupMenu = null; copiesFor = null; recordFor = null }; return@onPreviewKeyEvent true }
                     return@onPreviewKeyEvent false
                 }
                 if (quit) return@onPreviewKeyEvent false
@@ -407,7 +408,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             if (live) add("watch" to "Watch now")
             if (inArchive) add("catchup" to "Play from the start (catch-up)")
             if (future) add(if (vm.hasReminder(c.id, p!!.startEpoch)) "unremind" to "Cancel the reminder" else "remind" to "Remind me when it starts")
-            if (!past) addAll(tv.sloopy.ui.record.RecordOptions.choices)
+            if (!past) add(tv.sloopy.ui.record.RecordOptions.entry)
             if (live && vm.vlcInstalled()) add("vlc" to "Open in VLC")
             add("fav" to (if (c.id in favIds) "Remove ${c.name.take(24)} from favourites" else "Add ${c.name.take(24)} to favourites"))
             val cl = vm.clusterOf(c)
@@ -426,12 +427,13 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
                 "unremind" -> vm.removeReminder(c, p!!.startEpoch)
                 "report" -> vm.reportChannel(c, null)
                 "copies" -> copiesFor = c
+                "record" -> recordFor = c to p
                 "hidechan" -> { vm.setChannelHidden(c.id, true); vm.toast("Hidden: ${c.name}. Settings › Listings brings it back.") }
-                else -> tv.sloopy.ui.record.RecordOptions.handle(vm, k, c, p)
             }
             cellMenu = null
         })
     }
+    recordFor?.let { (c, p) -> tv.sloopy.ui.record.RecordPrompt(vm, c, p) { recordFor = null } }
     copiesFor?.let { c ->
         val cl = vm.clusterOf(c)
         if (cl == null) copiesFor = null else {

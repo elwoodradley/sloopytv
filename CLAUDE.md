@@ -153,6 +153,10 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.17 (2026-10-17): hold menus show one "Record" row (`RecordOptions.entry`); picking it
+  opens `RecordPrompt` (ui/record) with the three paddings, like the Copies row opens its picker.
+  Guide, Search and Tonight each keep a `recordFor`/`recordStep` state for the second step; the
+  guide's overlay Back guard includes it. The viewer asked for the fold.
 - 0.6.16 (2026-10-17): Back from a game returns to Sports. `ScoresScreen(onWatch)` tunes and
   navigates to "live" with Sports kept on the back stack (the search pattern); `SloopyRoot`'s
   live `onBack` pops when the previous route is in `RETURN_TO` (search, scores), else opens the
