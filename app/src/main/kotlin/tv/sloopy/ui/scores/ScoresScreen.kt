@@ -264,8 +264,10 @@ private fun GameCard(r: SloopyViewModel.GameRow, hide: Boolean) {
                 val why = when {
                     r.via == "guide" -> "Matched in the guide"
                     r.via == "name" -> "Matched by channel name"
-                    r.via.endsWith("?") -> r.via.dropLast(1) + " · best guess · hold OK to confirm"
-                    r.via.isNotEmpty() -> "Your pick for " + r.via
+                    r.via.startsWith("map:") -> "Your pick for " + r.via.removePrefix("map:")
+                    r.via.startsWith("guide:") -> r.via.removePrefix("guide:") + " · matched in the guide"
+                    r.via.startsWith("name:") -> r.via.removePrefix("name:") + " · matched by channel name"
+                    r.via.startsWith("guess:") -> r.via.removePrefix("guess:") + " · best guess · hold OK to confirm"
                     else -> null
                 }
                 if (why != null) Text(why, style = Sloopy.label.copy(color = Sloopy.dim))

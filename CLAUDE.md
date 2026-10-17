@@ -153,6 +153,14 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.24 (2026-10-17): buddy's priorities. 0.6.19–0.6.20 let a whole-lineup name/guide match
+  beat the listed network, so Auburn–Georgia on ESPN and Duke–UNC on ESPN2 landed on ESPN+
+  split-screen feeds named after the teams. Now, per game: for each listed network in order,
+  the viewer's pick (`map:NET`) → that network's candidates, the one whose name or kickoff
+  listing names the teams (`name:NET`/`guide:NET`) else the best-ranked (`guess:NET`); only a
+  network with no channels in the lineup falls through to the lineup-wide guide and name
+  passes, and those skip PLUS/ESPN+/PPV feeds unless ESPN lists no network or lists a plus
+  network. The card shows the network with the reason.
 - 0.6.23 (2026-10-17): Friends behind its own paywall. Config gains `friendsProduct`,
   `friendsBuyUrl`, `friendsPrice` (admin page, under the app paywall; empty = Friends free, the
   default, so nothing changes until the operator fills it). Server: `friendsOk(env, lic)` gates
