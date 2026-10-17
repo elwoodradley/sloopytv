@@ -153,9 +153,15 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.22 (2026-10-17): the Toad was missing from the user's strip while the server said
+  enabled + allowed: `refreshToad()` ran once at root, and a lost request (launch with a
+  296k-row guide download) hid it for the session. `vm.startToadWatch()` retries with backoff
+  (15 s, 1, 4, 16 min) and re-checks half-hourly once on. Check `/toad/status?id=<code>` with
+  curl first when the icon is missing; the stick's code is under Settings › Friends.
 - 0.6.21 (2026-10-17): the strip, after TiviMate. `STRIP_BANDS` in `ui/common/Rail.kt`: Guide ·
   Tonight · Sports / Movies · Series · History · Recordings · Search / (Toad ·) Settings, the
-  last band pinned to the foot, a 16dp hairline centred in each gap (`STRIP_GAP_H`), rows
+  last band pinned to the foot, plain air between bands (`STRIP_GAP_H`; the 0.6.21 hairline
+  read as a stray line and went in 0.6.22), rows
   `STRIP_ROW_H` (50dp, separate from `RAIL_ROW_H`), icons 24dp. `StripColumn` lays out both the
   icon column and the label panel so they line up. Settings is a proper eight-tooth gear path;
   the Toad is a front-facing toad (two eyes on top, mouth). "Scores" is labelled Sports on the
