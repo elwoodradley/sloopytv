@@ -153,6 +153,10 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.29 (2026-10-18): HANG ON SLOOPY for both states, scarlet runner, real Ohio outline (see
+  Voice). The boundary came from `https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json`
+  (TopoJSON, decoded and simplified with a Douglas-Peucker pass in a throwaway script); redo it
+  from there if the shape ever needs more or fewer points.
 - 0.6.28 (2026-10-18): the hub, second pass (the user: "not intuitive, buttons bigger, groups
   first then channels"). `HubPage` is now one column with three tabs (Groups, Favourites,
   Search): the Groups tab lists groups with ▲▼ and drag to reorder, big "Sports on/off" and
@@ -454,9 +458,11 @@ Five touches of copy, no more: HANG ON (buffering), HANG ON SLOOPY (reconnecting
 (empty search), "Stay tuned" (quit button), TV-menu headings in Settings (PICTURE, LISTINGS,
 PARENTAL). Everything else, especially errors and the provider form, stays dead straight.
 No O-H-I-O chant or team references in copy: the user turned that down. Since 0.6.28 the one
-Ohio nod is visual, not words: `ui/common/HangOn.kt` draws the state outline with the amber dot
-running round it under a big centred HANG ON / HANG ON SLOOPY (the user asked for "a little
-dance, something Ohio"). Buffering waits 1.2 s before showing it so channel changes never flash it.
+Ohio nod is visual, not words: `ui/common/HangOn.kt` draws the real state boundary (us-atlas
+states-10m, 116 points, embedded as a Kotlin list) with a scarlet dot (0xFFE0282E, the one
+non-amber accent, at the user's request) running round it under a big centred HANG ON SLOOPY,
+for buffering and reconnecting alike since 0.6.29; the small line underneath tells them apart.
+Buffering waits 1.2 s before showing it so channel changes never flash it.
 
 ## Releases
 Use `scripts/release.sh <version> "<notes>"`; never hand-bump without it (versionCode is derived
