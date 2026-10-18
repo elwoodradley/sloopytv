@@ -155,9 +155,7 @@ fun LiveScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit, on
         } else if (healed != null && overlay == Overlay.OSD) {
             Text("BACKUP COPY · ${tv.sloopy.core.model.Names.clean(healed!!.name).uppercase()} FAILED · OK › COPIES TO CHANGE", style = Sloopy.label.copy(color = Sloopy.amber), modifier = Modifier.align(Alignment.BottomEnd).padding(end = 72.dp, bottom = 56.dp))
         } else if (pstate.reconnecting || pstate.isBuffering) {
-            Box(Modifier.align(Alignment.BottomEnd).padding(end = 72.dp, bottom = 56.dp)) {
-                Text(if (pstate.reconnecting) "HANG ON SLOOPY" else "HANG ON", style = Sloopy.label)
-            }
+            tv.sloopy.ui.common.HangOnSloopy(pstate.reconnecting, pstate.isBuffering, Modifier.align(Alignment.Center))
         }
 
         copiesFor?.let { c ->

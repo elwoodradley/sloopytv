@@ -153,6 +153,13 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.28 (2026-10-18): the hub, second pass (the user: "not intuitive, buttons bigger, groups
+  first then channels"). `HubPage` is now one column with three tabs (Groups, Favourites,
+  Search): the Groups tab lists groups with ▲▼ and drag to reorder, big "Sports on/off" and
+  "Hide" text buttons, and tapping a group opens its channels with "☆ Favourite" and "Hide"
+  buttons and a back button; Favourites lists what is starred; Search covers every channel.
+  Phone-width layout wraps rows. Same /hub/data and /hub/op API. HANG ON moved to the middle
+  of the picture (`HangOnSloopy`, see Voice).
 - 0.6.27 (2026-10-18): the lineup hub. `pair/HubPage.kt` is a page the stick serves at
   `/hub#<token>` on the phone-remote server (same token, same Wi-Fi, app open): groups down the
   left (drag to reorder, eye hides, S = Sports hub may pick from it), the selected group's
@@ -446,7 +453,10 @@ a grabbed group.
 Five touches of copy, no more: HANG ON (buffering), HANG ON SLOOPY (reconnecting), "Nothing on."
 (empty search), "Stay tuned" (quit button), TV-menu headings in Settings (PICTURE, LISTINGS,
 PARENTAL). Everything else, especially errors and the provider form, stays dead straight.
-No O-H-I-O or team references: the user turned that down.
+No O-H-I-O chant or team references in copy: the user turned that down. Since 0.6.28 the one
+Ohio nod is visual, not words: `ui/common/HangOn.kt` draws the state outline with the amber dot
+running round it under a big centred HANG ON / HANG ON SLOOPY (the user asked for "a little
+dance, something Ohio"). Buffering waits 1.2 s before showing it so channel changes never flash it.
 
 ## Releases
 Use `scripts/release.sh <version> "<notes>"`; never hand-bump without it (versionCode is derived
