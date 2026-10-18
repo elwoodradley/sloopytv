@@ -195,9 +195,10 @@ a grabbed group.
   in it too. Rule: nothing in `core` that reads a body runs on the caller's thread.
 - 0.6.31 (2026-10-18): the strip after TiviMate's side panel (user's photos): the strip and its
   label panel sit on `Sloopy.surface` (one step above ground) so they read as a panel, and the
-  strip's header zone carries a mark, "TV" in Big Shoulders when folded and "SLOOPYTV"
-  overflowing over the label panel when the strip has focus (`NavStrip`, zIndex 3 above the
-  panel). The mark lives in the RAIL_HEADER_H zone, level with the screens' rail headers.
+  strip's header zone carries a mark (`StripMark`, 0.6.35): the launcher banner's look drawn
+  live, an amber TV over a 30dp strip of the SMPTE colour bars when folded, SLOOPY (off-white)
+  TV (amber) over a 116dp strip when the strip has focus, overflowing over the label panel
+  (zIndex 3). Text plus seven rectangles, no bitmap. The mark lives in the RAIL_HEADER_H zone.
 - 0.6.30 (2026-10-18): hub groups get a "Top" button beside ▲▼ (send to the top, then nudge
   down), the user's answer to drag not working on a phone.
 - 0.6.29 (2026-10-18): HANG ON SLOOPY for both states, scarlet runner, real Ohio outline (see

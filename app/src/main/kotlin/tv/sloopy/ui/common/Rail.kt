@@ -168,12 +168,7 @@ fun NavStrip(
         // The mark in the strip's header zone: "TV" when folded, the full name when the strip
         // has focus (it overflows to the right, over the label panel's own empty header zone).
         Box(Modifier.height(RAIL_HEADER_H).width(STRIP_W).zIndex(3f).padding(start = if (expanded) 16.dp else 0.dp), contentAlignment = if (expanded) Alignment.CenterStart else Alignment.Center) {
-            Text(
-                if (expanded) "SLOOPYTV" else "TV",
-                style = androidx.compose.ui.text.TextStyle(fontFamily = Sloopy.display, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = if (expanded) 26.sp else 21.sp, letterSpacing = 0.02.em, color = Sloopy.text),
-                softWrap = false, maxLines = 1,
-                modifier = Modifier.wrapContentWidth(Alignment.Start, unbounded = true),
-            )
+            StripMark(expanded)
         }
         StripColumn(Modifier) { i, route, label ->
                 var fc by remember { mutableStateOf(false) }
@@ -206,6 +201,29 @@ fun NavStrip(
                     Text(label.uppercase(), style = Sloopy.titleRow.copy(color = when { route == focusedRoute -> Color.White; route == current -> Sloopy.text; else -> Sloopy.muted }))
                 }
             }
+        }
+    }
+}
+
+/** The launcher banner's colour bars (SMPTE order), drawn, for the strip mark. */
+private val BARS = listOf(Color(0xFFC0C0C0), Color(0xFFC0C000), Color(0xFF00C0C0), Color(0xFF00C000), Color(0xFFC000C0), Color(0xFFC00000), Color(0xFF0000C0))
+
+/**
+ * The strip's mark, after the launcher banner: an amber TV when folded; SLOOPY in off-white
+ * and TV in amber when the strip has focus; the colour bars underneath in both. Drawn text
+ * and seven rectangles, so it costs nothing to ship or to draw.
+ */
+@Composable
+private fun StripMark(expanded: Boolean) {
+    val face = androidx.compose.ui.text.TextStyle(fontFamily = Sloopy.display, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = if (expanded) 22.sp else 18.sp, letterSpacing = 0.01.em, lineHeight = 1.em)
+    Column(Modifier.wrapContentWidth(if (expanded) Alignment.Start else Alignment.CenterHorizontally, unbounded = true), horizontalAlignment = if (expanded) Alignment.Start else Alignment.CenterHorizontally) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            if (expanded) Text("SLOOPY", style = face.copy(color = Sloopy.text), softWrap = false, maxLines = 1)
+            if (expanded) Spacer(Modifier.width(4.dp))
+            Text("TV", style = face.copy(color = Sloopy.amber), softWrap = false, maxLines = 1)
+        }
+        Row(Modifier.padding(top = 2.dp).height(3.dp).width(if (expanded) 116.dp else 30.dp)) {
+            BARS.forEach { c -> Box(Modifier.weight(1f).fillMaxHeight().background(c)) }
         }
     }
 }
