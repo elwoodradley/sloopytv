@@ -15,6 +15,8 @@ sealed class RemoteEvent {
     data class Type(val text: String, val submit: Boolean) : RemoteEvent()
     data class Tune(val channelId: Long) : RemoteEvent()
     data class Toad(val text: String) : RemoteEvent()
+    /** A lineup-hub change: op is groupOrder, groupHidden, channelHidden, favourite or sportsGroup. */
+    data class Hub(val op: String, val body: JsonObject) : RemoteEvent()
 }
 
 /**
@@ -22,21 +24,26 @@ sealed class RemoteEvent {
  * next to the pairing server. Every request carries a token that only the QR on the TV shows,
  * and the token changes each launch, so nothing else on the Wi-Fi can type into the TV.
  */
-class RemoteServer(private val context: Context, port: Int, private val channelsJson: () -> String, private val stateJson: () -> String) : NanoHTTPD("0.0.0.0", port) {
+class RemoteServer(private val context: Context, port: Int, private val channelsJson: () -> String, private val stateJson: () -> String, private val hubJson: () -> String = { "{}" }) : NanoHTTPD("0.0.0.0", port) {
     val token: String = ByteArray(12).also { SecureRandom().nextBytes(it) }.joinToString("") { "%02x".format(it) }
     val events = MutableSharedFlow<RemoteEvent>(extraBufferCapacity = 16)
     private val json = Json { ignoreUnknownKeys = true }
 
     val address: String get() = "http://${PairingServer.localIp() ?: "?"}:$listeningPort/remote#$token"
+    /** The lineup hub for a laptop: same server, same token. */
+    val hubAddress: String get() = "http://${PairingServer.localIp() ?: "?"}:$listeningPort/hub#$token"
 
     override fun serve(session: IHTTPSession): Response {
         return try {
             val ok = session.headers["x-token"] == token || session.parameters["t"]?.firstOrNull() == token
             when {
                 session.method == Method.GET && session.uri == "/remote" -> newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8", RemotePage.html())
+                session.method == Method.GET && session.uri == "/hub" -> newFixedLengthResponse(Response.Status.OK, "text/html; charset=utf-8", HubPage.html())
                 !ok -> newFixedLengthResponse(Response.Status.FORBIDDEN, "application/json", """{"ok":false,"message":"Scan the code on the TV again."}""")
                 session.method == Method.GET && session.uri == "/channels" -> newFixedLengthResponse(Response.Status.OK, "application/json", channelsJson())
                 session.method == Method.GET && session.uri == "/state" -> newFixedLengthResponse(Response.Status.OK, "application/json", stateJson())
+                session.method == Method.GET && session.uri == "/hub/data" -> newFixedLengthResponse(Response.Status.OK, "application/json", hubJson())
+                session.method == Method.POST && session.uri == "/hub/op" -> { val b = body(session); val op = b.str("op").orEmpty(); if (op.isNotBlank()) events.tryEmit(RemoteEvent.Hub(op, b)); okJson() }
                 session.method == Method.POST && session.uri == "/type" -> { val b = body(session); events.tryEmit(RemoteEvent.Type(b.str("text").orEmpty().take(200), b.str("submit") == "true")); okJson() }
                 session.method == Method.POST && session.uri == "/toad" -> { val b = body(session); b.str("text")?.takeIf { it.isNotBlank() }?.let { events.tryEmit(RemoteEvent.Toad(it.take(300))) }; okJson() }
                 session.method == Method.POST && session.uri == "/tune" -> { val b = body(session); b.str("id")?.toLongOrNull()?.let { events.tryEmit(RemoteEvent.Tune(it)) }; okJson() }
@@ -59,9 +66,9 @@ class RemoteServer(private val context: Context, port: Int, private val channels
     private fun JsonObject.str(k: String) = (this[k] as? JsonPrimitive)?.contentOrNull
 
     companion object {
-        fun start(context: Context, channelsJson: () -> String, stateJson: () -> String): RemoteServer? {
+        fun start(context: Context, channelsJson: () -> String, stateJson: () -> String, hubJson: () -> String = { "{}" }): RemoteServer? {
             for (p in 8781 until 8790) {
-                val s = RemoteServer(context, p, channelsJson, stateJson)
+                val s = RemoteServer(context, p, channelsJson, stateJson, hubJson)
                 try { s.start(SOCKET_READ_TIMEOUT, false); return s } catch (e: Exception) { runCatching { s.stop() } }
             }
             return null

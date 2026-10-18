@@ -153,6 +153,23 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.27 (2026-10-18): the lineup hub. `pair/HubPage.kt` is a page the stick serves at
+  `/hub#<token>` on the phone-remote server (same token, same Wi-Fi, app open): groups down the
+  left (drag to reorder, eye hides, S = Sports hub may pick from it), the selected group's
+  channels in the middle (star = favourite, eye = hide, search across all), favourites on the
+  right (drop a channel on it). `GET /hub/data` is `vm.hubJson()` (groups in order with flags,
+  every channel with group/fav/hidden; about 1 MB on a 10k lineup, LAN only); `POST /hub/op`
+  emits `RemoteEvent.Hub(op, body)` → `vm.hubOp` (groupOrder, groupHidden, channelHidden,
+  favourite, sportsGroup) which writes the same prefs/tables the TV uses. Settings › Listings
+  shows the address with a QR (`vm.hubAddress`). Zero cloud cost: nothing touches the code
+  server. The page is plain HTML/JS with system fonts so it works offline on the LAN. Debug
+  builds write the hub address (with token) to files/remote_address.txt so the emulator's hub
+  opens from a desktop browser via `adb forward tcp:8781 tcp:8781` and `run-as … cat`; a hash-only
+  URL change does not reload the page, so add `?v=N` when the token changes. Seen while testing:
+  two ANRs ("Input dispatching timed out", main thread 9 s into a LazyColumn measure under the
+  NavHost) within 30 s of a cold emulator boot with the launcher still setting up; not
+  reproducible warm with the same keys. ANR traces: `adb bugreport` → FS/data/anr/ (no root on
+  this image). Watch About › "closed on you" reports from real sticks for the same signature.
 - 0.6.26 (2026-10-17): buddy's second batch. Settings › Sports gains "Only US groups" (unticks
   every group without a US/USA word), "Tick all", "Untick all", and hides groups already hidden
   in the guide. A network with no candidates in the ticked groups falls back to all non-hidden

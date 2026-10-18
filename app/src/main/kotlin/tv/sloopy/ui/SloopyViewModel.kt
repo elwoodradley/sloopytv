@@ -478,6 +478,45 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     private var remote: tv.sloopy.pair.RemoteServer? = null
     private val _remoteAddress = MutableStateFlow<String?>(null)
     val remoteAddress: StateFlow<String?> = _remoteAddress
+    private val _hubAddress = MutableStateFlow<String?>(null)
+    /** The lineup hub's address on the Wi-Fi (Settings › Listings shows it with a QR). */
+    val hubAddress: StateFlow<String?> = _hubAddress
+    /** Everything the lineup hub shows: groups in order with hidden/sports flags, every channel with its group, favourite and hidden flags. */
+    private fun hubJson(): String {
+        val p = active.value
+        val hiddenG = hiddenGroups.value; val hiddenC = hiddenChannels.value; val favs = favouriteIds.value; val off = sportsGroupsOff.value
+        val pr = kotlinx.serialization.json.JsonPrimitive(p?.name ?: "")
+        return buildString(1 shl 20) {
+            append("{\"provider\":").append(pr.toString()).append(",\"groups\":[")
+            allLiveCategories.value.forEachIndexed { i, c ->
+                if (i > 0) append(',')
+                append("{\"id\":").append(kotlinx.serialization.json.JsonPrimitive(c.id).toString()).append(",\"name\":").append(kotlinx.serialization.json.JsonPrimitive(tv.sloopy.core.model.Names.clean(c.name)).toString())
+                append(",\"hidden\":").append(c.id in hiddenG).append(",\"sports\":").append(c.id !in off).append('}')
+            }
+            append("],\"channels\":[")
+            channels.value.forEachIndexed { i, c ->
+                if (i > 0) append(',')
+                append("{\"id\":").append(c.id).append(",\"n\":").append(c.number).append(",\"name\":").append(kotlinx.serialization.json.JsonPrimitive(tv.sloopy.core.model.Names.clean(c.name)).toString())
+                append(",\"g\":").append(kotlinx.serialization.json.JsonPrimitive(c.categoryId ?: "").toString()).append(",\"fav\":").append(c.id in favs).append(",\"hid\":").append(c.id in hiddenC).append('}')
+            }
+            append("]}")
+        }
+    }
+    private fun hubOp(ev: tv.sloopy.pair.RemoteEvent.Hub) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val b = ev.body
+        fun str(k: String) = (b[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
+        fun bool(k: String) = (b[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull == "true"
+        when (ev.op) {
+            "groupOrder" -> (b["ids"] as? kotlinx.serialization.json.JsonArray)?.mapNotNull { (it as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull }?.let { prefs.setGroupOrder(p.id, it) }
+            "groupHidden" -> str("id")?.let { setHidden(it, bool("hidden")) }
+            "channelHidden" -> str("id")?.toLongOrNull()?.let { setChannelHidden(it, bool("hidden")) }
+            "favourite" -> str("id")?.toLongOrNull()?.let { id ->
+                if (bool("on")) graph.db.favourites().add(FavouriteEntity(p.id, id, System.currentTimeMillis())) else graph.db.favourites().remove(p.id, id)
+            }
+            "sportsGroup" -> str("id")?.let { setSportsGroupOff(it, bool("off")) }
+        }
+    }
     val remoteText = MutableSharedFlow<Pair<String, Boolean>>(extraBufferCapacity = 8)
     fun ensureRemote() {
         if (remote != null) return
@@ -487,14 +526,19 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 buildString { append("{\"channels\":["); list.forEachIndexed { i, c -> if (i > 0) append(','); append("{\"id\":${c.id},\"number\":${c.number},\"name\":${kotlinx.serialization.json.JsonPrimitive(tv.sloopy.core.model.Names.clean(c.name))}}") }; append("]}") }
             },
             stateJson = { val c = currentChannel.value; "{\"id\":${c?.id ?: 0},\"toad\":${_toadAllowed.value},\"now\":${kotlinx.serialization.json.JsonPrimitive(c?.let { tv.sloopy.core.model.Names.clean(it.name) } ?: "")}}" },
+            hubJson = { hubJson() },
         ) ?: return
-        remote = s; _remoteAddress.value = s.address
+        remote = s; _remoteAddress.value = s.address; _hubAddress.value = s.hubAddress
+        // Debug builds only: the address (with token) in the app's private files, so the emulator's
+        // hub can be opened from a desktop browser over adb forward without reading a QR.
+        if (tv.sloopy.BuildConfig.DEBUG) runCatching { java.io.File(getApplication<android.app.Application>().filesDir, "remote_address.txt").writeText(s.hubAddress) }
         viewModelScope.launch {
             s.events.collect { ev ->
                 when (ev) {
                     is tv.sloopy.pair.RemoteEvent.Type -> remoteText.tryEmit(ev.text to ev.submit)
                     is tv.sloopy.pair.RemoteEvent.Tune -> channels.value.firstOrNull { it.id == ev.channelId }?.let { tune(it); goHome() }
                     is tv.sloopy.pair.RemoteEvent.Toad -> { toadAsk(ev.text); toadEvents.tryEmit("toad") }
+                    is tv.sloopy.pair.RemoteEvent.Hub -> hubOp(ev)
                 }
             }
         }

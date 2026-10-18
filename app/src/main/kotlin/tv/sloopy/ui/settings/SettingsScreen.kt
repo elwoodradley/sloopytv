@@ -157,6 +157,19 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                     }
                     "listings" -> {
                         Section("Listings")
+                        val hub by vm.hubAddress.collectAsState()
+                        if (hub != null) {
+                            Row(Modifier.padding(bottom = 16.dp), verticalAlignment = Alignment.CenterVertically) {
+                                Box(Modifier.background(Color.White).padding(4.dp)) { tv.sloopy.ui.common.QrCode(hub!!, 96.dp) }
+                                Spacer(Modifier.width(18.dp))
+                                Column {
+                                    Text("Sort your lineup on a laptop or phone", style = Sloopy.titleRow)
+                                    Text("Same Wi-Fi, app open. Drag groups into order, hide what you never watch, star favourites, tick groups for the Sports hub. Changes land here at once.", style = Sloopy.body.copy(color = Sloopy.textSoft), modifier = Modifier.width(760.dp).padding(top = 4.dp))
+                                    Text(hub!!.substringBefore('#'), style = Sloopy.body.copy(color = Sloopy.amber, fontFamily = Sloopy.mono), modifier = Modifier.padding(top = 6.dp))
+                                    Text("Scan the code, or type the address and add the code on the TV screen.", style = Sloopy.label.copy(color = Sloopy.dim), modifier = Modifier.padding(top = 2.dp))
+                                }
+                            }
+                        }
                         Row {
                             SloopyButton("Refresh channels and listings", onClick = { vm.refresh(force = true) })
                             Spacer(Modifier.width(16.dp))
