@@ -153,6 +153,16 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.33 (2026-10-18): "click MLS and it pops me back out": as the WHICH LEAGUE prompt closed,
+  focus landed on a neighbouring rail row for a frame, the rail's `onFocusChanged` set `page`
+  to that day and wiped `pickLeague`. Now a resting rail focus never drops the picker (only an
+  OK on another rail row does, in `RailItem.onClick`), the picker's "Fetching the team list…"
+  notice is itself focusable so the cursor has a home in the content while the list loads, and
+  the pick asks for `contentFocus` with retries. Emulator notes from the hunt: `tube_tv` has
+  `hw.gpu.enabled = no`, and the demo's 1080p stream is decoded in software, so the box sits at
+  100% CPU with ~1% of it on the UI thread; bursts (guide import at cold boot, a Sports page with
+  logos) then ANR on the emulator only. Launch it with `-gpu host -cores 8` and let it settle
+  40 s after the app starts before pressing keys. Real sticks decode in hardware.
 - 0.6.32 (2026-10-18): Sports hub, the user's batch. Leagues: MLS (soccer/usa.1), Premier
   League (eng.1), EFL Championship (eng.2) in `Scores.LEAGUES`; `SOCCER` set drives W-D-L
   records and points notes; team picker and standings work unchanged (ESPN soccer teams have

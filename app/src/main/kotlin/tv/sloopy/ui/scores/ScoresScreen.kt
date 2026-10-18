@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -170,9 +171,19 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
                     itemsIndexed(pages, key = { _, p -> p.first }) { i, (key, name) ->
                         // Landing on a different rail row changes the page and drops an open picker; the
                         // cursor merely resting back on the same row leaves the picker up.
-                        Box(Modifier.onFocusChanged { if (it.hasFocus && page != key) { page = key; pickLeague = null } }) {
+                        // A rail row taking focus changes the page; the team picker is dropped only when the
+                        // cursor really leaves My teams (focus passing through a neighbour while a prompt
+                        // closes used to wipe it: "I click MLS and it pops me back out").
+                        // A rail row taking focus changes the page. It never drops the team picker: as the
+                        // league prompt closes, focus passes through a neighbouring row for a frame, and
+                        // that used to wipe the picker ("I click MLS and it pops me back out"). The picker
+                        // shows while the page is My teams; Back or Not now closes it.
+                        Box(Modifier.onFocusChanged { if (it.hasFocus && page != key && pickLeague == null) page = key }) {
                             RailItem(name + (if (key == "live" && rows.any { it.game.state == "in" }) "  ·  ${rows.count { it.game.state == "in" }}" else ""), selected = key == page, requester = if (key == page) railFocus else null, first = i == 0, last = i == pages.lastIndex, leftTarget = stripFocus, onLongClick = { railMenu = key }) {
                                 // OK fetches the day at once (no resting delay) and moves over when it is in.
+                                // A deliberate OK on a rail row is what closes the team picker (resting never does).
+                                if (pickLeague != null && key != "teams") pickLeague = null
+                                page = key
                                 if (key == "live" || key.startsWith("d") || key == "teams") vm.setScoresDay(dayOf(key))
                                 enterContent()
                             }
@@ -225,7 +236,7 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
             scope.launch { delay(150); runCatching { railFocus.requestFocus() } }
         })
     }
-    if (leagueMenu) ChoicePrompt("WHICH LEAGUE?", Scores.LEAGUES.map { it to Scores.leagueName(it) } + ("no" to "Not now"), onCancel = { leagueMenu = false }, onPick = { k -> leagueMenu = false; if (k != "no") { pickLeague = k; scope.launch { delay(100); runCatching { railFocus.requestFocus() } } } })
+    if (leagueMenu) ChoicePrompt("WHICH LEAGUE?", Scores.LEAGUES.map { it to Scores.leagueName(it) } + ("no" to "Not now"), onCancel = { leagueMenu = false }, onPick = { k -> leagueMenu = false; if (k != "no") { page = "teams"; pickLeague = k; scope.launch { repeat(15) { delay(60); if (runCatching { contentFocus.requestFocus() }.getOrDefault(false)) return@launch } } } })
     gameMenu?.let { r ->
         val g = r.game
         val now = System.currentTimeMillis() / 1000
@@ -394,8 +405,10 @@ private fun TeamPicker(vm: SloopyViewModel, league: String, first: FocusRequeste
     Label("Follow a team · OK follows, OK again unfollows · Back when done")
     Text(Scores.leagueName(league).uppercase(), style = Sloopy.titleHuge, modifier = Modifier.padding(top = 8.dp, bottom = 10.dp))
     when {
-        teams == null -> Text("Fetching the team list…", style = Sloopy.bodyBig)
-        teams!!.isEmpty() -> Text("Could not fetch the team list. Check the connection and try again.", style = Sloopy.bodyBig.copy(color = Sloopy.amber))
+        // While the list loads, the notice itself holds focus (so the cursor has a home in the
+        // content and cannot wander back to the rail); the first row takes over when it lands.
+        teams == null -> Box(Modifier.focusRequester(first).focusProperties { left = railFocus }.focusable()) { Text("Fetching the team list…", style = Sloopy.bodyBig) }
+        teams!!.isEmpty() -> Box(Modifier.focusRequester(first).focusProperties { left = railFocus }.focusable()) { Text("Could not fetch the team list. Check the connection and try again.", style = Sloopy.bodyBig.copy(color = Sloopy.amber)) }
         else -> LazyColumn(Modifier.fillMaxSize().focusRestorer().focusGroup(), contentPadding = PaddingValues(bottom = 40.dp)) {
             itemsIndexed(teams!!, key = { _, t -> t.id }) { i, t ->
                 val on = followed.any { it.league == league && it.id == t.id }
