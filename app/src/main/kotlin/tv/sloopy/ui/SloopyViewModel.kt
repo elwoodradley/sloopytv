@@ -1031,7 +1031,9 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     }
     private val _games = MutableStateFlow<List<GameRow>>(emptyList())
     val games: StateFlow<List<GameRow>> = _games
-    private val _scoresBusy = MutableStateFlow(false)
+    // True until the first fetch lands, so the Sports hub opens on the loader, not "Nothing in play".
+    private val _scoresBusy = MutableStateFlow(true)
+    private var scoresGen = 0
     val scoresBusy: StateFlow<Boolean> = _scoresBusy
     /** Days from today for the games shown: -1 yesterday … +6. */
     val scoresDay = MutableStateFlow(0)
@@ -1134,6 +1136,10 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     private var scoresJob: Job? = null
     fun refreshScores() {
         scoresJob?.cancel()
+        // A newer refresh cancels this one, and the cancelled job's finally ran after the new one
+        // had set busy: the hub said "Nothing in play" while five games were live. Only the
+        // newest job may clear the flag.
+        val gen = ++scoresGen
         scoresJob = viewModelScope.launch {
             _scoresBusy.value = true
             try {
@@ -1145,7 +1151,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 val sorted = all.sortedWith(compareBy({ when (it.state) { "in" -> 0; "pre" -> 1; else -> 2 } }, { !it.redZone }, { it.startEpoch }))
                 val rows = if (p == null) sorted.map { GameRow(it, null, "") } else resolveGameChannels(p, sorted)
                 _games.value = rows
-            } finally { _scoresBusy.value = false }
+            } finally { if (gen == scoresGen) _scoresBusy.value = false }
         }
     }
     /** One pass over what is on now, then the network map, then a guess by name: never a search through the guide table. */
@@ -1244,6 +1250,23 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val fresh = runCatching { scores.teams(league) }.getOrDefault(emptyList())
         if (fresh.isNotEmpty()) prefs.setTeamList(league, fresh.map { FollowedTeam.of(it).encode() })
         return fresh
+    }
+    /**
+     * The lineup's NFL RedZone channel: a name with REDZONE / RED ZONE, the plain feed over LOWER /
+     * ALT / RAW / BACKUP variants, a group the Sports hub may use, a US group, then picture quality.
+     */
+    fun redZoneChannel(): ChannelEntity? {
+        val hiddenC = hiddenChannels.value; val hiddenG = hiddenGroups.value; val off = sportsGroupsOff.value
+        val cats = allLiveCategories.value.associate { it.id to it.name.uppercase() }
+        return channels.value.asSequence()
+            .filter { it.id !in hiddenC && it.categoryId !in hiddenG }
+            .filter { val n = tv.sloopy.core.model.Names.clean(it.name).uppercase(); n.contains("REDZONE") || n.contains("RED ZONE") }
+            .maxWithOrNull(compareBy<ChannelEntity>(
+                { val n = it.name.uppercase(); if (listOf("LOWER", "ALT", "RAW", "ᴿᴬᵂ", "BACKUP").any { w -> n.contains(w) }) 0 else 1 },
+                { if (it.categoryId in off) 0 else 1 },
+                { if ((cats[it.categoryId] ?: "").contains("US")) 1 else 0 },
+                { tv.sloopy.core.model.Dupes.quality(it.name) },
+            ))
     }
     val sportsRailOrder: StateFlow<List<String>> = prefs.sportsRailOrder.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     fun setSportsRailOrder(list: List<String>) = viewModelScope.launch { prefs.setSportsRailOrder(list) }

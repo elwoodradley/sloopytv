@@ -44,7 +44,23 @@ fun HangOnSloopy(reconnecting: Boolean, buffering: Boolean, modifier: Modifier =
         if (!reconnecting) { show = false; delay(1200) }
         show = true
     }
-    if (!show) return
+    if (show) OhioCard(if (reconnecting) "Getting the stream back" else "Loading the stream", modifier)
+}
+
+/**
+ * The same card as the app's "wait" everywhere else (the buddy, 2026-10-18: Search, Sports and
+ * Tonight said so in small letters that were easy to miss). Shown while the caller is loading;
+ * it waits [delayMs] first so a quick answer never flashes it.
+ */
+@Composable
+fun LoadingSloopy(caption: String, modifier: Modifier = Modifier, delayMs: Long = 350) {
+    var show by remember { mutableStateOf(delayMs <= 0) }
+    LaunchedEffect(Unit) { if (!show) { delay(delayMs); show = true } }
+    if (show) OhioCard(caption, modifier)
+}
+
+@Composable
+private fun OhioCard(caption: String, modifier: Modifier) {
     val t by rememberInfiniteTransition(label = "ohio").animateFloat(0f, 1f, infiniteRepeatable(tween(2800, easing = LinearEasing), RepeatMode.Restart), label = "dot")
     val line = Sloopy.text; val dot = androidx.compose.ui.graphics.Color(0xFFE0282E)   // scarlet, the viewer's pick for the runner
     Column(modifier, horizontalAlignment = Alignment.CenterHorizontally) {
@@ -68,11 +84,10 @@ fun HangOnSloopy(reconnecting: Boolean, buffering: Boolean, modifier: Modifier =
             }
         }
         Spacer(Modifier.height(10.dp))
-        androidx.tv.material3.Text(if (reconnecting) "Getting the stream back" else "Loading the stream", style = Sloopy.label)
+        androidx.tv.material3.Text(caption, style = Sloopy.label)
     }
 }
 
-/** Ohio, simplified: Lake Erie along the top, the straight western line, the river's bends below. 0..1 units. */
 /** Ohio's boundary from the US Census 1:10m cartographic file (us-atlas states-10m, state 39), equirectangular at Ohio's mean latitude, 116 points after simplification. 0..1 units, width:height 0.924. */
 private val OHIO = listOf(
     0.0033f to 0.0789f, 0.3180f to 0.0685f, 0.3189f to 0.0748f, 0.3364f to 0.0815f, 0.3472f to 0.0774f,

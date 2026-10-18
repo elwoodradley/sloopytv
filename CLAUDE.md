@@ -153,6 +153,19 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.38 (2026-10-18), buddy's notes. The HANG ON SLOOPY card (Ohio outline, scarlet runner)
+  is the app's one "wait": `LoadingSloopy(caption, delayMs = 350)` in `ui/common/HangOn.kt`
+  shares the drawing with `HangOnSloopy` (`OhioCard`) and replaces the small loading text in
+  Search ("Searching your service"), Tonight, the Sports day pages (only when nothing is shown,
+  so the 45 s live refresh never flashes it), standings, playoffs and the team picker (whose
+  loading box still holds focus). Sports rail gains "NFL RedZone" (key `rz`, after Live now):
+  one big tile that tunes `vm.redZoneChannel()` (REDZONE / RED ZONE in the name; plain feed
+  over LOWER/ALT/RAW/BACKUP; ticked group; US group; quality) and the NFL games in play below.
+  The buddy's lineup has "US| NFL REDZONE HD", "US| NFL REDZONE (LOWER)", "TV| NFL REDZONE ᴿᴬᵂ".
+  Found while testing: `refreshScores` cancels the previous job, whose `finally` then cleared
+  `scoresBusy` under the new job, so the hub flashed "Nothing in play right now" with games live
+  and never showed a loader. A generation counter lets only the newest job clear it, and the
+  flag starts true until the first fetch lands.
 - 0.6.37 (2026-10-18): with the Toad on, the guide's strip (which only gets the height under
   the programme panel, ~550dp) was taller than its space and Settings fell off the bottom; the
   user had to reach Settings through Sports. `StripColumn` now sizes rows to the height it is

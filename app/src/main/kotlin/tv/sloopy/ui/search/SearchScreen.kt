@@ -149,7 +149,7 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
                 Text("Type on your phone: scan with the camera. Same Wi-Fi. You can also tap a channel there to tune.", style = Sloopy.label.copy(color = Sloopy.dim), modifier = Modifier.width(520.dp))
             }
             Spacer(Modifier.height(12.dp))
-            if (searching && hits.isEmpty()) Text("Searching…", style = Sloopy.bodyBig.copy(color = Sloopy.muted))
+            if (searching && hits.isEmpty()) Box(Modifier.fillMaxWidth().padding(top = 36.dp), contentAlignment = Alignment.Center) { tv.sloopy.ui.common.LoadingSloopy("Searching your service") }
             else if (q.trim().length >= 2 && hits.isEmpty()) Text("Nothing on.", style = Sloopy.bodyBig)
             if (hits.isNotEmpty()) Text("Hold OK on a channel, movie or series to add it to favourites and keep going. Hold OK on a programme to record it.", style = Sloopy.label.copy(color = Sloopy.dim), modifier = Modifier.padding(bottom = 8.dp))
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 40.dp)) {

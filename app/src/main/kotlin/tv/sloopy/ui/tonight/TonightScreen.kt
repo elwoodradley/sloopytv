@@ -75,7 +75,7 @@ fun TonightScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit,
                 Text("ON TONIGHT", style = Sloopy.titleHuge, modifier = Modifier.padding(top = 8.dp, bottom = 14.dp))
                 Box(Modifier.focusRequester(hold).focusProperties { up = FocusRequester.Cancel; down = FocusRequester.Cancel; right = FocusRequester.Cancel }.focusable()) {
                     when {
-                        busy && items.isEmpty() -> Column { Label("Hang on", bright = true); Text("Fetching tonight's programmes…", style = Sloopy.bodyBig, modifier = Modifier.padding(top = 6.dp)) }
+                        busy && items.isEmpty() -> Box(Modifier.fillMaxWidth().padding(top = 30.dp), contentAlignment = Alignment.Center) { tv.sloopy.ui.common.LoadingSloopy("Fetching tonight's programmes", delayMs = 0) }
                         items.isEmpty() -> Text("Nothing you follow is on tonight. Watch a few channels and this fills in on its own. Settings › Picture can widen it to sport on any channel, new episodes on demand, and what's popular today.", style = Sloopy.bodyBig, modifier = Modifier.width(900.dp))
                     }
                 }
