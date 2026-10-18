@@ -153,6 +153,11 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.31 (2026-10-18): the strip after TiviMate's side panel (user's photos): the strip and its
+  label panel sit on `Sloopy.surface` (one step above ground) so they read as a panel, and the
+  strip's header zone carries a mark, "TV" in Big Shoulders when folded and "SLOOPYTV"
+  overflowing over the label panel when the strip has focus (`NavStrip`, zIndex 3 above the
+  panel). The mark lives in the RAIL_HEADER_H zone, level with the screens' rail headers.
 - 0.6.30 (2026-10-18): hub groups get a "Top" button beside ▲▼ (send to the top, then nudge
   down), the user's answer to drag not working on a phone.
 - 0.6.29 (2026-10-18): HANG ON SLOOPY for both states, scarlet runner, real Ohio outline (see

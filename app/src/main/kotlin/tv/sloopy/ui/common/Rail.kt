@@ -36,6 +36,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.em
+import androidx.compose.ui.unit.sp
 import androidx.tv.material3.Border
 import androidx.tv.material3.ClickableSurfaceDefaults
 import androidx.tv.material3.Surface
@@ -159,10 +161,20 @@ fun NavStrip(
     var expanded by remember { mutableStateOf(false) }
     val items = stripItems()
     Box(
-        Modifier.width(STRIP_W).fillMaxHeight().zIndex(2f)
+        Modifier.width(STRIP_W).fillMaxHeight().zIndex(2f).background(Sloopy.surface)
             .focusProperties { this.canFocus = canFocus }
             .onFocusChanged { expanded = it.hasFocus; onFocusChange(it.hasFocus) },
     ) {
+        // The mark in the strip's header zone: "TV" when folded, the full name when the strip
+        // has focus (it overflows to the right, over the label panel's own empty header zone).
+        Box(Modifier.height(RAIL_HEADER_H).width(STRIP_W).zIndex(3f).padding(start = if (expanded) 16.dp else 0.dp), contentAlignment = if (expanded) Alignment.CenterStart else Alignment.Center) {
+            Text(
+                if (expanded) "SLOOPYTV" else "TV",
+                style = androidx.compose.ui.text.TextStyle(fontFamily = Sloopy.display, fontWeight = androidx.compose.ui.text.font.FontWeight.Bold, fontSize = if (expanded) 26.sp else 21.sp, letterSpacing = 0.02.em, color = Sloopy.text),
+                softWrap = false, maxLines = 1,
+                modifier = Modifier.wrapContentWidth(Alignment.Start, unbounded = true),
+            )
+        }
         StripColumn(Modifier) { i, route, label ->
                 var fc by remember { mutableStateOf(false) }
                 Surface(
@@ -187,7 +199,7 @@ fun NavStrip(
         }
         if (expanded) {
             StripColumn(
-                Modifier.wrapContentWidth(Alignment.Start, unbounded = true).offset(x = STRIP_W).width(236.dp).background(Sloopy.ground)
+                Modifier.wrapContentWidth(Alignment.Start, unbounded = true).offset(x = STRIP_W).width(236.dp).background(Sloopy.surface)
                     .drawBehind { drawRect(Sloopy.hair, Offset(size.width - 1.dp.toPx(), 0f), Size(1.dp.toPx(), size.height)) },
             ) { _, route, label ->
                 Box(Modifier.height(STRIP_ROW_H).fillMaxWidth().padding(start = 18.dp), contentAlignment = Alignment.CenterStart) {
