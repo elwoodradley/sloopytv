@@ -160,6 +160,9 @@ class Prefs(private val context: Context) {
         p[stringPreferencesKey("toad_tags_digest_$providerId")] = digest
     }
     // Sports: teams followed (league|id|name|abbr|logo), the hide-scores switch, and a week-old team list per league.
+    /** The Sports hub rail in the viewer's order (page keys); pages it does not name follow in the default order. */
+    val sportsRailOrder: Flow<List<String>> = ds.data.map { p -> p[stringPreferencesKey("sports_rail")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
+    suspend fun setSportsRailOrder(list: List<String>) = ds.edit { it[stringPreferencesKey("sports_rail")] = list.joinToString("\u0001") }
     val followedTeams: Flow<List<String>> = ds.data.map { p -> p[stringPreferencesKey("followed_teams")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
     suspend fun setFollowedTeams(list: List<String>) = ds.edit { it[stringPreferencesKey("followed_teams")] = list.distinct().joinToString("\u0001") }
     val hideScores: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("hide_scores")] ?: false }

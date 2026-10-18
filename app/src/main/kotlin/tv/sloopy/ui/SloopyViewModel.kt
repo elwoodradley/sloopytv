@@ -1226,6 +1226,30 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         if (fresh.isNotEmpty()) prefs.setTeamList(league, fresh.map { FollowedTeam.of(it).encode() })
         return fresh
     }
+    val sportsRailOrder: StateFlow<List<String>> = prefs.sportsRailOrder.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
+    fun setSportsRailOrder(list: List<String>) = viewModelScope.launch { prefs.setSportsRailOrder(list) }
+    /** The league's postseason games as resolved rows, kept a quarter hour. Empty outside the playoffs. */
+    private val playoffCache = HashMap<String, Pair<Long, List<GameRow>>>()
+    private val playoffNowCache = HashMap<String, Pair<Long, Boolean>>()
+    /** Whether the league is in its postseason: one cheap call, kept an hour. */
+    suspend fun inPlayoffs(league: String): Boolean {
+        playoffNowCache[league]?.let { (at, v) -> if (System.currentTimeMillis() - at < 60 * 60_000L) return v }
+        // A postseason game within a fortnight: ESPN lists college's bowl placeholders months ahead.
+        val now = System.currentTimeMillis() / 1000
+        val v = runCatching { scores.playoffsNow(league) }.getOrDefault(emptyList()).any { kotlin.math.abs(it.startEpoch - now) < 14 * 86_400L }
+        playoffNowCache[league] = System.currentTimeMillis() to v
+        return v
+    }
+    suspend fun playoffsFor(league: String): List<GameRow> {
+        playoffCache[league]?.let { (at, v) -> if (System.currentTimeMillis() - at < 15 * 60_000L) return v }
+        val today = java.time.LocalDate.now(); val f = java.time.format.DateTimeFormatter.ofPattern("yyyyMMdd")
+        val days = (-7..7).map { today.plusDays(it.toLong()).format(f) }
+        val games = runCatching { scores.playoffs(league, days) }.getOrDefault(emptyList())
+        val p = active.value
+        val rows = if (p == null || games.isEmpty()) games.map { GameRow(it, null, "") } else resolveGameChannels(p, games)
+        playoffCache[league] = System.currentTimeMillis() to rows
+        return rows
+    }
     private val standingsCache = HashMap<String, Pair<Long, List<tv.sloopy.core.sports.StandingsGroup>>>()
     suspend fun standingsFor(league: String): List<tv.sloopy.core.sports.StandingsGroup> {
         standingsCache[league]?.let { (at, v) -> if (System.currentTimeMillis() - at < 15 * 60_000L) return v }

@@ -16,6 +16,7 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -109,13 +110,21 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
     BackHandler { when { pickLeague != null -> { pickLeague = null; scope.launch { delay(100); runCatching { railFocus.requestFocus() } } }; inContent -> runCatching { railFocus.requestFocus() }; else -> onBack() } }
 
     val today = remember { LocalDate.now() }
-    val pages = remember(today) {
-        buildList {
+    // Leagues in their postseason right now get a Playoffs row; found once per visit.
+    val playoffLeagues by produceState(emptyList<String>()) { value = Scores.LEAGUES.filter { runCatching { vm.inPlayoffs(it) }.getOrDefault(false) } }
+    val railOrder by vm.sportsRailOrder.collectAsState()
+    var railMenu by remember { mutableStateOf<String?>(null) }   // hold OK on a rail row: move it
+    val pages = remember(today, playoffLeagues, railOrder) {
+        val base = buildList {
             add("live" to "Live now"); add("d0" to "Today"); add("d1" to "Tomorrow"); add("d-1" to "Yesterday")
             for (i in 2..6) add("d$i" to today.plusDays(i.toLong()).format(DateTimeFormatter.ofPattern("EEEE")))
             add("teams" to "My teams")
+            playoffLeagues.forEach { add("po:$it" to "Playoffs · " + Scores.leagueName(it)) }
             Scores.LEAGUES.forEach { add("st:$it" to "Standings · " + Scores.leagueName(it)) }
         }
+        // The viewer's order first (My teams at the top, say), then whatever it does not name.
+        val rank = railOrder.withIndex().associate { (i, k) -> k to i }
+        base.sortedWith(compareBy({ rank[it.first] ?: Int.MAX_VALUE }, { base.indexOf(it) }))
     }
     // The day a page needs: the live page is today's feed filtered to games in play.
     fun dayOf(p: String): Int = if (p.startsWith("d")) p.drop(1).toIntOrNull() ?: 0 else 0
@@ -162,7 +171,7 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
                         // Landing on a different rail row changes the page and drops an open picker; the
                         // cursor merely resting back on the same row leaves the picker up.
                         Box(Modifier.onFocusChanged { if (it.hasFocus && page != key) { page = key; pickLeague = null } }) {
-                            RailItem(name + (if (key == "live" && rows.any { it.game.state == "in" }) "  ·  ${rows.count { it.game.state == "in" }}" else ""), selected = key == page, requester = if (key == page) railFocus else null, first = i == 0, last = i == pages.lastIndex, leftTarget = stripFocus) {
+                            RailItem(name + (if (key == "live" && rows.any { it.game.state == "in" }) "  ·  ${rows.count { it.game.state == "in" }}" else ""), selected = key == page, requester = if (key == page) railFocus else null, first = i == 0, last = i == pages.lastIndex, leftTarget = stripFocus, onLongClick = { railMenu = key }) {
                                 // OK fetches the day at once (no resting delay) and moves over when it is in.
                                 if (key == "live" || key.startsWith("d") || key == "teams") vm.setScoresDay(dayOf(key))
                                 enterContent()
@@ -176,6 +185,7 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
                 when {
                     pickLeague != null -> TeamPicker(vm, pickLeague!!, contentFocus, railFocus, onDone = { pickLeague = null; scope.launch { delay(100); runCatching { railFocus.requestFocus() } } })
                     page.startsWith("st:") -> StandingsPage(vm, page.removePrefix("st:"), contentFocus, railFocus)
+                    page.startsWith("po:") -> PlayoffsPage(vm, page.removePrefix("po:"), hide, contentFocus, railFocus, onFocus = { focusedRow = it }, onOpen = { r -> r.channel?.let { vm.tune(it); onWatch() } ?: run { gameMenu = r } }, onHold = { gameMenu = it })
                     else -> {
                         val title = when (page) { "live" -> "LIVE NOW"; "teams" -> "MY TEAMS"; "d0" -> "TODAY"; "d1" -> "TOMORROW"; "d-1" -> "YESTERDAY"; else -> pages.firstOrNull { it.first == page }?.second?.uppercase() ?: "GAMES" }
                         Label(when { busy -> "Fetching scores…"; hide -> "Scores hidden · Menu shows them"; else -> "OK watch · hold OK for more · Menu hides scores" })
@@ -201,6 +211,20 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
 
     // While the team list downloads there is nothing in the content to focus, so the rail holds
     // the cursor; the picker hands it to its first row when the list arrives.
+    railMenu?.let { key ->
+        val name = pages.firstOrNull { it.first == key }?.second ?: key
+        ChoicePrompt(name.uppercase().take(28), listOf("top" to "Move to the top", "up" to "Move up", "down" to "Move down", "reset" to "Put everything back in order", "no" to "Not now"), onCancel = { railMenu = null }, onPick = { k ->
+            val ids = pages.map { it.first }.toMutableList(); val i = ids.indexOf(key)
+            when (k) {
+                "top" -> { ids.removeAt(i); ids.add(0, key); vm.setSportsRailOrder(ids) }
+                "up" -> if (i > 0) { ids.removeAt(i); ids.add(i - 1, key); vm.setSportsRailOrder(ids) }
+                "down" -> if (i < ids.lastIndex) { ids.removeAt(i); ids.add(i + 1, key); vm.setSportsRailOrder(ids) }
+                "reset" -> vm.setSportsRailOrder(emptyList())
+            }
+            railMenu = null
+            scope.launch { delay(150); runCatching { railFocus.requestFocus() } }
+        })
+    }
     if (leagueMenu) ChoicePrompt("WHICH LEAGUE?", Scores.LEAGUES.map { it to Scores.leagueName(it) } + ("no" to "Not now"), onCancel = { leagueMenu = false }, onPick = { k -> leagueMenu = false; if (k != "no") { pickLeague = k; scope.launch { delay(100); runCatching { railFocus.requestFocus() } } } })
     gameMenu?.let { r ->
         val g = r.game
@@ -253,6 +277,7 @@ private fun GameCard(r: SloopyViewModel.GameRow, hide: Boolean) {
                 Text(statusText(g, hide), style = Sloopy.mono14.copy(color = if (g.redZone && !hide) Sloopy.amber else Sloopy.textSoft))
                 if (g.redZone && !hide) Text("  ·  RED ZONE" + (g.possession?.let { " · $it" } ?: ""), style = Sloopy.mono14.copy(color = Sloopy.amber))
             }
+            if (g.note.isNotBlank() || g.series.isNotBlank()) Text(listOf(g.note, if (hide) "" else g.series).filter { it.isNotBlank() }.joinToString("  ·  "), style = Sloopy.mono14.copy(color = Sloopy.amber), modifier = Modifier.padding(top = 2.dp))
             TeamLine(g.awayLogo, g.away, g.awayRecord, if (hide || g.state == "pre") "" else g.awayScore.toString(), big = true)
             TeamLine(g.homeLogo, g.home, g.homeRecord, if (hide || g.state == "pre") "" else g.homeScore.toString(), big = true)
         }
@@ -288,9 +313,16 @@ private fun TeamLine(logo: String?, name: String, record: String, score: String,
         else Box(Modifier.size(if (big) 28.dp else 18.dp).background(Sloopy.surface2))
         Spacer(Modifier.width(10.dp))
         Text(name, style = nameStyle, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
-        if (record.isNotBlank()) Text(record, style = Sloopy.mono14.copy(color = Sloopy.muted), modifier = Modifier.padding(start = 8.dp).width(if (big) 70.dp else 50.dp))
+        if (record.isNotBlank()) Text(record, style = Sloopy.mono14.copy(color = Sloopy.muted), maxLines = 1, softWrap = false, modifier = Modifier.padding(start = 8.dp).widthIn(min = if (big) 70.dp else 50.dp))
         if (score.isNotBlank()) Text(score, style = nameStyle, modifier = Modifier.padding(start = 10.dp).width(if (big) 60.dp else 36.dp))
     }
+}
+
+/** "ALCS - Game 4" → "ALCS G4"; "AFC Wild Card - Bills at Dolphins" → "AFC Wild Card". Fits a tile's corner. */
+private fun roundShort(note: String): String {
+    val head = note.substringBefore(" - ").trim()
+    val game = Regex("Game (\\d+)").find(note)?.groupValues?.get(1)
+    return (if (game != null) "$head G$game" else head).take(18)
 }
 
 private fun statusText(g: Game, hide: Boolean): String = when (g.state) {
@@ -339,6 +371,7 @@ private fun GameGrid(rows: List<SloopyViewModel.GameRow>, hide: Boolean, first: 
                             Text(statusText(g, hide), style = Sloopy.mono14.copy(color = if (g.redZone && !hide) Sloopy.amber else Sloopy.muted), maxLines = 1)
                             Spacer(Modifier.weight(1f))
                             if (g.redZone && !hide) Text("RZ", style = Sloopy.label.copy(color = Sloopy.amber))
+                            else if (g.note.isNotBlank()) Text(roundShort(g.note), style = Sloopy.label.copy(color = Sloopy.amber), maxLines = 1, modifier = Modifier.padding(start = 8.dp))
                         }
                         TeamLine(g.awayLogo, g.away, g.awayRecord, if (hide || g.state == "pre") "" else g.awayScore.toString(), big = false)
                         TeamLine(g.homeLogo, g.home, g.homeRecord, if (hide || g.state == "pre") "" else g.homeScore.toString(), big = false)
@@ -392,17 +425,81 @@ private fun TeamPicker(vm: SloopyViewModel, league: String, first: FocusRequeste
 }
 
 /** A league's table, one block per conference or division. */
+/** Every postseason game ESPN lists for the league, a month either side of today, newest round first; the round and series ride each tile. */
+@Composable
+private fun PlayoffsPage(vm: SloopyViewModel, league: String, hide: Boolean, first: FocusRequester, railFocus: FocusRequester, onFocus: (SloopyViewModel.GameRow) -> Unit, onOpen: (SloopyViewModel.GameRow) -> Unit, onHold: (SloopyViewModel.GameRow) -> Unit) {
+    var rows by remember(league) { mutableStateOf<List<SloopyViewModel.GameRow>?>(null) }
+    LaunchedEffect(league) { rows = vm.playoffsFor(league) }
+    Label("Playoffs · from ESPN · hold OK on a game for more")
+    Text(("Playoffs · " + Scores.leagueName(league)).uppercase(), style = Sloopy.titleHuge, modifier = Modifier.padding(top = 8.dp, bottom = 10.dp))
+    when {
+        rows == null -> Text("Fetching the bracket…", style = Sloopy.bodyBig)
+        rows!!.isEmpty() -> Text("No playoff games listed.", style = Sloopy.bodyBig.copy(color = Sloopy.amber))
+        else -> {
+            val now = System.currentTimeMillis() / 1000
+            // In play first, then upcoming by kickoff, then finished newest first.
+            val sorted = remember(rows) { rows!!.sortedWith(compareBy({ when (it.game.state) { "in" -> 0; "pre" -> 1; else -> 2 } }, { if (it.game.state == "post") -it.game.startEpoch else it.game.startEpoch })) }
+            GameGrid(sorted, hide, first, railFocus, onFocus = onFocus, onOpen = onOpen, onHold = onHold)
+        }
+    }
+}
+
 @Composable
 private fun StandingsPage(vm: SloopyViewModel, league: String, first: FocusRequester, railFocus: FocusRequester) {
-    val groups by produceState<List<tv.sloopy.core.sports.StandingsGroup>?>(null, league) { value = vm.standingsFor(league) }
+    // Keyed remember, not produceState: produceState keeps the old league's rows while the new
+    // ones load, so the heading flipped a beat before the table did.
+    var all by remember(league) { mutableStateOf<List<tv.sloopy.core.sports.StandingsGroup>?>(null) }
+    LaunchedEffect(league) { all = vm.standingsFor(league) }
     val followed by vm.followedTeams.collectAsState()
-    Label("Standings · from ESPN · teams you follow are marked")
-    Text(Scores.leagueName(league).uppercase(), style = Sloopy.titleHuge, modifier = Modifier.padding(top = 8.dp, bottom = 10.dp))
+    // Several conferences or divisions: a grid of cards, each with the top of its table; OK opens
+    // the whole table and Back returns to the grid. One table (the Premier League): straight in.
+    var open by remember(league) { mutableStateOf<String?>(null) }
+    val groups = remember(all, open) { all?.let { list -> if (open == null) list else list.filter { it.name == open } } }
+    androidx.activity.compose.BackHandler(enabled = open != null) { open = null }
+    // The table is composed a frame after OK on a card, and the grid a frame after Back: ask for
+    // the first row or card until it takes. Not on the page's first composition, which would
+    // pull the cursor off the rail while it merely rests on the Standings row.
+    var lastOpen by remember(league) { mutableStateOf<String?>(null) }
+    LaunchedEffect(open) {
+        val from = lastOpen; lastOpen = open
+        if (open != null || from != null) repeat(12) { delay(60); if (runCatching { first.requestFocus() }.getOrDefault(false)) return@LaunchedEffect }
+    }
+    Label("Standings · from ESPN · teams you follow are marked" + if (open != null) " · Back for every table" else "")
+    Text((if (open != null) open!! else Scores.leagueName(league)).uppercase(), style = Sloopy.titleHuge, modifier = Modifier.padding(top = 8.dp, bottom = 10.dp), maxLines = 1, overflow = TextOverflow.Ellipsis)
     when {
-        groups == null -> Text("Fetching the table…", style = Sloopy.bodyBig)
-        groups!!.isEmpty() -> Text("No standings right now, or the feed is unreachable.", style = Sloopy.bodyBig.copy(color = Sloopy.amber))
+        all == null -> Text("Fetching the table…", style = Sloopy.bodyBig)
+        all!!.isEmpty() -> Text("No standings right now, or the feed is unreachable.", style = Sloopy.bodyBig.copy(color = Sloopy.amber))
+        open == null && all!!.size > 1 -> {
+            LazyVerticalGrid(GridCells.Fixed(3), Modifier.fillMaxSize().focusRestorer().focusGroup(), contentPadding = PaddingValues(bottom = 40.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                itemsIndexed(all!!, key = { _, g -> g.name }) { i, g ->
+                    Surface(
+                        onClick = { open = g.name },
+                        shape = ClickableSurfaceDefaults.shape(RectangleShape),
+                        colors = ClickableSurfaceDefaults.colors(containerColor = Sloopy.surface, focusedContainerColor = Sloopy.surface2, contentColor = Sloopy.text, focusedContentColor = Color.White),
+                        border = ClickableSurfaceDefaults.border(focusedBorder = androidx.tv.material3.Border(androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.55f)), shape = RectangleShape)),
+                        scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+                        modifier = Modifier.fillMaxWidth().then(if (i == 0) Modifier.focusRequester(first) else Modifier).focusProperties { if (i % 3 == 0) left = railFocus },
+                    ) {
+                        Column(Modifier.padding(14.dp)) {
+                            Label(g.name.take(34), bright = true)
+                            Spacer(Modifier.height(6.dp))
+                            g.rows.take(6).forEachIndexed { k, r ->
+                                val on = followed.any { it.league == league && it.id == r.teamId }
+                                Row(Modifier.fillMaxWidth().height(26.dp), verticalAlignment = Alignment.CenterVertically) {
+                                    Text((k + 1).toString(), style = Sloopy.mono14.copy(color = Sloopy.muted), modifier = Modifier.width(24.dp))
+                                    Box(Modifier.size(5.dp).background(if (on) Sloopy.amber else Color.Transparent)); Spacer(Modifier.width(8.dp))
+                                    Text(r.abbr.ifBlank { r.team }, style = Sloopy.listName.copy(color = Color.Unspecified), modifier = Modifier.weight(1f), maxLines = 1)
+                                    Text(r.record, style = Sloopy.mono14.copy(color = Color.Unspecified))
+                                }
+                            }
+                            if (g.rows.size > 6) Text("OK for all ${g.rows.size}", style = Sloopy.label.copy(color = Sloopy.dim), modifier = Modifier.padding(top = 6.dp))
+                        }
+                    }
+                }
+            }
+        }
         else -> {
-            val lines = remember(groups) { buildList<Any> { groups!!.forEach { g -> add(g.name); g.rows.forEachIndexed { i, r -> add(i + 1 to r) } } } }
+            val lines = remember(groups) { buildList<Any> { groups!!.forEach { g -> if (groups!!.size > 1) add(g.name); g.rows.forEachIndexed { i, r -> add(i + 1 to r) } } } }
             LazyColumn(Modifier.fillMaxSize().focusRestorer().focusGroup(), contentPadding = PaddingValues(bottom = 40.dp)) {
                 itemsIndexed(lines) { i, l ->
                     if (l is String) Label(l, modifier = Modifier.padding(top = 18.dp, bottom = 6.dp))
@@ -416,7 +513,7 @@ private fun StandingsPage(vm: SloopyViewModel, league: String, first: FocusReque
                             colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Sloopy.surface2, contentColor = Sloopy.text, focusedContentColor = Color.White),
                             border = ClickableSurfaceDefaults.border(focusedBorder = androidx.tv.material3.Border(androidx.compose.foundation.BorderStroke(1.dp, Color.White.copy(alpha = 0.55f)), shape = RectangleShape)),
                             scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
-                            modifier = Modifier.fillMaxWidth().height(44.dp).then(if (i == 1) Modifier.focusRequester(first) else Modifier).focusProperties { left = railFocus },
+                            modifier = Modifier.fillMaxWidth().height(44.dp).then(if (i == lines.indexOfFirst { it !is String }) Modifier.focusRequester(first) else Modifier).focusProperties { left = railFocus },
                         ) {
                             Column {
                                 Row(Modifier.fillMaxWidth().height(43.dp).padding(horizontal = 14.dp), verticalAlignment = Alignment.CenterVertically) {

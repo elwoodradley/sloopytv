@@ -153,6 +153,28 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.32 (2026-10-18): Sports hub, the user's batch. Leagues: MLS (soccer/usa.1), Premier
+  League (eng.1), EFL Championship (eng.2) in `Scores.LEAGUES`; `SOCCER` set drives W-D-L
+  records and points notes; team picker and standings work unchanged (ESPN soccer teams have
+  location = displayName, so `mentions` still matches). Rail order: hold OK on a Sports rail
+  row → Move to the top / up / down / reset (`prefs.sportsRailOrder`, keys; unnamed pages follow
+  in default order). Standings: a league with several groups shows a 3-wide grid of conference
+  cards (top six, "OK for all N"); OK opens the full table, Back returns to the grid
+  (`BackHandler(enabled = open != null)` inside `StandingsPage`); one-table leagues go straight
+  in. Playoffs: ESPN ignores a date range with `seasontype=3`, so `Scores.playoffsNow(league)`
+  (no date, one call, cached an hour in `vm.inPlayoffs`) decides whether a league is in its
+  postseason and `Scores.playoffs(league, days)` fetches ±7 days one day at a time (15 calls,
+  only for such leagues, cached 15 min); `Game` gained `note` (ESPN headline, "ALCS - Game 4"), `series` ("Series tied
+  2-2"), `postseason`; `vm.playoffsFor` resolves channels and caches 15 min; a "Playoffs ·
+  <league>" rail row appears only for leagues with postseason games (`playoffLeagues`
+  produceState) and shows them as tiles, in play → upcoming → finished; the card shows round
+  and series. No true bracket drawing: ESPN's public feed has no bracket object, the round
+  headline and series line are what it gives. Found while testing: every `Scores` call now
+  runs on Dispatchers.IO at the source (`games/teams/standings/playoffs/playoffsNow` wrap
+  private `…Io` bodies). `Http.get` hops to IO for the request, but the body read and the JSON
+  parse of a 1 MB scoreboard ran on the caller, the UI thread; fifteen playoff-day calls in a
+  row was a 5 s ANR on the emulator, and the buddy's "kicked out on Tomorrow" (0.6.5) had this
+  in it too. Rule: nothing in `core` that reads a body runs on the caller's thread.
 - 0.6.31 (2026-10-18): the strip after TiviMate's side panel (user's photos): the strip and its
   label panel sit on `Sloopy.surface` (one step above ground) so they read as a panel, and the
   strip's header zone carries a mark, "TV" in Big Shoulders when folded and "SLOOPYTV"

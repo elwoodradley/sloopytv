@@ -1,5 +1,7 @@
 package tv.sloopy.core.sports
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
@@ -26,6 +28,9 @@ data class Game(
     val homeLogo: String? = null, val awayLogo: String? = null,
     val homeLoc: String = "", val awayLoc: String = "",        // "Michigan State": the school or city
     val homeMascot: String = "", val awayMascot: String = "",  // "Spartans"
+    val note: String = "",         // "ALCS - Game 4", "AFC Wild Card": ESPN's headline for a playoff game
+    val series: String = "",       // "Series tied 2-2"
+    val postseason: Boolean = false,
 ) {
     fun has(league: String, teamId: String) = this.league == league && (homeId == teamId || awayId == teamId)
 }
@@ -35,13 +40,18 @@ data class Team(val league: String, val id: String, val name: String, val abbr: 
 
 /** One standings table (a conference or a division) with its rows in order. */
 data class StandingsGroup(val name: String, val rows: List<StandingsRow>)
-data class StandingsRow(val teamId: String, val team: String, val abbr: String, val record: String, val note: String)
+data class StandingsRow(val teamId: String, val team: String, val abbr: String, val record: String, val note: String, val rank: Int = 0, val points: Int = 0)
 
-/** ESPN's public scoreboard feed: what every scores app reads. No key, no login. */
+/**
+ * ESPN's public scoreboard feed: what every scores app reads. No key, no login. Every call
+ * runs on Dispatchers.IO: the body read and the JSON parse of a 1 MB scoreboard used to happen
+ * on whichever thread called, which was the UI thread, and fifteen of them in a row is an ANR.
+ */
 class Scores(private val http: Http) {
     private val json = Json { ignoreUnknownKeys = true }
 
-    suspend fun games(league: String, yyyymmdd: String? = null): List<Game> {
+    suspend fun games(league: String, yyyymmdd: String? = null): List<Game> = withContext(Dispatchers.IO) { gamesIo(league, yyyymmdd) }
+    private suspend fun gamesIo(league: String, yyyymmdd: String? = null): List<Game> {
         val path = path(league) ?: return emptyList()
         val extra = (if (yyyymmdd != null) "&dates=$yyyymmdd" else "") + (if (league == "college-football") "&groups=80&limit=200" else "")
         val text = http.get("https://site.api.espn.com/apis/site/v2/sports/$path/scoreboard?lang=en&region=us$extra", timeoutMs = 10_000).use { r ->
@@ -54,7 +64,8 @@ class Scores(private val http: Http) {
     }
 
     /** Every team in a league: id, name, abbreviation, logo. College football is the top division only. */
-    suspend fun teams(league: String): List<Team> {
+    suspend fun teams(league: String): List<Team> = withContext(Dispatchers.IO) { teamsIo(league) }
+    private suspend fun teamsIo(league: String): List<Team> {
         val path = path(league) ?: return emptyList()
         val extra = if (league == "college-football") "&groups=80" else ""
         val text = http.get("https://site.api.espn.com/apis/site/v2/sports/$path/teams?limit=500$extra", timeoutMs = 15_000).use { r ->
@@ -71,7 +82,8 @@ class Scores(private val http: Http) {
     }
 
     /** The league table(s): conferences for NFL/NBA/NHL/MLB, the top-25-style poll is not here. */
-    suspend fun standings(league: String): List<StandingsGroup> {
+    suspend fun standings(league: String): List<StandingsGroup> = withContext(Dispatchers.IO) { standingsIo(league) }
+    private suspend fun standingsIo(league: String): List<StandingsGroup> {
         val path = path(league) ?: return emptyList()
         val text = http.get("https://site.api.espn.com/apis/v2/sports/$path/standings", timeoutMs = 15_000).use { r ->
             if (!r.ok) return emptyList()
@@ -93,15 +105,26 @@ class Scores(private val http: Http) {
                 all.forEach { (n, _, v) -> stats.putIfAbsent(n, v) }
                 all.firstOrNull { it.second == "total" }?.let { stats["overall"] = it.third }
                 all.firstOrNull { it.second == "vsconf" }?.let { stats["vsconf"] = it.third }
-                StandingsRow(t.str("id") ?: "", t.str("displayName") ?: "?", t.str("abbreviation") ?: "", recordLine(league, stats), noteLine(league, stats))
+                StandingsRow(t.str("id") ?: "", t.str("displayName") ?: "?", t.str("abbreviation") ?: "", recordLine(league, stats), noteLine(league, stats),
+                    rank = stats["rank"]?.toIntOrNull() ?: 0, points = stats["points"]?.toIntOrNull() ?: 0)
             }
-            if (rows.isNotEmpty()) out.add(StandingsGroup(name, rows))
+            // ESPN's soccer tables arrive in no useful order: the rank stat is the table order, points the fallback.
+            val sorted = when {
+                rows.any { it.rank > 0 } -> rows.sortedBy { if (it.rank > 0) it.rank else Int.MAX_VALUE }
+                league in SOCCER -> rows.sortedByDescending { it.points }
+                else -> rows
+            }
+            if (sorted.isNotEmpty()) out.add(StandingsGroup(name, sorted))
         }
         walk(root, root.str("name") ?: league)
         return out
     }
 
-    private fun path(league: String): String? = when (league) { "nfl" -> "football/nfl"; "college-football" -> "football/college-football"; "nba" -> "basketball/nba"; "mlb" -> "baseball/mlb"; "nhl" -> "hockey/nhl"; else -> null }
+    private fun path(league: String): String? = when (league) {
+        "nfl" -> "football/nfl"; "college-football" -> "football/college-football"; "nba" -> "basketball/nba"; "mlb" -> "baseball/mlb"; "nhl" -> "hockey/nhl"
+        "mls" -> "soccer/usa.1"; "epl" -> "soccer/eng.1"; "efl" -> "soccer/eng.2"
+        else -> null
+    }
 
     private fun parse(e: JsonObject, league: String): Game? {
         val comp = (e["competitions"] as? JsonArray)?.firstOrNull()?.jsonObject ?: return null
@@ -112,6 +135,9 @@ class Scores(private val http: Http) {
         val type = status?.get("type")?.jsonObject
         val sit = comp["situation"] as? JsonObject
         val nets = (comp["broadcasts"] as? JsonArray)?.flatMap { b -> (b.jsonObject["names"] as? JsonArray)?.mapNotNull { (it as? JsonPrimitive)?.contentOrNull } ?: emptyList() } ?: emptyList()
+        val note = (comp["notes"] as? JsonArray)?.firstOrNull()?.jsonObject?.str("headline") ?: ""
+        val series = (comp["series"] as? JsonObject)?.str("summary") ?: ""
+        val post = (e["season"] as? JsonObject)?.get("type")?.let { (it as? JsonPrimitive)?.contentOrNull?.toIntOrNull() } == 3
         val possId = sit?.str("possession")
         val possName = teams.firstOrNull { it.str("id") == possId }?.get("team")?.jsonObject?.str("abbreviation")
         val date = comp.str("date") ?: e.str("date")
@@ -129,17 +155,55 @@ class Scores(private val http: Http) {
             homeId = home["team"]?.jsonObject?.str("id") ?: "", awayId = away["team"]?.jsonObject?.str("id") ?: "",
             homeRecord = (home["records"] as? JsonArray)?.firstOrNull()?.jsonObject?.str("summary") ?: "", awayRecord = (away["records"] as? JsonArray)?.firstOrNull()?.jsonObject?.str("summary") ?: "",
             homeLogo = home["team"]?.jsonObject?.str("logo"), awayLogo = away["team"]?.jsonObject?.str("logo"),
+            note = note, series = series, postseason = post,
         )
+    }
+
+    /**
+     * Postseason games. ESPN's scoreboard ignores a date range for the playoffs, so this is one
+     * call per day in [days] with `seasontype=3`, merged by game id; [playoffsNow] (no date) is
+     * the cheap probe that says whether a league is in its postseason at all.
+     */
+    suspend fun playoffs(league: String, days: List<String>): List<Game> = withContext(Dispatchers.IO) { playoffsIo(league, days) }
+    private suspend fun playoffsIo(league: String, days: List<String>): List<Game> {
+        val path = path(league) ?: return emptyList()
+        val extra = if (league == "college-football") "&groups=80&limit=300" else "&limit=300"
+        val seen = LinkedHashMap<String, Game>()
+        for (d in days) {
+            val text = runCatching {
+                http.get("https://site.api.espn.com/apis/site/v2/sports/$path/scoreboard?lang=en&region=us&seasontype=3&dates=$d$extra", timeoutMs = 10_000).use { r -> if (!r.ok) null else r.body.readBytes().decodeToString() }
+            }.getOrNull() ?: continue
+            val root = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: continue
+            (root["events"] as? JsonArray)?.mapNotNull { parse(it.jsonObject, league) }?.filter { it.postseason }?.forEach { seen[it.id] = it }
+        }
+        return seen.values.sortedBy { it.startEpoch }
+    }
+    suspend fun playoffsNow(league: String): List<Game> = withContext(Dispatchers.IO) { playoffsNowIo(league) }
+    private suspend fun playoffsNowIo(league: String): List<Game> {
+        val path = path(league) ?: return emptyList()
+        val text = http.get("https://site.api.espn.com/apis/site/v2/sports/$path/scoreboard?lang=en&region=us&seasontype=3&limit=100", timeoutMs = 10_000).use { r ->
+            if (!r.ok) return emptyList()
+            r.body.readBytes().decodeToString()
+        }
+        val root = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return emptyList()
+        return (root["events"] as? JsonArray)?.mapNotNull { parse(it.jsonObject, league) }?.filter { it.postseason } ?: emptyList()
     }
 
     private fun parseIso(s: String): Long = runCatching { java.time.OffsetDateTime.parse(s.replace("Z", "+00:00")).toEpochSecond() }.getOrDefault(0L)
     private fun JsonObject.str(k: String) = (this[k] as? JsonPrimitive)?.contentOrNull
 
     companion object {
-        val LEAGUES = listOf("nfl", "college-football", "nba", "nhl", "mlb")
-        fun leagueName(league: String) = when (league) { "nfl" -> "NFL"; "college-football" -> "College football"; "nba" -> "NBA"; "nhl" -> "NHL"; "mlb" -> "MLB"; else -> league.uppercase() }
+        val LEAGUES = listOf("nfl", "college-football", "nba", "nhl", "mlb", "mls", "epl", "efl")
+        val SOCCER = setOf("mls", "epl", "efl")
+        fun leagueName(league: String) = when (league) {
+            "nfl" -> "NFL"; "college-football" -> "College football"; "nba" -> "NBA"; "nhl" -> "NHL"; "mlb" -> "MLB"
+            "mls" -> "MLS"; "epl" -> "Premier League"; "efl" -> "EFL Championship"
+            else -> league.uppercase()
+        }
         /** "4-1", "6-1-1" (NHL adds overtime losses). */
         fun recordLine(league: String, stats: Map<String, String>): String {
+            // Football (the other kind): wins-draws-losses, the way every table prints it.
+            if (league in SOCCER) return "${stats["wins"] ?: "0"}-${stats["ties"] ?: "0"}-${stats["losses"] ?: "0"}"
             // The "overall" stat is "5-1" for college and "6-1-1, 13 PTS" for hockey: the record is before the comma.
             stats["overall"]?.substringBefore(",")?.trim()?.takeIf { it.isNotBlank() }?.let { return it }
             val w = stats["wins"] ?: "0"; val l = stats["losses"] ?: "0"
@@ -148,7 +212,7 @@ class Scores(private val http: Http) {
         }
         /** What else the table says about the row: points for hockey, games behind for the others. */
         fun noteLine(league: String, stats: Map<String, String>): String = when (league) {
-            "nhl" -> stats["points"]?.let { "$it pts" } ?: ""
+            "nhl", "mls", "epl", "efl" -> stats["points"]?.let { "$it pts" } ?: ""
             "nfl" -> stats["streak"] ?: ""
             "college-football" -> stats["vsconf"]?.let { "$it conf" } ?: (stats["streak"] ?: "")
             else -> stats["gamesBehind"]?.let { if (it == "-" || it == "0") "" else "$it GB" } ?: ""
