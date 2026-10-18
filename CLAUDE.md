@@ -153,6 +153,18 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.25 (2026-10-17): three things. (1) Friend codes stopped changing: `ensureFriendCode`
+  reads `prefs.friendCode.first()`, not the StateFlow (initial null while DataStore loads; a
+  check that raced it minted a new code over the saved one; the user's code changed and the
+  Toad allow-list no longer matched). (2) Settings › Sports › "Look for games in these groups":
+  `prefs.sportsGroupsOff(provider)` (ids of unticked groups; new groups default in),
+  `vm.sportsGroupsOff` filters `live` in `resolveGameChannels`; the buddy's RAW local-station
+  groups were feeding any city's affiliate. `Affiliates.rank` now rejects any token with "+",
+  PLUS or PPV for every non-plus network (SEC Network was landing on an ESPN+ booth feed).
+  (3) Settings › About › "Send my sports lineup": `vm.sendLineup()` posts sports-looking
+  channels (name, group, epg id, next 12 h of titles; host hash; no URLs) to `POST /lineup`
+  (`lu:<friend code>`, 30-day TTL, one write); admin page "Sports lineups" lists and shows
+  them. Write matching rules against a real lineup from there, not from descriptions.
 - 0.6.24 (2026-10-17): buddy's priorities. 0.6.19–0.6.20 let a whole-lineup name/guide match
   beat the listed network, so Auburn–Georgia on ESPN and Duke–UNC on ESPN2 landed on ESPN+
   split-screen feeds named after the teams. Now, per game: for each listed network in order,

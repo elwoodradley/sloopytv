@@ -54,6 +54,10 @@ object Affiliates {
         if (!hit) return null
         val bad = NOT_THIS[network.uppercase()] ?: emptyList()
         if (tokens.any { it in bad }) return null
+        // ESPN+, SECN+, PPV and "PLUS" feeds carry event streams, never a regular network's
+        // own feed, whatever words their names borrow ("ESPN+ 12: SEC Network booth").
+        val plusNet = network.uppercase().let { it.contains('+') || it.contains("PLUS") || it.contains("PPV") }
+        if (!plusNet && tokens.any { it.contains('+') || it == "PLUS" || it == "PPV" }) return null
         if (network.uppercase() !in BROADCAST) {
             // Cable and streaming networks have no affiliates: the plain name wins, and extra
             // words ("ESPN PLUS 12" is already out; "PEACOCK 3") rank below it, so the guide decides.

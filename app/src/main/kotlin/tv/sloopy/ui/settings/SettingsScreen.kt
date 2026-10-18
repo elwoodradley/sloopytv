@@ -450,6 +450,17 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                             }
                         }
                     }
+                    "sports" -> {
+                        Section("Sports")
+                        Text("The Sports hub picks a game's channel from the groups ticked here. Untick the ones that are only noise for games (every city's raw local stations, foreign folders, 24/7 channels). Your own picks from hold OK on a game still win.", style = Sloopy.body.copy(color = Sloopy.textSoft), modifier = Modifier.width(900.dp))
+                        val cats by vm.liveCategories.collectAsState()
+                        val off by vm.sportsGroupsOff.collectAsState()
+                        Section("Look for games in these groups · ${cats.size - cats.count { it.id in off }} of ${cats.size}")
+                        cats.sortedBy { tv.sloopy.core.model.Names.clean(it.name).lowercase() }.forEach { c ->
+                            val on = c.id !in off
+                            SettingRow(tv.sloopy.core.model.Names.clean(c.name).take(48), if (on) "ON" else "OFF") { vm.setSportsGroupOff(c.id, on) }
+                        }
+                    }
                     "transfer" -> {
                         Section("Transfer")
                         val code by vm.syncCode.collectAsState()
@@ -564,6 +575,13 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                             Text(note, style = Sloopy.body.copy(color = if (update is UpdateState.Failed || update is UpdateState.NeedsPermission) Sloopy.amber else Sloopy.textSoft), modifier = Modifier.width(700.dp))
                         }
                         val context = androidx.compose.ui.platform.LocalContext.current
+                        var lineupMsg by remember { mutableStateOf<String?>(null) }
+                        var lineupBusy by remember { mutableStateOf(false) }
+                        Row(Modifier.padding(top = 14.dp), verticalAlignment = Alignment.CenterVertically) {
+                            SloopyButton(if (lineupBusy) "Sending…" else "Send my sports lineup", enabled = !lineupBusy, onClick = { lineupBusy = true; scope.launch { lineupMsg = runCatching { vm.sendLineup() }.getOrElse { it.message ?: "Failed" }; lineupBusy = false } })
+                            Spacer(Modifier.width(16.dp))
+                            Text(lineupMsg ?: "Sends the names and guide titles of your sports channels to whoever looks after SloopyTV, so the Sports hub can be tuned to your service. No login, no stream links.", style = Sloopy.body.copy(color = Sloopy.textSoft), modifier = Modifier.width(820.dp))
+                        }
                         val gstats by vm.guideStats.collectAsState()
                         if (gstats.isNotBlank()) Text(gstats, style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 10.dp))
                         var sysExit by remember { mutableStateOf(tv.sloopy.CrashLog.readSystemExit(context)) }
@@ -590,7 +608,7 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
     }
 }
 
-private val SECTIONS = listOf("providers" to "Providers", "listings" to "Listings", "picture" to "Picture", "recordings" to "Recordings", "friends" to "Friends", "parental" to "Parental", "transfer" to "Transfer", "about" to "About")
+private val SECTIONS = listOf("providers" to "Providers", "listings" to "Listings", "picture" to "Picture", "recordings" to "Recordings", "sports" to "Sports", "friends" to "Friends", "parental" to "Parental", "transfer" to "Transfer", "about" to "About")
 private val KID_SECTIONS = listOf("parental" to "Profile")
 
 @Composable

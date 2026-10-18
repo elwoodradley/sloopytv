@@ -898,7 +898,13 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             tv.sloopy.data.AndroidHttp.client.newCall(b.build()).execute().use { r -> kotlinx.serialization.json.Json.parseToJsonElement(r.body?.string() ?: "") as? kotlinx.serialization.json.JsonObject }
         }.getOrNull()
     }
-    fun ensureFriendCode() = viewModelScope.launch { if (friendCode.value == null) prefs.setFriendCode(tv.sloopy.sync.SyncClient.newCode()) }
+    /**
+     * Makes this stick's code once. Reads the store itself, never the in-memory StateFlow: at
+     * launch that flow still holds its initial null while DataStore loads, and until 0.6.25 a
+     * check that raced it minted a fresh code over the saved one (the user's code changed, his
+     * friends lost him, and the Toad allow-list no longer matched).
+     */
+    fun ensureFriendCode() = viewModelScope.launch { if (prefs.friendCode.first().isNullOrBlank()) prefs.setFriendCode(tv.sloopy.sync.SyncClient.newCode()) }
     fun addFriend(code: String, name: String) = viewModelScope.launch {
         val c = tv.sloopy.sync.SyncClient.normalise(code); if (c.length != 8) { _toast.value = "A friend code is eight letters and numbers"; return@launch }
         prefs.setFriends((friends.value.filter { it.first != c } + (c to name.trim().ifBlank { c })))
@@ -996,6 +1002,46 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val hideScores: StateFlow<Boolean> = prefs.hideScores.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     fun setHideScores(v: Boolean) = viewModelScope.launch { prefs.setHideScores(v) }
     val networkMap: StateFlow<Map<String, Long>> = perProvider({ prefs.networkMap(it) }, emptyMap())
+    /** Groups the Sports hub leaves alone (Settings › Sports). Channels there are never a game's guess. */
+    val sportsGroupsOff: StateFlow<Set<String>> = perProvider({ prefs.sportsGroupsOff(it) }, emptySet())
+    fun setSportsGroupOff(categoryId: String, off: Boolean) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        val cur = sportsGroupsOff.value
+        prefs.setSportsGroupsOff(p.id, if (off) cur + categoryId else cur - categoryId)
+        gameChannelCache.clear(); refreshScores()
+    }
+    /**
+     * Settings › About › "Send my sports lineup": the names, groups and guide ids of every
+     * sports-looking channel, with the next twelve hours of guide titles, to the code server
+     * under this stick's friend code, so matching rules can be written against a real lineup.
+     * Names only: no stream URLs, no login; the provider is a hash of its host.
+     */
+    suspend fun sendLineup(): String {
+        val p = active.value ?: return "No service is set up."
+        val server = codeServer.value; if (!server.startsWith("http")) return "No code server is set up."
+        ensureFriendCode()
+        val me = kotlinx.coroutines.withTimeoutOrNull(5_000) { friendCode.first { it != null } } ?: return "No friend code yet; try again."
+        val cats = allLiveCategories.value.associateBy { it.id }
+        val now = System.currentTimeMillis() / 1000
+        val chans = channels.value.filter { c -> SPORT_WORDS.containsMatchIn(c.name.uppercase()) || SPORT_WORDS.containsMatchIn((cats[c.categoryId]?.name ?: "").uppercase()) }.take(2000)
+        if (chans.isEmpty()) return "No sports-looking channels found."
+        val ids = chans.mapNotNull { it.epgId }.toSet()
+        val progs = runCatching { catalog.programmesBetween(p.id, now, now + 12 * 3600) }.getOrDefault(emptyList()).filter { it.epgId in ids }.groupBy { it.epgId }
+        val host = java.security.MessageDigest.getInstance("SHA-256").digest(p.displayHost().toByteArray()).toHex().take(10)
+        val body = kotlinx.serialization.json.buildJsonObject {
+            put("id", kotlinx.serialization.json.JsonPrimitive(me)); put("host", kotlinx.serialization.json.JsonPrimitive(host)); put("app", kotlinx.serialization.json.JsonPrimitive(tv.sloopy.BuildConfig.VERSION_NAME))
+            put("channels", kotlinx.serialization.json.buildJsonArray {
+                chans.forEach { c ->
+                    add(kotlinx.serialization.json.buildJsonObject {
+                        put("name", kotlinx.serialization.json.JsonPrimitive(c.name.take(80))); put("group", kotlinx.serialization.json.JsonPrimitive((cats[c.categoryId]?.name ?: "").take(60))); put("epg", kotlinx.serialization.json.JsonPrimitive((c.epgId ?: "").take(60)))
+                        put("titles", kotlinx.serialization.json.buildJsonArray { progs[c.epgId]?.sortedBy { it.startEpoch }?.take(16)?.forEach { add(kotlinx.serialization.json.JsonPrimitive(it.title.take(80))) } })
+                    })
+                }
+            })
+        }.toString()
+        val r = friendsCall("/lineup", body) ?: return "Could not reach the code server."
+        return if ((r["ok"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull == "true") "Sent ${chans.size} channels. Thank you." else ((r["error"] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull ?: "The server said no.")
+    }
     /** game id → (channel id, how it was found, when). */
     private val gameChannelCache = java.util.concurrent.ConcurrentHashMap<String, Triple<Long?, String, Long>>()
     /** Groups and channel keys that could carry a game: where the day's listings are read for the sport pass. */
@@ -1051,8 +1097,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     /** One pass over what is on now, then the network map, then a guess by name: never a search through the guide table. */
     private suspend fun resolveGameChannels(p: tv.sloopy.data.ProviderRecord, list: List<tv.sloopy.core.sports.Game>): List<GameRow> {
         val now = System.currentTimeMillis() / 1000
-        val hiddenCh = hiddenChannels.value; val hiddenG = hiddenGroups.value
-        val live = channels.value.filter { it.id !in hiddenCh && it.categoryId !in hiddenG }
+        val hiddenCh = hiddenChannels.value; val hiddenG = hiddenGroups.value; val off = sportsGroupsOff.value
+        val live = channels.value.filter { it.id !in hiddenCh && it.categoryId !in hiddenG && it.categoryId !in off }
         val byEpg = live.filter { it.epgId != null }.groupBy { it.epgId!! }
         // The guide at each kickoff (quarter-hour buckets, at least now), for the channels that
         // could carry a game: sports groups and sports-named channels. A few indexed reads per

@@ -28,6 +28,7 @@ export default {
       if (request.method === "GET" && path === "/sync/get") return syncGet(request, env, url);
       if (request.method === "GET" && path === "/config") return json({ ok: true, ...publicConfig((await env.CODES.get("config", "json")) || {}) });
       if (request.method === "POST" && path === "/report") return report(request, env);
+      if (request.method === "POST" && path === "/lineup") return lineupPut(request, env);
       if (request.method === "GET" && path === "/poster") return poster(request, env, url);
       if (request.method === "GET" && path === "/trending") return trending(request, env);
       if (request.method === "GET" && path === "/toad/status") return toadStatus(env, url);
@@ -43,6 +44,8 @@ export default {
         if (request.method === "POST" && path === "/admin/config") return setConfig(request, env);
         if (request.method === "GET" && path === "/admin/config") return json({ ok: true, ...adminConfig((await env.CODES.get("config", "json")) || {}) });
         if (request.method === "GET" && path === "/admin/reports") return listReports(env);
+        if (request.method === "GET" && path === "/admin/lineups") return lineupList(env);
+        if (request.method === "GET" && path === "/admin/lineup") return lineupGet(env, url);
         if (request.method === "GET" && path === "/admin/toad") return toadAdmin(env);
         if (request.method === "DELETE" && path.startsWith("/admin/report/")) { await env.CODES.delete("r:" + path.slice("/admin/report/".length)); return json({ ok: true }); }
         if (request.method === "POST" && path === "/admin/report-test") return reportTest(env);
@@ -580,6 +583,40 @@ async function friendInbox(env, url) {
   return json({ ok: true, messages: out });
 }
 
+// ---- sports lineups ---------------------------------------------------------------------------
+// A stick's sports-looking channels (name, group, guide id, next twelve hours of titles), sent
+// from Settings › About on request, kept a month under the friend code. One KV write per send.
+// Names only: the app never includes stream URLs or logins, and the provider is a host hash.
+
+const LINEUP_TTL = 30 * 24 * 3600;
+async function lineupPut(request, env) {
+  if (await syncLimited(request, env)) return json({ ok: false }, 429);
+  const b = await request.json().catch(() => null);
+  const id = String(b?.id || "");
+  if (!FRIEND_RE.test(id)) return json({ ok: false, error: "Bad code" }, 400);
+  const chans = Array.isArray(b?.channels) ? b.channels.slice(0, 2000).map((c) => ({
+    name: String(c?.name || "").slice(0, 80), group: String(c?.group || "").slice(0, 60), epg: String(c?.epg || "").slice(0, 60),
+    titles: Array.isArray(c?.titles) ? c.titles.slice(0, 16).map((t) => String(t).slice(0, 80)) : [],
+  })) : [];
+  if (!chans.length) return json({ ok: false, error: "Nothing to send" }, 400);
+  const rec = { at: Date.now(), host: String(b?.host || "").slice(0, 16), app: String(b?.app || "").slice(0, 16), n: chans.length, channels: chans };
+  await env.CODES.put("lu:" + id, JSON.stringify(rec), { expirationTtl: LINEUP_TTL });
+  return json({ ok: true, n: chans.length });
+}
+async function lineupList(env) {
+  const out = [];
+  const page = await env.CODES.list({ prefix: "lu:" });
+  for (const k of page.keys) { const r = await env.CODES.get(k.name, "json"); if (r) out.push({ id: k.name.slice(3), at: r.at, host: r.host, app: r.app, n: r.n }); }
+  out.sort((a, b) => b.at - a.at);
+  return json({ ok: true, lineups: out });
+}
+async function lineupGet(env, url) {
+  const id = url.searchParams.get("id") || "";
+  if (!FRIEND_RE.test(id)) return json({ ok: false, error: "Bad code" }, 400);
+  const r = await env.CODES.get("lu:" + id, "json");
+  return r ? json({ ok: true, ...r }) : json({ ok: false, error: "No lineup for that code" }, 404);
+}
+
 // ---- admin page -----------------------------------------------------------------------------
 
 const ADMIN_PAGE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
@@ -656,6 +693,10 @@ textarea{width:100%;box-sizing:border-box;background:none;border:0;border-bottom
   <button class="pri" id="repsave">Save</button> <button id="reptest">Test ping</button>
   <div class="msg" id="repmsg"></div>
   <table><thead><tr><th>When</th><th>Channel</th><th>What happened</th><th>Who</th><th></th></tr></thead><tbody id="reps"></tbody></table>
+  <h2 style="margin-top:28px">Sports lineups</h2>
+  <p class="k">Sent from a stick's Settings › About › "Send my sports lineup". Channel names, groups, guide ids and the next twelve hours of titles. Kept a month.</p>
+  <table><thead><tr><th>Stick</th><th>Sent</th><th>Service</th><th>App</th><th>Channels</th><th></th></tr></thead><tbody id="lus"></tbody></table>
+  <pre id="lupre" class="mono" style="white-space:pre-wrap;max-height:600px;overflow:auto;background:#0d0d0d;padding:12px;border:1px solid #333;display:none"></pre>
   <h1 style="margin-top:48px">The Toad</h1>
   <p class="k">The helper on the strip: say or type "put ESPN and AMC in favourites" and it does it. Uses your Claude credit through this server; the key never leaves here.</p>
   <div class="tog"><input type="checkbox" id="toadon"><label for="toadon" style="margin:0">Toad on</label></div>
@@ -678,7 +719,9 @@ $("go").onclick=function(){pw=$("pw").value;sessionStorage.setItem("pw",pw);api(
 $("mint").onclick=function(){$("code").textContent="";$("msg").textContent="";api("POST","/admin/mint",{url:$("url").value,user:$("user").value,pass:$("pass").value,name:$("name").value,note:$("note").value}).then(function(j){if(j.ok){$("code").textContent=j.code;$("msg").textContent="Send this code. It works once, until "+fmt(j.expiresAt)+".";$("user").value="";$("pass").value="";$("note").value="";refresh()}else $("msg").textContent=j.error})}
 $("rows").onclick=function(e){var c=e.target.getAttribute("data-c");if(c&&confirm("Delete code "+c+"?"))api("DELETE","/admin/code/"+c).then(refresh)}
 $("cfg").onclick=function(){api("POST","/admin/config",{gumroadProduct:$("gp").value,buyUrl:$("gu").value,price:$("gpr").value,friendsProduct:$("fgp").value,friendsBuyUrl:$("fgu").value,friendsPrice:$("fgpr").value}).then(function(j){$("cmsg").textContent=j.ok?((j.gumroadProduct?"Paywall on.":"Paywall off, the app is free.")+(j.friendsProduct?" Friends is paid.":" Friends is free.")):j.error})}
-function loadCfg(){api("GET","/admin/config").then(function(j){if(j.ok){$("gp").value=j.gumroadProduct||"";$("gu").value=j.buyUrl||"";$("gpr").value=j.price||"";$("fgp").value=j.friendsProduct||"";$("fgu").value=j.friendsBuyUrl||"";$("fgpr").value=j.friendsPrice||"";$("opname").value=j.operatorName||"";$("ann").value=j.announcementText||"";$("repon").checked=!!j.reportsEnabled;$("toadon").checked=!!j.toadEnabled;$("toadsticks").value=j.toadSticks||"";$("toadcap").value=j.toadDailyCap||50;$("toadmodel").value=j.toadModel||"claude-haiku-5-5";loadToad();$("tgtok").value=j.telegramToken||"";$("dcweb").value=j.discordWebhook||""}});loadReps()}
+function loadCfg(){api("GET","/admin/config").then(function(j){if(j.ok){$("gp").value=j.gumroadProduct||"";$("gu").value=j.buyUrl||"";$("gpr").value=j.price||"";$("fgp").value=j.friendsProduct||"";$("fgu").value=j.friendsBuyUrl||"";$("fgpr").value=j.friendsPrice||"";$("opname").value=j.operatorName||"";$("ann").value=j.announcementText||"";$("repon").checked=!!j.reportsEnabled;$("toadon").checked=!!j.toadEnabled;$("toadsticks").value=j.toadSticks||"";$("toadcap").value=j.toadDailyCap||50;$("toadmodel").value=j.toadModel||"claude-haiku-5-5";loadToad();$("tgtok").value=j.telegramToken||"";$("dcweb").value=j.discordWebhook||""}});loadReps();loadLineups()}
+function loadLineups(){api("GET","/admin/lineups").then(function(j){if(!j.ok)return;var h="";j.lineups.forEach(function(l){h+="<tr><td class=mono>"+l.id+"</td><td>"+fmt(l.at)+"</td><td class=mono>"+(l.host||"")+"</td><td>"+(l.app||"")+"</td><td>"+l.n+"</td><td><button class=sm data-lu="+l.id+">View</button></td></tr>"});$("lus").innerHTML=h||"<tr><td colspan=6 class=used>No lineups yet.</td></tr>"})}
+document.addEventListener("click",function(e){var b=e.target.closest("button[data-lu]");if(!b)return;api("GET","/admin/lineup?id="+b.dataset.lu).then(function(j){if(!j.ok){alert(j.error);return}var lines=[];j.channels.forEach(function(c){lines.push((c.group||"")+" | "+c.name+" | "+(c.epg||"-")+(c.titles&&c.titles.length?"\n    "+c.titles.join(" / "):""))});var p=$("lupre");p.textContent=lines.join("\n");p.style.display="block";p.scrollIntoView()})});
 function loadReps(){api("GET","/admin/reports").then(function(j){if(!j.ok)return;var h="";j.reports.forEach(function(r){h+="<tr><td>"+fmt(r.at)+"</td><td>"+(r.number?r.number+" ":"")+r.channel+(r.group?" <span class=used>("+r.group+")</span>":"")+"</td><td>"+(r.error||"")+(r.note?"<br><span class=used>"+r.note+"</span>":"")+"</td><td>"+(r.nick||"")+"<br><span class=used>"+(r.device||"")+" v"+(r.version||"")+"</span></td><td><button class=sm data-r="+r.id+">Fixed</button></td></tr>"});$("reps").innerHTML=h||"<tr><td colspan=5 class=used>No reports.</td></tr>"})}
 $("opsave").onclick=function(){api("POST","/admin/config",{operatorName:$("opname").value}).then(function(j){$("opmsg").textContent=j.ok?"Saved.":j.error})}
 $("annsend").onclick=function(){api("POST","/admin/config",{announcementText:$("ann").value}).then(function(j){$("annmsg").textContent=j.ok?(j.announcementText?"Sent. Sticks show it on their next open.":"Cleared."):j.error})}

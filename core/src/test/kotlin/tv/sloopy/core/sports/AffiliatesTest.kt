@@ -65,6 +65,14 @@ class AffiliatesTest {
         assertEquals(2, Scores.score(Scores.normalize("US| ESPN+ 14: Michigan State vs Indiana (CFB)"), g))
     }
 
+    @Test fun plus_feeds_never_carry_a_regular_network() {
+        assertNull(Affiliates.rank("SEC NETWORK", "US ESPN+ 12 SEC NETWORK BOOTH", listOf("SEC NETWORK", "SECN")))
+        assertNull(Affiliates.rank("SEC NETWORK", "US SECN PLUS 3", listOf("SEC NETWORK", "SECN")))
+        assertNull(Affiliates.rank("FOX", "US FOX PPV 1"))
+        assertEquals(2, Affiliates.rank("SEC NETWORK", "US SEC NETWORK HD", listOf("SEC NETWORK", "SECN")))
+        assertEquals(2, Affiliates.rank("ESPN+", "US ESPN+ 12", listOf("ESPN+", "ESPN PLUS")))
+    }
+
     @Test fun multi_word_networks_still_match() {
         assertEquals(2, Affiliates.rank("NFL NETWORK", "NFL NETWORK HD", listOf("NFL NETWORK", "NFL NET")))
         assertEquals(2, Affiliates.rank("FS1", "FOX SPORTS 1", listOf("FS1", "FOX SPORTS 1")))
