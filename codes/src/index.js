@@ -594,7 +594,7 @@ async function lineupPut(request, env) {
   const b = await request.json().catch(() => null);
   const id = String(b?.id || "");
   if (!FRIEND_RE.test(id)) return json({ ok: false, error: "Bad code" }, 400);
-  const chans = Array.isArray(b?.channels) ? b.channels.slice(0, 2000).map((c) => ({
+  const chans = Array.isArray(b?.channels) ? b.channels.slice(0, 8000).map((c) => ({
     name: String(c?.name || "").slice(0, 80), group: String(c?.group || "").slice(0, 60), epg: String(c?.epg || "").slice(0, 60),
     titles: Array.isArray(c?.titles) ? c.titles.slice(0, 16).map((t) => String(t).slice(0, 80)) : [],
   })) : [];

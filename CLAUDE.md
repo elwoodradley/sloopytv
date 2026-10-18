@@ -153,6 +153,18 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.36 (2026-10-18): package channels first. The buddy's lineup report (lu:JVGSE64Y, 2,000
+  channels, read via /admin/lineup) showed his provider's per-game groups: "US| NBA PACKAGE"
+  ("Philadelphia 76ers vs Boston Celtics @ Oct 16 7:00 PM :NBA 01"), "US| NCAAF PACKAGE"
+  ("NCAAF 01: NC State at Wake Forest 7:30pm"), "US| NHL PACKAGE", and an NFL PACKAGE the report
+  never reached; none carry guide data. `resolveGameChannels` now tries, before anything else,
+  a channel in a group named PACKAGE + the league word (`Scores.packageWord`) whose name names
+  both teams and whose date, if the name has one, is the game's day ±1 (`Scores.nameDateOk`).
+  That beats the network guess and the viewer's network pin (it is the exact game; a pin is per
+  network). PPV/plus groups are not packages. Card: "From the package · this game by name".
+  The report now sends package groups first and up to 8,000 channels (app and Worker caps).
+  His groups also show the noise the Sports ticks are for: 300 PARAMOUNT+ PPV, 200 SOCCER PPV,
+  100 each of DAZN/PEACOCK/BTN+ PPV, two RAW local-station groups.
 - 0.6.34 (2026-10-18): standings, all of them. The four US leagues read ESPN's conference
   tables and then `?level=3` (AFC North, Atlantic, Metropolitan Division, AL East …), so the grid
   shows conferences first and every division after (`Scores.standingsTable(league, query)`).

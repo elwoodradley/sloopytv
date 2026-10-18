@@ -73,6 +73,20 @@ class AffiliatesTest {
         assertEquals(2, Affiliates.rank("ESPN+", "US ESPN+ 12", listOf("ESPN+", "ESPN PLUS")))
     }
 
+    @Test fun package_channels_from_the_buddys_lineup() {
+        val utc = java.time.ZoneOffset.UTC
+        val oct16 = java.time.LocalDate.of(2026, 10, 16).atTime(23, 0).toEpochSecond(utc)
+        val g = Game(id = "2", league = "nba", home = "Boston Celtics", away = "Philadelphia 76ers", homeShort = "BOS", awayShort = "PHI",
+            homeScore = 0, awayScore = 0, state = "pre", detail = "", redZone = false, possession = null, networks = listOf("ESPN"), startEpoch = oct16,
+            homeLoc = "Boston", awayLoc = "Philadelphia", homeMascot = "Celtics", awayMascot = "76ers")
+        val name = "Philadelphia 76ers vs Boston Celtics @ Oct 16 7:00 PM :NBA 01"
+        assertEquals(2, Scores.mentions(name, g))
+        assertTrue(Scores.nameDateOk(name, oct16, utc))
+        assertTrue(!Scores.nameDateOk(name, oct16 + 5 * 86_400, utc))      // same teams, five days later: not this feed
+        assertTrue(Scores.nameDateOk("NCAAF 01: NC State at Wake Forest 7:30pm", oct16, utc))   // no date: passes
+        assertEquals("NFL", Scores.packageWord("nfl")); assertEquals("NCAAF", Scores.packageWord("college-football"))
+    }
+
     @Test fun multi_word_networks_still_match() {
         assertEquals(2, Affiliates.rank("NFL NETWORK", "NFL NETWORK HD", listOf("NFL NETWORK", "NFL NET")))
         assertEquals(2, Affiliates.rank("FS1", "FOX SPORTS 1", listOf("FS1", "FOX SPORTS 1")))

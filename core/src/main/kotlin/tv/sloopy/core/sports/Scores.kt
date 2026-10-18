@@ -258,6 +258,28 @@ class Scores(private val http: Http) {
          */
         fun mentions(title: String, g: Game): Int = score(normalize(title), g)
 
+        /** The word a provider's per-game package group carries for the league ("US| NFL PACKAGE"). */
+        fun packageWord(league: String): String? = when (league) {
+            "nfl" -> "NFL"; "nba" -> "NBA"; "nhl" -> "NHL"; "mlb" -> "MLB"; "college-football" -> "NCAAF"; "mls" -> "MLS"
+            else -> null
+        }
+
+        private val MONTH_DAY = Regex("\\b(JAN|FEB|MAR|APR|MAY|JUN|JUL|AUG|SEP|OCT|NOV|DEC)[A-Z]*\\.? (\\d{1,2})\\b")
+        private val MONTHS = listOf("JAN", "FEB", "MAR", "APR", "MAY", "JUN", "JUL", "AUG", "SEP", "OCT", "NOV", "DEC")
+        /**
+         * A package channel's name sometimes carries its date ("… @ Oct 16 7:00 PM :NBA 01"). When
+         * it does, it must be the game's day (a day either way, for late kickoffs across midnight
+         * and providers that rename late), so yesterday's Celtics–76ers feed is not today's game
+         * between the same two teams. No date in the name passes.
+         */
+        fun nameDateOk(name: String, startEpoch: Long, zone: java.time.ZoneId = java.time.ZoneId.systemDefault()): Boolean {
+            val m = MONTH_DAY.find(name.uppercase()) ?: return true
+            val month = MONTHS.indexOf(m.groupValues[1]) + 1; val day = m.groupValues[2].toIntOrNull() ?: return true
+            if (month <= 0 || startEpoch <= 0) return true
+            val game = java.time.Instant.ofEpochSecond(startEpoch).atZone(zone).toLocalDate()
+            return (-1L..1L).any { d -> game.plusDays(d).let { it.monthValue == month && it.dayOfMonth == day } }
+        }
+
         /** A title or channel name as [score] wants it: lower case, one space between words, padded. */
         fun normalize(text: String): String = " " + text.lowercase().replace(NON_WORD, " ").trim() + " "
         private val NON_WORD = Regex("[^a-z0-9]+")

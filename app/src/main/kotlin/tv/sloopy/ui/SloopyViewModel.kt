@@ -1072,7 +1072,10 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val me = kotlinx.coroutines.withTimeoutOrNull(5_000) { friendCode.first { it != null } } ?: return "No friend code yet; try again."
         val cats = allLiveCategories.value.associateBy { it.id }
         val now = System.currentTimeMillis() / 1000
-        val chans = channels.value.filter { c -> SPORT_WORDS.containsMatchIn(c.name.uppercase()) || SPORT_WORDS.containsMatchIn((cats[c.categoryId]?.name ?: "").uppercase()) }.take(2000)
+        // Package groups first (they are what the matching needs), then the rest, up to 8,000:
+        // the buddy's first report stopped at 2,000 and never reached his NFL PACKAGE group.
+        val chans = channels.value.filter { c -> SPORT_WORDS.containsMatchIn(c.name.uppercase()) || SPORT_WORDS.containsMatchIn((cats[c.categoryId]?.name ?: "").uppercase()) }
+            .sortedBy { c -> if ((cats[c.categoryId]?.name ?: "").uppercase().contains("PACKAGE")) 0 else 1 }.take(8000)
         if (chans.isEmpty()) return "No sports-looking channels found."
         val offNames = sportsGroupsOff.value.mapNotNull { cats[it]?.name }.sorted()
         val ids = chans.mapNotNull { it.epgId }.toSet()
@@ -1151,6 +1154,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val hiddenCh = hiddenChannels.value; val hiddenG = hiddenGroups.value; val off = sportsGroupsOff.value
         val liveAll = channels.value.filter { it.id !in hiddenCh && it.categoryId !in hiddenG }
         val live = liveAll.filter { it.categoryId !in off }
+        val catName = allLiveCategories.value.associate { it.id to it.name }
         val byEpg = live.filter { it.epgId != null }.groupBy { it.epgId!! }
         // The guide at each kickoff (quarter-hour buckets, at least now), for the channels that
         // could carry a game: sports groups and sports-named channels. A few indexed reads per
@@ -1196,6 +1200,21 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             fun found(g: tv.sloopy.core.sports.Game, c: ChannelEntity, via: String): GameRow { gameChannelCache[g.id] = Triple(c.id, via, now); return GameRow(g, c, via) }
             list.map { g ->
                 gameChannelCache[g.id]?.let { (id, via, at) -> if (now - at < 600) return@map GameRow(g, live.firstOrNull { it.id == id }, via) }
+                // 0. The provider's per-game package (2026-10-18, from the buddy's lineup report):
+                // a channel in a "… NFL PACKAGE" / "NBA PACKAGE" / "NCAAF PACKAGE" group whose name
+                // names both teams ("Philadelphia 76ers vs Boston Celtics @ Oct 16 7:00 PM :NBA 01")
+                // is that exact game, so it beats the network guess and the viewer's network pick.
+                // PPV and plus groups are not packages and keep the rules below.
+                val pkgWord = tv.sloopy.core.sports.Scores.packageWord(g.league)
+                if (pkgWord != null) {
+                    val pkg = live.filter { c ->
+                        val gn = (catName[c.categoryId] ?: "").uppercase()
+                        gn.contains("PACKAGE") && gn.contains(pkgWord) &&
+                            tv.sloopy.core.sports.Scores.score(nameNorm[c.id] ?: " ", g) == 2 &&
+                            tv.sloopy.core.sports.Scores.nameDateOk(c.name, g.startEpoch)
+                    }.maxByOrNull { tv.sloopy.core.model.Dupes.quality(it.name) }
+                    if (pkg != null) return@map found(g, pkg, "package")
+                }
                 // Priorities (the buddy, 2026-10-17): the network ESPN lists comes first. 1. The
                 // viewer's own pick for that network. 2. That network's channels, the one whose
                 // name or listing names the teams, else the best-ranked. Only a network with no
