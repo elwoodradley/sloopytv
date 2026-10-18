@@ -83,9 +83,42 @@ class Scores(private val http: Http) {
 
     /** The league table(s): conferences for NFL/NBA/NHL/MLB, the top-25-style poll is not here. */
     suspend fun standings(league: String): List<StandingsGroup> = withContext(Dispatchers.IO) { standingsIo(league) }
+    /**
+     * Conferences first, then every division (ESPN's `level=3`) for the four US leagues; the
+     * AP Top 25 (and the playoff ranking when it exists) ahead of the conferences for college.
+     */
     private suspend fun standingsIo(league: String): List<StandingsGroup> {
+        val out = ArrayList<StandingsGroup>()
+        if (league == "college-football") out.addAll(rankings(league))
+        out.addAll(standingsTable(league, ""))
+        if (league in setOf("nfl", "nba", "nhl", "mlb")) out.addAll(standingsTable(league, "?level=3"))
+        return out
+    }
+
+    /** ESPN's polls: "AP Top 25" and, from November, "College Football Playoff". Rank order, record, places moved. */
+    private suspend fun rankings(league: String): List<StandingsGroup> {
         val path = path(league) ?: return emptyList()
-        val text = http.get("https://site.api.espn.com/apis/v2/sports/$path/standings", timeoutMs = 15_000).use { r ->
+        val text = runCatching { http.get("https://site.api.espn.com/apis/site/v2/sports/$path/rankings", timeoutMs = 15_000).use { r -> if (!r.ok) null else r.body.readBytes().decodeToString() } }.getOrNull() ?: return emptyList()
+        val root = runCatching { json.parseToJsonElement(text) as? JsonObject }.getOrNull() ?: return emptyList()
+        val polls = (root["rankings"] as? JsonArray)?.mapNotNull { it as? JsonObject } ?: return emptyList()
+        val wanted = polls.filter { val n = it.str("name") ?: ""; n.contains("Playoff") || n == "AP Top 25" }.sortedBy { if ((it.str("name") ?: "").contains("Playoff")) 0 else 1 }
+        return wanted.mapNotNull { poll ->
+            val rows = (poll["ranks"] as? JsonArray)?.mapNotNull { e ->
+                val o = e as? JsonObject ?: return@mapNotNull null
+                val t = o["team"]?.jsonObject ?: return@mapNotNull null
+                val cur = (o["current"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
+                val prev = (o["previous"] as? JsonPrimitive)?.contentOrNull?.toIntOrNull() ?: 0
+                val moved = when { prev == 0 -> "new"; prev > cur -> "up ${prev - cur}"; prev < cur -> "down ${cur - prev}"; else -> "" }
+                val name = t.str("displayName") ?: listOf(t.str("location"), t.str("name")).filterNotNull().joinToString(" ").ifBlank { "?" }
+                StandingsRow(t.str("id") ?: "", name, t.str("abbreviation") ?: "", o.str("recordSummary") ?: "", moved, rank = cur)
+            } ?: emptyList()
+            if (rows.isEmpty()) null else StandingsGroup(poll.str("name") ?: "Top 25", rows.sortedBy { it.rank })
+        }
+    }
+
+    private suspend fun standingsTable(league: String, query: String): List<StandingsGroup> {
+        val path = path(league) ?: return emptyList()
+        val text = http.get("https://site.api.espn.com/apis/v2/sports/$path/standings$query", timeoutMs = 15_000).use { r ->
             if (!r.ok) return emptyList()
             r.body.readBytes().decodeToString()
         }

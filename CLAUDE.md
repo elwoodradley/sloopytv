@@ -153,6 +153,14 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.34 (2026-10-18): standings, all of them. The four US leagues read ESPN's conference
+  tables and then `?level=3` (AFC North, Atlantic, Metropolitan Division, AL East …), so the grid
+  shows conferences first and every division after (`Scores.standingsTable(league, query)`).
+  College football gets its polls ahead of the conferences from `/rankings`: "AP Top 25" and,
+  once it exists, "College Football Playoff" first (`Scores.rankings`; note = "up 2" / "down 1"
+  / "new"). Verified against the live feeds with curl; the emulator ANR'd on every attempt to
+  look at the bigger grids (its software video decode, see 0.6.33), so the first look at the
+  12-card college grid is on a real stick.
 - 0.6.33 (2026-10-18): "click MLS and it pops me back out": as the WHICH LEAGUE prompt closed,
   focus landed on a neighbouring rail row for a frame, the rail's `onFocusChanged` set `page`
   to that day and wiped `pickLeague`. Now a resting rail focus never drops the picker (only an
