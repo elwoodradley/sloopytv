@@ -132,7 +132,8 @@ fun stripItems(): List<Pair<String, String>> = stripBands().flatten()
 private fun StripColumn(modifier: Modifier, row: @Composable (index: Int, route: String, label: String) -> Unit) {
     val bands = stripBands()
     var i = 0
-    Column(modifier.fillMaxHeight().padding(top = RAIL_HEADER_H + 1.dp, bottom = 14.dp)) {
+    // 36dp at the foot keeps Settings inside a TV's overscan (about 5% of the height is unsafe).
+    Column(modifier.fillMaxHeight().padding(top = RAIL_HEADER_H + 1.dp, bottom = 36.dp)) {
         bands.forEachIndexed { b, band ->
             if (b == bands.lastIndex) Spacer(Modifier.weight(1f))
             else if (b > 0) Spacer(Modifier.height(STRIP_GAP_H))   // air between bands, no mark (the hairline read as a stray line)

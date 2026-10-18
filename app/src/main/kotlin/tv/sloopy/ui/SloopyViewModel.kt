@@ -1010,6 +1010,11 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         prefs.setSportsGroupsOff(p.id, if (off) cur + categoryId else cur - categoryId)
         gameChannelCache.clear(); refreshScores()
     }
+    /** The whole tick list at once: Tick all, Untick all, Only US groups. */
+    fun setSportsGroupsOff(off: Set<String>) = viewModelScope.launch {
+        val p = active.value ?: return@launch
+        prefs.setSportsGroupsOff(p.id, off); gameChannelCache.clear(); refreshScores()
+    }
     /**
      * Settings › About › "Send my sports lineup": the names, groups and guide ids of every
      * sports-looking channel, with the next twelve hours of guide titles, to the code server
@@ -1025,11 +1030,13 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val now = System.currentTimeMillis() / 1000
         val chans = channels.value.filter { c -> SPORT_WORDS.containsMatchIn(c.name.uppercase()) || SPORT_WORDS.containsMatchIn((cats[c.categoryId]?.name ?: "").uppercase()) }.take(2000)
         if (chans.isEmpty()) return "No sports-looking channels found."
+        val offNames = sportsGroupsOff.value.mapNotNull { cats[it]?.name }.sorted()
         val ids = chans.mapNotNull { it.epgId }.toSet()
         val progs = runCatching { catalog.programmesBetween(p.id, now, now + 12 * 3600) }.getOrDefault(emptyList()).filter { it.epgId in ids }.groupBy { it.epgId }
         val host = java.security.MessageDigest.getInstance("SHA-256").digest(p.displayHost().toByteArray()).toHex().take(10)
         val body = kotlinx.serialization.json.buildJsonObject {
             put("id", kotlinx.serialization.json.JsonPrimitive(me)); put("host", kotlinx.serialization.json.JsonPrimitive(host)); put("app", kotlinx.serialization.json.JsonPrimitive(tv.sloopy.BuildConfig.VERSION_NAME))
+            put("off", kotlinx.serialization.json.buildJsonArray { offNames.take(300).forEach { add(kotlinx.serialization.json.JsonPrimitive(it.take(60))) } })
             put("channels", kotlinx.serialization.json.buildJsonArray {
                 chans.forEach { c ->
                     add(kotlinx.serialization.json.buildJsonObject {
@@ -1070,7 +1077,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
      * The picker's list and the guess share this order.
      */
     fun channelsForNetwork(network: String, from: List<ChannelEntity> = channels.value, keyOf: (ChannelEntity) -> String = { tv.sloopy.core.model.Dupes.key(it.name) }): List<ChannelEntity> {
-        val words = tv.sloopy.core.sports.Scores.NETWORK_WORDS[network] ?: listOf(network)
+        val words = tv.sloopy.core.sports.Scores.wordsFor(network)
         val ranked = from.mapNotNull { c -> tv.sloopy.core.sports.Affiliates.rank(network, keyOf(c), words)?.let { c to it } }
         val usCats = liveCategories.value.filter { it.name.uppercase().contains("US") }.map { it.id }.toSet()
         val order = ranked.sortedWith(compareByDescending<Pair<ChannelEntity, Int>> { it.second }.thenByDescending { it.first.categoryId in usCats })
@@ -1098,7 +1105,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     private suspend fun resolveGameChannels(p: tv.sloopy.data.ProviderRecord, list: List<tv.sloopy.core.sports.Game>): List<GameRow> {
         val now = System.currentTimeMillis() / 1000
         val hiddenCh = hiddenChannels.value; val hiddenG = hiddenGroups.value; val off = sportsGroupsOff.value
-        val live = channels.value.filter { it.id !in hiddenCh && it.categoryId !in hiddenG && it.categoryId !in off }
+        val liveAll = channels.value.filter { it.id !in hiddenCh && it.categoryId !in hiddenG }
+        val live = liveAll.filter { it.categoryId !in off }
         val byEpg = live.filter { it.epgId != null }.groupBy { it.epgId!! }
         // The guide at each kickoff (quarter-hour buckets, at least now), for the channels that
         // could carry a game: sports groups and sports-named channels. A few indexed reads per
@@ -1113,8 +1121,15 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         return kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
             val keyOf = HashMap<Long, String>(live.size * 2)
             live.forEach { keyOf[it.id] = tv.sloopy.core.model.Dupes.key(it.name) }
+            // Ticked groups first; a network with nothing there (USA Network lives in an
+            // entertainment folder) falls back to every group that is not hidden. Keys for the
+            // unticked channels are computed only on that fallback.
+            val keyAll = HashMap<Long, String>()
+            fun keyAny(c: ChannelEntity): String = keyOf[c.id] ?: keyAll.getOrPut(c.id) { tv.sloopy.core.model.Dupes.key(c.name) }
             val candidates = HashMap<String, List<ChannelEntity>>()
-            fun forNetwork(net: String): List<ChannelEntity> = candidates.getOrPut(net) { channelsForNetwork(net, live) { keyOf[it.id] ?: "" } }
+            fun forNetwork(net: String): List<ChannelEntity> = candidates.getOrPut(net) {
+                channelsForNetwork(net, live) { keyOf[it.id] ?: "" }.ifEmpty { if (off.isEmpty()) emptyList() else channelsForNetwork(net, liveAll) { keyAny(it) } }
+            }
             // Channel names, normalised once: ESPN+ and PPV event feeds are named after the
             // matchup ("ESPN+ 14: Bowling Green vs Toledo"), with no guide row behind them.
             val nameNorm = HashMap<Long, String>(live.size * 2)

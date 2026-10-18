@@ -453,10 +453,20 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                     "sports" -> {
                         Section("Sports")
                         Text("The Sports hub picks a game's channel from the groups ticked here. Untick the ones that are only noise for games (every city's raw local stations, foreign folders, 24/7 channels). Your own picks from hold OK on a game still win.", style = Sloopy.body.copy(color = Sloopy.textSoft), modifier = Modifier.width(900.dp))
+                        val hiddenG by vm.hiddenGroups.collectAsState()
                         val cats by vm.liveCategories.collectAsState()
+                        val shownCats = cats.filter { it.id !in hiddenG }
                         val off by vm.sportsGroupsOff.collectAsState()
-                        Section("Look for games in these groups · ${cats.size - cats.count { it.id in off }} of ${cats.size}")
-                        cats.sortedBy { tv.sloopy.core.model.Names.clean(it.name).lowercase() }.forEach { c ->
+                        val usWord = Regex("\\b(US|USA)\\b")
+                        Row(Modifier.padding(top = 14.dp)) {
+                            SloopyButton("Only US groups", primary = true, onClick = { vm.setSportsGroupsOff(shownCats.filter { !usWord.containsMatchIn(tv.sloopy.core.model.Names.clean(it.name).uppercase()) }.map { it.id }.toSet()) })
+                            Spacer(Modifier.width(12.dp))
+                            SloopyButton("Tick all", onClick = { vm.setSportsGroupsOff(emptySet()) })
+                            Spacer(Modifier.width(12.dp))
+                            SloopyButton("Untick all", onClick = { vm.setSportsGroupsOff(shownCats.map { it.id }.toSet()) })
+                        }
+                        Section("Look for games in these groups · ${shownCats.size - shownCats.count { it.id in off }} of ${shownCats.size}")
+                        shownCats.sortedBy { tv.sloopy.core.model.Names.clean(it.name).lowercase() }.forEach { c ->
                             val on = c.id !in off
                             SettingRow(tv.sloopy.core.model.Names.clean(c.name).take(48), if (on) "ON" else "OFF") { vm.setSportsGroupOff(c.id, on) }
                         }

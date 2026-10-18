@@ -153,6 +153,15 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.26 (2026-10-17): buddy's second batch. Settings › Sports gains "Only US groups" (unticks
+  every group without a US/USA word), "Tick all", "Untick all", and hides groups already hidden
+  in the guide. A network with no candidates in the ticked groups falls back to all non-hidden
+  groups (`liveAll`; USA Network lives in an entertainment folder), ticked groups still first.
+  `Scores.wordsFor(network)` is the case-insensitive alias lookup; aliases added for USA
+  Network/USA Net, CW, NBC Sports, truTV, ESPNEWS, ESPN3, ACCNX, SECN+, Paramount+, Netflix,
+  Apple TV+. Search shows "Searching…" while the programme scan runs (it felt frozen). The strip's
+  bottom padding is 36dp so Settings clears TV overscan (his set clipped the word). The lineup
+  report now carries his unticked group names (`off`), the seed for a per-provider default list.
 - 0.6.25 (2026-10-17): three things. (1) Friend codes stopped changing: `ensureFriendCode`
   reads `prefs.friendCode.first()`, not the StateFlow (initial null while DataStore loads; a
   check that raced it minted a new code over the saved one; the user's code changed and the

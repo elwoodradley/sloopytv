@@ -102,10 +102,13 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
         runCatching { speak.launch(intent) }.onFailure { vm.toast("Could not start voice search") }
     }
 
+    var searching by remember { mutableStateOf(false) }
     LaunchedEffect(q, provider?.id) {
         val p = provider ?: return@LaunchedEffect
-        if (q.trim().length < 2) { hits = emptyList(); return@LaunchedEffect }
+        if (q.trim().length < 2) { hits = emptyList(); searching = false; return@LaunchedEffect }
         delay(250)
+        searching = true   // the programme search is a scan over a big table; say so instead of sitting blank
+        try {
         val text = q.trim()
         val now = System.currentTimeMillis() / 1000
         val hidden = vm.hiddenGroups.value
@@ -120,6 +123,7 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
             vm.graph.db.series().search(p.id, text, 30).forEach { out.add(Hit.Item("series", it.id, it.name, "Series" + (it.releaseDate?.take(4)?.let { y -> " · $y" } ?: ""))) }
         }
         hits = out
+        } finally { searching = false }
     }
     fun remember(hit: Hit) { scope.launch { vm.prefs.pushSearch(q) } }
     // Typed or spoken, a search that found something is remembered once it has sat for a moment.
@@ -145,7 +149,8 @@ fun SearchScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
                 Text("Type on your phone: scan with the camera. Same Wi-Fi. You can also tap a channel there to tune.", style = Sloopy.label.copy(color = Sloopy.dim), modifier = Modifier.width(520.dp))
             }
             Spacer(Modifier.height(12.dp))
-            if (q.trim().length >= 2 && hits.isEmpty()) Text("Nothing on.", style = Sloopy.bodyBig)
+            if (searching && hits.isEmpty()) Text("Searching…", style = Sloopy.bodyBig.copy(color = Sloopy.muted))
+            else if (q.trim().length >= 2 && hits.isEmpty()) Text("Nothing on.", style = Sloopy.bodyBig)
             if (hits.isNotEmpty()) Text("Hold OK on a channel, movie or series to add it to favourites and keep going. Hold OK on a programme to record it.", style = Sloopy.label.copy(color = Sloopy.dim), modifier = Modifier.padding(bottom = 8.dp))
             LazyColumn(Modifier.fillMaxSize(), contentPadding = PaddingValues(bottom = 40.dp)) {
                 if (q.trim().length < 2) {

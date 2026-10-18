@@ -187,6 +187,13 @@ class Scores(private val http: Http) {
             "ACCN" to listOf("ACC NETWORK", "ACCN"), "ACC NETWORK" to listOf("ACC NETWORK", "ACCN"), "CBSSN" to listOf("CBS SPORTS", "CBSSN"), "CBS SPORTS NETWORK" to listOf("CBS SPORTS", "CBSSN"),
             "PEACOCK" to listOf("PEACOCK"), "ESPN+" to listOf("ESPN+", "ESPN PLUS"), "NBCSN" to listOf("NBCSN"), "TNT" to listOf("TNT"), "TBS" to listOf("TBS"), "USA" to listOf("USA NETWORK", "USA"),
             "NHL NETWORK" to listOf("NHL NETWORK"), "MLB NETWORK" to listOf("MLB NETWORK"), "NBA TV" to listOf("NBA TV"), "REDZONE" to listOf("REDZONE", "RED ZONE"), "NFL REDZONE" to listOf("REDZONE", "RED ZONE"),
+            "USA NETWORK" to listOf("USA NETWORK", "USA"), "USA NET" to listOf("USA NETWORK", "USA"), "CW" to listOf("CW"), "THE CW" to listOf("CW"),
+            "NBC SPORTS" to listOf("NBC SPORTS", "NBCSN"), "TRUTV" to listOf("TRUTV", "TRU TV"), "ESPNEWS" to listOf("ESPNEWS", "ESPN NEWS"), "ESPN NEWS" to listOf("ESPNEWS", "ESPN NEWS"),
+            "MLB NET" to listOf("MLB NETWORK"), "NHL NET" to listOf("NHL NETWORK"), "NBATV" to listOf("NBA TV"), "NFL" to listOf("NFL NETWORK", "NFL NET"),
+            "ACCNX" to listOf("ACCNX", "ACC EXTRA", "ACC NETWORK EXTRA"), "ACC NETWORK EXTRA" to listOf("ACCNX", "ACC EXTRA", "ACC NETWORK EXTRA"), "SECN+" to listOf("SECN+", "SEC NETWORK+", "SEC NETWORK PLUS", "SECN PLUS"),
+            "ESPN3" to listOf("ESPN3", "ESPN 3"), "PARAMOUNT+" to listOf("PARAMOUNT+", "PARAMOUNT PLUS"), "NETFLIX" to listOf("NETFLIX"), "APPLE TV+" to listOf("APPLE TV+", "APPLE TV"),
         )
+        /** The words a network goes by in channel names; the lookup ignores case and spacing. */
+        fun wordsFor(network: String): List<String> = NETWORK_WORDS[network.uppercase().trim()] ?: listOf(network.uppercase().trim())
     }
 }
