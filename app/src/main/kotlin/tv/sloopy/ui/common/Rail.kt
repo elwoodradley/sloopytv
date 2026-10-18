@@ -131,15 +131,24 @@ fun stripItems(): List<Pair<String, String>> = stripBands().flatten()
  * the bands with a hairline gap between them, and the last band pinned to the foot.
  */
 @Composable
-private fun StripColumn(modifier: Modifier, row: @Composable (index: Int, route: String, label: String) -> Unit) {
+private fun StripColumn(modifier: Modifier, row: @Composable (index: Int, route: String, label: String, rowH: androidx.compose.ui.unit.Dp) -> Unit) {
     val bands = stripBands()
     var i = 0
-    // 36dp at the foot keeps Settings inside a TV's overscan (about 5% of the height is unsafe).
-    Column(modifier.fillMaxHeight().padding(top = RAIL_HEADER_H + 1.dp, bottom = 36.dp)) {
-        bands.forEachIndexed { b, band ->
-            if (b == bands.lastIndex) Spacer(Modifier.weight(1f))
-            else if (b > 0) Spacer(Modifier.height(STRIP_GAP_H))   // air between bands, no mark (the hairline read as a stray line)
-            band.forEach { (route, label) -> row(i, route, label); i++ }
+    // The guide gives the strip only the space under its programme panel, so rows shrink to fit
+    // the height they are given (never above STRIP_ROW_H, never below 34dp). Before 0.6.37 a
+    // fixed 50dp let the Toad push Settings off the bottom of the guide.
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier.fillMaxHeight()) {
+        val rows = bands.sumOf { it.size }
+        val gaps = (bands.size - 2).coerceAtLeast(0)
+        val fixed = RAIL_HEADER_H + 1.dp + 36.dp + STRIP_GAP_H * gaps + 8.dp
+        val rowH = ((maxHeight - fixed) / rows.coerceAtLeast(1)).coerceIn(34.dp, STRIP_ROW_H)
+        // 36dp at the foot keeps Settings inside a TV's overscan (about 5% of the height is unsafe).
+        Column(Modifier.fillMaxHeight().padding(top = RAIL_HEADER_H + 1.dp, bottom = 36.dp)) {
+            bands.forEachIndexed { b, band ->
+                if (b == bands.lastIndex) Spacer(Modifier.weight(1f))
+                else if (b > 0) Spacer(Modifier.height(STRIP_GAP_H))   // air between bands, no mark (the hairline read as a stray line)
+                band.forEach { (route, label) -> row(i, route, label, rowH); i++ }
+            }
         }
     }
 }
@@ -170,7 +179,7 @@ fun NavStrip(
         Box(Modifier.height(RAIL_HEADER_H).width(STRIP_W).zIndex(3f).padding(start = if (expanded) 16.dp else 0.dp), contentAlignment = if (expanded) Alignment.CenterStart else Alignment.Center) {
             StripMark(expanded)
         }
-        StripColumn(Modifier) { i, route, label ->
+        StripColumn(Modifier) { i, route, label, rowH ->
                 var fc by remember { mutableStateOf(false) }
                 Surface(
                     onClick = { go(route) },
@@ -178,7 +187,7 @@ fun NavStrip(
                     colors = ClickableSurfaceDefaults.colors(containerColor = Color.Transparent, focusedContainerColor = Sloopy.focus, contentColor = Sloopy.text, focusedContentColor = Color.White),
                     border = ClickableSurfaceDefaults.border(focusedBorder = Border(BorderStroke(1.dp, Color.White.copy(alpha = 0.55f)), shape = RectangleShape)),
                     scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
-                    modifier = Modifier.size(STRIP_W, STRIP_ROW_H)
+                    modifier = Modifier.size(STRIP_W, rowH)
                         .then(if (route == current && requester != null) Modifier.focusRequester(requester) else Modifier)
                         .focusProperties {
                             left = FocusRequester.Cancel
@@ -188,7 +197,7 @@ fun NavStrip(
                         .onFocusChanged { fc = it.isFocused; if (it.isFocused) focusedRoute = route },
                 ) {
                     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        NavIcon(route, color = if (route == current || fc) Sloopy.text else Sloopy.dim, size = 24.dp)
+                        NavIcon(route, color = if (route == current || fc) Sloopy.text else Sloopy.dim, size = if (rowH < 44.dp) 21.dp else 24.dp)
                     }
                 }
         }
@@ -196,8 +205,8 @@ fun NavStrip(
             StripColumn(
                 Modifier.wrapContentWidth(Alignment.Start, unbounded = true).offset(x = STRIP_W).width(236.dp).background(Sloopy.surface)
                     .drawBehind { drawRect(Sloopy.hair, Offset(size.width - 1.dp.toPx(), 0f), Size(1.dp.toPx(), size.height)) },
-            ) { _, route, label ->
-                Box(Modifier.height(STRIP_ROW_H).fillMaxWidth().padding(start = 18.dp), contentAlignment = Alignment.CenterStart) {
+            ) { _, route, label, rowH ->
+                Box(Modifier.height(rowH).fillMaxWidth().padding(start = 18.dp), contentAlignment = Alignment.CenterStart) {
                     Text(label.uppercase(), style = Sloopy.titleRow.copy(color = when { route == focusedRoute -> Color.White; route == current -> Sloopy.text; else -> Sloopy.muted }))
                 }
             }

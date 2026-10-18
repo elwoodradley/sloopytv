@@ -153,6 +153,11 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.37 (2026-10-18): with the Toad on, the guide's strip (which only gets the height under
+  the programme panel, ~550dp) was taller than its space and Settings fell off the bottom; the
+  user had to reach Settings through Sports. `StripColumn` now sizes rows to the height it is
+  given (BoxWithConstraints, 34dp to `STRIP_ROW_H`), icons drop to 21dp on short rows, and the
+  row lambda takes `rowH`. Toad allow-list on 2026-10-18: Q6FHLTN5 (user), LQMS5BG8 (buddy).
 - 0.6.36 (2026-10-18): package channels first. The buddy's lineup report (lu:JVGSE64Y, 2,000
   channels, read via /admin/lineup) showed his provider's per-game groups: "US| NBA PACKAGE"
   ("Philadelphia 76ers vs Boston Celtics @ Oct 16 7:00 PM :NBA 01"), "US| NCAAF PACKAGE"
