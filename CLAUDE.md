@@ -153,6 +153,8 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.30 (2026-10-18): hub groups get a "Top" button beside ▲▼ (send to the top, then nudge
+  down), the user's answer to drag not working on a phone.
 - 0.6.29 (2026-10-18): HANG ON SLOOPY for both states, scarlet runner, real Ohio outline (see
   Voice). The boundary came from `https://cdn.jsdelivr.net/npm/us-atlas@3/states-10m.json`
   (TopoJSON, decoded and simplified with a Douglas-Peucker pass in a throwaway script); redo it

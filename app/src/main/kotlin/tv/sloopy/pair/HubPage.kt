@@ -74,13 +74,13 @@ object HubPage {
       h += '<div class="bar"><h2>Groups</h2><span class="k">'+shown+' of '+D.groups.length+' shown</span></div>';
       D.groups.forEach(function(x, i){
         h += '<div class="row g'+(x.hidden?' hid':'')+'" draggable="true" data-g="'+esc(x.id)+'">'+
-             '<button class="b mini" data-act="up" title="Move up"'+(i===0?' disabled':'')+'>&#9650;</button><button class="b mini" data-act="down" title="Move down"'+(i===D.groups.length-1?' disabled':'')+'>&#9660;</button>'+
+             '<button class="b mini" data-act="top" title="Move to the top"'+(i===0?' disabled':'')+'>Top</button><button class="b mini" data-act="up" title="Move up"'+(i===0?' disabled':'')+'>&#9650;</button><button class="b mini" data-act="down" title="Move down"'+(i===D.groups.length-1?' disabled':'')+'>&#9660;</button>'+
              '<span class="t">'+esc(x.name)+'</span><span class="c">'+(byGroup[x.id]||[]).length+'</span>'+
              '<button class="b'+(x.sports?' on':'')+'" data-act="sports">'+(x.sports?'Sports on':'Sports off')+'</button>'+
              '<button class="b'+(x.hidden?' on':'')+'" data-act="ghide">'+(x.hidden?'Hidden':'Hide')+'</button><span class="open">&#8250;</span></div>';
       });
       if (!D.groups.length) h += '<div class="empty">No groups yet. Is a service set up on the TV?</div>';
-      h += '<div class="help">Tap a group to see its channels. Arrows or drag to reorder. Hide takes a group off the TV everywhere. Sports on lets the Sports hub pick game channels from it.</div>';
+      h += '<div class="help">Tap a group to see its channels. Top sends a group to the top of the list, the arrows nudge it one place, or drag it on a computer. Hide takes a group off the TV everywhere. Sports on lets the Sports hub pick game channels from it.</div>';
     } else if (view === "groups") {
       var gx = group(sel) || {name:""}; var list = byGroup[sel] || [];
       h += '<div class="bar"><button class="back" data-act="back">&#8249; Groups</button><h2>'+esc(gx.name)+'</h2><span class="k">'+list.length+'</span></div>';
@@ -109,7 +109,7 @@ object HubPage {
       else if (act === "chide") { var c2 = chan(r.dataset.c); op({op:"channelHidden", id:c2.id, hidden: !c2.hid}, c2.hid ? "Shown again" : "Hidden") }
       else if (act === "ghide") { var g1 = group(r.dataset.g); op({op:"groupHidden", id:g1.id, hidden: !g1.hidden}, g1.hidden ? "Group shown" : "Group hidden") }
       else if (act === "sports") { var g2 = group(r.dataset.g); op({op:"sportsGroup", id:g2.id, off: !!g2.sports}, g2.sports ? "Sports hub skips this group" : "Sports hub may pick from this group") }
-      else if (act === "up" || act === "down") { var ids = D.groups.map(function(x){ return x.id }); var i = ids.indexOf(r.dataset.g), j = act === "up" ? i - 1 : i + 1; if (j < 0 || j >= ids.length) return; ids.splice(i, 1); ids.splice(j, 0, r.dataset.g); reorder(ids) }
+      else if (act === "up" || act === "down" || act === "top") { var ids = D.groups.map(function(x){ return x.id }); var i = ids.indexOf(r.dataset.g), j = act === "top" ? 0 : act === "up" ? i - 1 : i + 1; if (j < 0 || j >= ids.length || j === i) return; ids.splice(i, 1); ids.splice(j, 0, r.dataset.g); reorder(ids); if (act === "top") window.scrollTo(0, 0) }
       e.stopPropagation(); return;
     }
     if (r && r.dataset.g !== undefined) { sel = r.dataset.g; render(); window.scrollTo(0, 0) }
