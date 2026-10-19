@@ -60,14 +60,14 @@ class Prefs(private val context: Context) {
     suspend fun setExternalPlayer(v: String) = ds.edit { it[stringPreferencesKey("player")] = v }
 
     val clock12: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("clock_12h")] ?: false }
-    suspend fun setClock12(v: Boolean) = ds.edit { it[booleanPreferencesKey("clock_12h")] = v }
+    suspend fun setClock12(v: Boolean) { if (clock12.first() != v) tv.sloopy.SettingsLog.note(context, "clock set to " + (if (v) "12 hour" else "24 hour")); ds.edit { it[booleanPreferencesKey("clock_12h")] = v } }
 
     val theme: Flow<String> = ds.data.map { it[stringPreferencesKey("theme")] ?: "phosphor" }
     suspend fun setTheme(v: String) = ds.edit { it[stringPreferencesKey("theme")] = v }
 
     /** Ask the display for a refresh rate that matches the stream (50 Hz for European channels). */
     val frameRateMatch: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("frame_rate_match")] ?: false }
-    suspend fun setFrameRateMatch(v: Boolean) = ds.edit { it[booleanPreferencesKey("frame_rate_match")] = v }
+    suspend fun setFrameRateMatch(v: Boolean) { if (frameRateMatch.first() != v) tv.sloopy.SettingsLog.note(context, "frame-rate matching " + (if (v) "on" else "off")); ds.edit { it[booleanPreferencesKey("frame_rate_match")] = v } }
 
     /** "provider" | "number" | "name", per group. */
     private fun sortKey(providerId: String, group: String) = stringPreferencesKey("channel_sort_${providerId}_$group")
@@ -175,7 +175,7 @@ class Prefs(private val context: Context) {
         p[stringPreferencesKey("search_history")] = (listOf(q.trim()) + cur.filter { !it.equals(q.trim(), ignoreCase = true) }).take(10).joinToString("\u0001")
     }
     suspend fun clearSearchHistory() = ds.edit { it.remove(stringPreferencesKey("search_history")) }
-    suspend fun setOsdSeconds(v: Int) = ds.edit { it[intPreferencesKey("osd_seconds")] = v }
+    suspend fun setOsdSeconds(v: Int) { if (osdSeconds.first() != v) tv.sloopy.SettingsLog.note(context, "channel badge set to $v s"); ds.edit { it[intPreferencesKey("osd_seconds")] = v } }
 
     private fun orderKey(providerId: String) = stringPreferencesKey("group_order_$providerId")
     fun groupOrder(providerId: String): Flow<List<String>> = ds.data.map { p -> p[orderKey(providerId)]?.split('\u0001')?.filter { it.isNotEmpty() } ?: emptyList() }

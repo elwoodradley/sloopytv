@@ -948,7 +948,15 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
      * check that raced it minted a fresh code over the saved one (the user's code changed, his
      * friends lost him, and the Toad allow-list no longer matched).
      */
-    fun ensureFriendCode() = viewModelScope.launch { if (prefs.friendCode.first().isNullOrBlank()) prefs.setFriendCode(tv.sloopy.sync.SyncClient.newCode()) }
+    fun ensureFriendCode() = viewModelScope.launch {
+        if (prefs.friendCode.first().isNullOrBlank()) {
+            val c = tv.sloopy.sync.SyncClient.newCode()
+            // A new code on a stick that has been used before means its settings store was empty:
+            // the app was removed and reinstalled, or its data cleared.
+            tv.sloopy.SettingsLog.note(getApplication(), "settings store was empty; made friend code " + tv.sloopy.sync.SyncClient.pretty(c))
+            prefs.setFriendCode(c)
+        }
+    }
     fun addFriend(code: String, name: String) = viewModelScope.launch {
         val c = tv.sloopy.sync.SyncClient.normalise(code); if (c.length != 8) { _toast.value = "A friend code is eight letters and numbers"; return@launch }
         prefs.setFriends((friends.value.filter { it.first != c } + (c to name.trim().ifBlank { c })))
@@ -1389,6 +1397,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
      * partial one keeps this stick's own code, or its own backup would overwrite the other stick's.
      */
     suspend fun applyBundle(bundle: tv.sloopy.sync.SyncBundle, code: String, opts: tv.sloopy.sync.SyncManager.RestoreOptions): String {
+        tv.sloopy.SettingsLog.note(getApplication(), "restore from transfer code " + tv.sloopy.sync.SyncClient.pretty(tv.sloopy.sync.SyncClient.normalise(code)) +
+            " · " + listOfNotNull("login".takeIf { opts.login }, "favourites".takeIf { opts.favourites }, "groups".takeIf { opts.groups }, "history".takeIf { opts.history }, "settings".takeIf { opts.settings }).joinToString(", "))
         val note = syncManager.apply(bundle, opts)
         if (opts.login) { prefs.setSyncCode(tv.sloopy.sync.SyncClient.normalise(code)); prefs.setSyncedAt(bundle.at) }
         active.value?.let { refresh(it) }

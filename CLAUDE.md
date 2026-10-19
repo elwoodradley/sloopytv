@@ -153,6 +153,20 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.39 (2026-10-18): the buddy's "settings keep resetting" (clock to 24 h, frame-rate
+  matching off, badge to 4 s, i.e. defaults). Only two things write those: the Settings toggles
+  and `SyncManager.apply` (a transfer restore, whose Settings tick was on by default). Nothing
+  restores on its own, nothing deletes the store, one DataStore instance. But his friend code
+  went LQMS5BG8 (Toad use 10-17) → JVGSE64Y (lineup 10-18), and a restore never touches the
+  friend code, so his whole store was emptied at least once: the app removed and reinstalled
+  (a failed update?) or its data cleared. Now: `SettingsLog` (files/settings_log.txt, outside
+  the store) records changes to the three settings, every restore with its code and options,
+  and "settings store was empty; made friend code …"; About › Settings history shows it with
+  the install and last-update dates (a recent install date = reinstalled). Restore's Settings
+  tick now defaults off on a stick that already has a provider, and says it replaces this
+  TV's clock, badge, frame rate and theme. Also: Right from the strip's foot icons (Settings,
+  Toad) had nothing beside them and went nowhere; `NavStrip` now retries Right from its top
+  icon (`topRow`) when the move fails.
 - 0.6.38 (2026-10-18), buddy's notes. The HANG ON SLOOPY card (Ohio outline, scarlet runner)
   is the app's one "wait": `LoadingSloopy(caption, delayMs = 350)` in `ui/common/HangOn.kt`
   shares the drawing with `HangOnSloopy` (`OhioCard`) and replaces the small loading text in

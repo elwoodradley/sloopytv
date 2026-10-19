@@ -35,6 +35,9 @@ import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -168,11 +171,23 @@ fun NavStrip(
 ) {
     var focusedRoute by remember { mutableStateOf<String?>(null) }
     var expanded by remember { mutableStateOf(false) }
+    val fm = androidx.compose.ui.platform.LocalFocusManager.current
+    val topRow = remember { FocusRequester() }
     val items = stripItems()
     Box(
         Modifier.width(STRIP_W).fillMaxHeight().zIndex(2f).background(Sloopy.surface)
             .focusProperties { this.canFocus = canFocus }
-            .onFocusChanged { expanded = it.hasFocus; onFocusChange(it.hasFocus) },
+            .onFocusChanged { expanded = it.hasFocus; onFocusChange(it.hasFocus) }
+            // Right from an icon with nothing beside it (Settings and the Toad sit at the foot,
+            // below every screen's menu) went nowhere; retry from the top icon, which always has
+            // the screen's menu to its right. Screens that handle Right themselves (the guide)
+            // see the key first and never reach this.
+            .onPreviewKeyEvent { ev ->
+                if (ev.type == androidx.compose.ui.input.key.KeyEventType.KeyDown && ev.key == androidx.compose.ui.input.key.Key.DirectionRight) {
+                    if (!fm.moveFocus(androidx.compose.ui.focus.FocusDirection.Right)) { runCatching { topRow.requestFocus() }; fm.moveFocus(androidx.compose.ui.focus.FocusDirection.Right) }
+                    true
+                } else false
+            },
     ) {
         // The mark in the strip's header zone: "TV" when folded, the full name when the strip
         // has focus (it overflows to the right, over the label panel's own empty header zone).
@@ -189,6 +204,7 @@ fun NavStrip(
                     scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
                     modifier = Modifier.size(STRIP_W, rowH)
                         .then(if (route == current && requester != null) Modifier.focusRequester(requester) else Modifier)
+                        .then(if (i == 0) Modifier.focusRequester(topRow) else Modifier)
                         .focusProperties {
                             left = FocusRequester.Cancel
                             if (i == 0) up = FocusRequester.Cancel

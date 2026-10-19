@@ -533,7 +533,7 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                                 busy = true
                                 scope.launch {
                                     runCatching { vm.fetchBundle(restoreCode) }
-                                        .onSuccess { b -> restoreOpts = tv.sloopy.sync.SyncManager.RestoreOptions(login = providersNow.isEmpty()); pendingBundle = b }
+                                        .onSuccess { b -> restoreOpts = tv.sloopy.sync.SyncManager.RestoreOptions(login = providersNow.isEmpty(), settings = providersNow.isEmpty()); pendingBundle = b }
                                         .onFailure { vm.toast(tv.sloopy.TLog.userMessage(it)) }
                                     busy = false
                                 }
@@ -548,7 +548,7 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                                     Triple("fav", "Favourites and My list", o.favourites),
                                     Triple("groups", "Group order, hidden groups and channels", o.groups),
                                     Triple("history", "History and resume points", o.history),
-                                    Triple("settings", "Theme, clock, teams and other settings", o.settings),
+                                    Triple("settings", "That stick's settings: clock, channel badge, frame rate, theme, teams (replaces this TV's)", o.settings),
                                 ),
                                 note = b.summary + (if (!o.login) ". Without the login, favourites that exist on this stick's own provider are kept; this stick keeps its own transfer code." else ". With the login, this stick joins the other stick's code and stays in step with it."),
                                 onToggle = { k -> restoreOpts = when (k) { "login" -> o.copy(login = !o.login); "fav" -> o.copy(favourites = !o.favourites); "groups" -> o.copy(groups = !o.groups); "history" -> o.copy(history = !o.history); else -> o.copy(settings = !o.settings) } },
@@ -607,6 +607,12 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                         }
                         val gstats by vm.guideStats.collectAsState()
                         if (gstats.isNotBlank()) Text(gstats, style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 10.dp))
+                        val setLog = remember { tv.sloopy.SettingsLog.read(context) }
+                        val installed = remember { tv.sloopy.SettingsLog.installLine(context) }
+                        Section("Settings history")
+                        Text(installed.ifBlank { "Install date unknown." }, style = Sloopy.body.copy(color = Sloopy.textSoft), modifier = Modifier.width(900.dp))
+                        if (setLog.isEmpty()) Text("Nothing recorded yet. Changes to the clock, the channel badge and frame-rate matching, restores from a transfer code, and a fresh start of the settings store are listed here from now on.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.width(900.dp).padding(top = 4.dp))
+                        else Text(setLog.reversed().joinToString("\n"), style = Sloopy.mono14.copy(color = Sloopy.textSoft), modifier = Modifier.padding(top = 6.dp).width(1000.dp))
                         var sysExit by remember { mutableStateOf(tv.sloopy.CrashLog.readSystemExit(context)) }
                         if (sysExit != null) {
                             Section("Last time the app was closed on you")
