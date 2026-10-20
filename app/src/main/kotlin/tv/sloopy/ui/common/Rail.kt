@@ -114,8 +114,8 @@ fun RailItem(
 
 /** The strip in three bands (0.6.21, after TiviMate): watching, the library, and the foot of the screen. */
 val STRIP_BANDS: List<List<Pair<String, String>>> = listOf(
-    listOf("guide" to "Guide", "tonight" to "Tonight", "scores" to "Sports"),
-    listOf("movies" to "Movies", "series" to "Series", "history" to "History", "recordings" to "Recordings", "search" to "Search"),
+    listOf("search" to "Search", "guide" to "Guide", "tonight" to "Tonight", "scores" to "Sports"),   // Search on top, as TiviMate (the buddy, 0.6.40)
+    listOf("movies" to "Movies", "series" to "Series", "history" to "History", "recordings" to "Recordings"),
     listOf("settings" to "Settings"),
 )
 val STRIP_ITEMS = STRIP_BANDS.flatten()

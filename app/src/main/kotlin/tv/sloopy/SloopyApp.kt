@@ -29,7 +29,9 @@ class SloopyApp : Application(), SingletonImageLoader.Factory {
     override fun onCreate() {
         super.onCreate()
         CrashLog.install(this)
-        CrashLog.noteSystemExit(this)
+        // Reads the system's exit records and may write a small file: off the main thread, so a
+        // slow app drive (a Shield with apps on a USB stick) cannot hold up the first frame.
+        Thread({ runCatching { CrashLog.noteSystemExit(this) } }, "exit-reasons").start()
         graph = Graph(this)
     }
 

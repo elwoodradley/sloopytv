@@ -13,10 +13,18 @@ object SettingsLog {
     private const val MAX = 40
     private fun file(context: Context) = File(context.applicationContext.filesDir, "settings_log.txt")
 
+    /** Writes go to one background thread: on a box whose app storage is a slow USB drive, even a small file write on the main thread can stall a frame. */
+    private val writer = java.util.concurrent.Executors.newSingleThreadExecutor()
+
     fun note(context: Context, what: String) {
+        val app = context.applicationContext
+        val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date())
+        writer.execute { write(app, stamp, what) }
+    }
+
+    private fun write(context: Context, stamp: String, what: String) {
         runCatching {
             val f = file(context)
-            val stamp = java.text.SimpleDateFormat("yyyy-MM-dd HH:mm", java.util.Locale.US).format(java.util.Date())
             val lines = (if (f.exists()) f.readLines() else emptyList()) + "$stamp · v${BuildConfig.VERSION_NAME} · $what"
             f.writeText(lines.takeLast(MAX).joinToString("\n") + "\n")
         }

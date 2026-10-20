@@ -226,10 +226,16 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     }
     BackHandler { back() }
 
-    /** The cursor goes to the current channel's row at "now" (or stays where it was), and the grid takes focus. */
-    suspend fun focusGrid() {
+    /**
+     * The cursor goes to the current channel's row at "now" (or stays where it was), and the grid
+     * takes focus. [newGroup]: a different group was just picked, so when the channel playing is
+     * not in it the cursor starts at the top. Before 0.6.40 it kept the old group's row number and
+     * scroll ("switched to 24/7 Comedy and it dropped me in the middle of the list").
+     */
+    suspend fun focusGrid(newGroup: Boolean = false) {
         val i = channels.indexOfFirst { it.id == current?.id }
         if (i >= 0) { cursorRow = i; cursorEpoch = nowEpoch; listState.scrollToItem((i - 3).coerceAtLeast(0)); scrollTimelineTo(nowPx) }
+        else if (newGroup) { cursorRow = 0; cursorEpoch = nowEpoch; listState.scrollToItem(0); scrollTimelineTo(nowPx) }
         else if (cursorRow !in channels.indices) { cursorRow = 0; cursorEpoch = nowEpoch; scrollTimelineTo(nowPx) }
         repeat(40) { if (runCatching { gridFocus.requestFocus() }.getOrDefault(false)) return; delay(50) }
     }
@@ -238,7 +244,7 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     LaunchedEffect(Unit) { if (vm.epgError.value != null) vm.refreshEpgNow() }
     LaunchedEffect(rail, quit) { if (!quit) { if (rail == Rail.NONE) focusGrid() else focusRail() } }
     // A new group's channels arrive a moment after the selection; land on them when they do.
-    LaunchedEffect(channels) { if (pendingGroup) { pendingGroup = false; focusGrid() } else if (cursorRow > channels.lastIndex) cursorRow = channels.lastIndex.coerceAtLeast(0) }
+    LaunchedEffect(channels) { if (pendingGroup) { pendingGroup = false; focusGrid(newGroup = true) } else if (cursorRow > channels.lastIndex) cursorRow = channels.lastIndex.coerceAtLeast(0) }
     var scrolledToNow by remember { mutableStateOf(false) }
     LaunchedEffect(hScroll.maxValue) { if (!scrolledToNow && hScroll.maxValue > 0) { hScroll.scrollTo(nowPx.coerceIn(0, hScroll.maxValue)); scrolledToNow = true } }
 

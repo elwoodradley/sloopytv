@@ -153,6 +153,20 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.40 (2026-10-20), buddy's notes. Picking a different group in the guide kept the old
+  group's row number and scroll when the channel playing was not in the new one ("dropped me in
+  the middle of 24/7 Comedy"); `focusGrid(newGroup = true)` now starts at the top in that case
+  (and still lands on the playing channel when it is in the group). Search moved to the top of
+  the strip's first band (Search · Guide · Tonight · Sports), as TiviMate. His other report, ANRs
+  plus the Shield rebooting itself, came with "some of my apps are on my flash drive": a Shield
+  puts sideloaded apps on adopted USB storage, so the APK's code pages and the 275 MB guide
+  database live on the stick, and a stalling drive freezes any app (the main thread faults on
+  code it has to read from the drive). No main-thread database access exists in the app
+  (checked: no allowMainThreadQueries, no runBlocking); the two small file writes that did run
+  on the main thread (`SettingsLog.note`, `CrashLog.noteSystemExit` at startup) now run on a
+  background thread. Advice given: keep SloopyTV on internal storage (Settings › Apps ›
+  SloopyTV › Storage used › Internal shared storage). Code server checked the same day: up,
+  writes succeeding; login codes are single-use, and none had been minted since the 17th.
 - 0.6.39 (2026-10-18): the buddy's "settings keep resetting" (clock to 24 h, frame-rate
   matching off, badge to 4 s, i.e. defaults). Only two things write those: the Settings toggles
   and `SyncManager.apply` (a transfer restore, whose Settings tick was on by default). Nothing
