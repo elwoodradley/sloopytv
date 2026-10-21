@@ -597,6 +597,14 @@ memory, presence (`/friends/me`) is rewritten only on a channel change or after 
 of failing the request. Remaining writers: login code mint/redeem, sync put, config, poster and
 trending caches, Toad counters, presence. If the group turns on friends presence at scale, the
 Workers Paid plan ($5/mo, 1M writes/day) is the answer, not more trimming.
+Admin page sign-in (2026-10-20): the buddy pasted the password and Open did nothing. The real
+cause: since 0.6.25 the "Sports lineups" viewer script carried `"\n"` written into the Worker as a
+real line break (the page is a JS template literal, so `\n` in index.js becomes a newline in
+the served page), a syntax error that stopped the whole admin script, so no button worked. Fixed
+by writing `\\n` in index.js. `signIn()` also strips pasted line breaks and spaces, shows
+"Checking…" and any error, and Enter submits. Rule: inside the admin HTML template every escape
+is doubled (`\\n`, `\\r`, `\\d`), and after any admin page change run:
+`curl -s <worker>/admin | python3 -c 'import re,sys;print(";".join(re.findall(r"<script>(.*?)</script>",sys.stdin.read(),re.S)))' > /tmp/a.js && node --check /tmp/a.js`.
 `codes/src/index.js` (Cloudflare Worker, KV `CODES`, secret `ADMIN_PASSWORD`). Local run:
 `cd codes && npx wrangler@4 dev --local --port 8787` with `.dev.vars` holding the password;
 `adb reverse tcp:8787 tcp:8787` and set Settings › Login code server to `http://127.0.0.1:8787`.
