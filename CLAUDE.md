@@ -153,6 +153,21 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.41 (2026-10-24), the wife's notes on series. Crash on Series › Continue watching
+  ("Key series19406 was already used", LazyVerticalGrid): the shelf mapped every episode with
+  progress to its series tile, so two episodes of one show in progress gave two tiles with one
+  key; `continueTiles` is now `distinctBy` kind+id (newest first). A finished episode used to
+  delete its progress row, so the show vanished from Continue watching and the details screen
+  opened on S1 E1; `saveProgress` now removes the finished row and writes the next episode
+  (from `nextEpisodeAfter`, position 0, subtitle "Up next · S9 E5 · title") unless that one
+  already has progress; the last episode of the run and a finished film still drop out. Series
+  details: `target` = the last-touched episode (resume or up-next) else S1 E1; the season
+  follows it until the viewer picks one (`seasonPicked`), the episode list opens scrolled to
+  it, and a primary "Resume · S9 E4 · 12:34" / "Play next · S9 E5" / "Play · S1 E1" button at
+  the top of the left column takes focus on open. The season row is a LazyRow over every
+  season (was `take(12)`). History shows PLAY and no "0% watched" for an up-next row. The
+  emulator's Demo provider has no series, so this was checked by build only; first look is on
+  the user's stick.
 - 0.6.40 (2026-10-20), buddy's notes. Picking a different group in the guide kept the old
   group's row number and scroll when the channel playing was not in the new one ("dropped me in
   the middle of 24/7 Comedy"); `focusGrid(newGroup = true)` now starts at the top in that case

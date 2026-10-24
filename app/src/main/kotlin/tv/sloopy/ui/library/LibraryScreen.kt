@@ -107,6 +107,7 @@ fun LibraryScreen(vm: SloopyViewModel, kind: String, go: (String) -> Unit, onBac
     val continueTiles = remember(progress, kind) {
         progress.filter { if (kind == "vod") it.kind == "vod" else it.kind == "episode" }
             .map { Tile(if (it.kind == "episode") (it.parentId ?: it.itemId) else it.itemId, if (it.kind == "episode") "series" else "vod", it.title, it.image, it.subtitle, it.positionMs.toFloat() / it.durationMs.coerceAtLeast(1), it.container, it.parentId, it.positionMs) }
+            .distinctBy { it.kind + it.id }   // newest episode per series; a second one crashed the grid's keys
     }
     val favIds by (if (kind == "vod") vm.favouriteVodIds else vm.favouriteSeriesIds).collectAsState()
     val total by produceState(0, provider?.id, kind) {

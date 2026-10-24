@@ -1899,9 +1899,18 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val pos = player.position()
         val dur = player.duration()
         if (dur <= 0) return
+        // A finished episode hands its place to the next one (position 0, "Up next"), so the series
+        // stays in Continue watching and opens on the right episode; the last episode of the run,
+        // and a finished film, just drop out.
+        val next = if (v.kind == "episode" && pos > dur - 60_000) nextEpisodeAfter(v.id) else null
         detachedScope.launch {
         if (pos > dur - 60_000 || pos < 15_000) {
-            if (pos > dur - 60_000) graph.db.progress().remove(p.id, v.kind, v.id)
+            if (pos > dur - 60_000) {
+                graph.db.progress().remove(p.id, v.kind, v.id)
+                if (next != null && graph.db.progress().get(p.id, "episode", next.id)?.let { it.positionMs > 0 } != true) graph.db.progress().upsert(
+                    tv.sloopy.data.db.ProgressEntity(p.id, "episode", next.id, v.parentId, 0, (next.durationSecs ?: 0) * 1000, System.currentTimeMillis(), v.title, "Up next · S${next.season} E${next.number} · ${next.title}", next.image ?: v.image, next.container)
+                )
+            }
             return@launch
         }
         graph.db.progress().upsert(

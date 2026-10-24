@@ -85,9 +85,9 @@ fun HistoryScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit,
                                 Column(Modifier.weight(1f)) {
                                     Label(when (r.kind) { "episode" -> "Episode"; "recording" -> "Recording"; else -> "Movie" })
                                     Text(r.title, style = Sloopy.listName.copy(color = Color.Unspecified), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 2.dp))
-                                    Text(listOfNotNull(r.subtitle, "$pct% watched", tv.sloopy.ui.common.TimeFmt.dateTime(r.updatedAt)).joinToString("  ·  "), style = Sloopy.listSub, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Text(listOfNotNull(r.subtitle, if (r.positionMs > 0) "$pct% watched" else null, tv.sloopy.ui.common.TimeFmt.dateTime(r.updatedAt)).joinToString("  ·  "), style = Sloopy.listSub, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 }
-                                Text("RESUME", style = Sloopy.label)
+                                Text(if (r.positionMs > 0) "RESUME" else "PLAY", style = Sloopy.label)
                             }
                             Hairline(color = Sloopy.hair2)
                         }

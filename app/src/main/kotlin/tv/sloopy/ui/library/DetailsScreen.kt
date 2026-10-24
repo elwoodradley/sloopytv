@@ -12,7 +12,9 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.ui.graphics.RectangleShape
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -111,11 +113,24 @@ fun DetailsScreen(vm: SloopyViewModel, kind: String, id: Long, onBack: () -> Uni
             value = runCatching { api?.seriesInfo(id) }.onFailure { error = TLog.userMessage(it) }.getOrNull()
         }
         var season by remember { mutableStateOf<Int?>(null) }
+        var seasonPicked by remember { mutableStateOf(false) }   // the viewer chose a season; stop following the history
         val latest by produceState<tv.sloopy.data.db.ProgressEntity?>(null, id) { value = provider?.let { vm.graph.db.progress().latestEpisode(it.id, id) } }
-        LaunchedEffect(info) { if (season == null) season = info?.seasons?.firstOrNull() }
+        // The episode to go on with: the last one touched (resume, or the "up next" row a finished
+        // episode leaves), else the first of the first season.
+        val target: Episode? = remember(info, latest) {
+            val i = info ?: return@remember null
+            latest?.let { l -> i.episodes.values.asSequence().flatten().firstOrNull { it.id == l.itemId } }
+                ?: i.seasons.firstOrNull()?.let { s -> i.episodes[s]?.firstOrNull() }
+        }
+        LaunchedEffect(info, latest) { if (!seasonPicked && info != null) season = target?.season ?: info?.seasons?.firstOrNull() }
+        LaunchedEffect(target) { if (target != null) repeat(20) { if (runCatching { playFocus.requestFocus() }.getOrDefault(false)) return@LaunchedEffect; kotlinx.coroutines.delay(50) } }
         val title = info?.series?.name ?: base?.name ?: ""
         val image = info?.series?.backdrop ?: base?.backdrop ?: base?.cover
         val episodes = season?.let { s -> info?.episodes?.get(s) } ?: emptyList()
+        fun playEpisode(ep: Episode, fromMs: Long) {
+            vm.setEpisodeQueue(id, title, image, info?.seasons?.flatMap { sn -> info?.episodes?.get(sn) ?: emptyList() } ?: emptyList())
+            if (vm.playVod(ep.id, title, "S${ep.season} E${ep.number} · ${ep.title}", ep.image ?: image, ep.container, "episode", id, fromMs)) onPlay()
+        }
         // The episode the cursor rests on. While one is lit, the left panel describes it instead of
         // the show; it falls back to the show's summary when the provider sent nothing for it.
         var focusedEp by remember { mutableStateOf<Episode?>(null) }
@@ -144,22 +159,34 @@ fun DetailsScreen(vm: SloopyViewModel, kind: String, id: Long, onBack: () -> Uni
                     }
                     if (error != null) Text(error!!, style = Sloopy.body.copy(color = Sloopy.amber), modifier = Modifier.padding(top = 8.dp))
                     Spacer(Modifier.height(20.dp))
-                    SloopyButton(if (id in favSeries) "On your list" else "Add to list", onClick = { vm.toggleItemFavourite("series", id) })
-                    Spacer(Modifier.height(14.dp))
                     Row {
-                        info?.seasons?.take(12)?.forEach { s ->
-                            SloopyButton("S$s", primary = s == season, onClick = { season = s }, modifier = Modifier.padding(end = 8.dp))
+                        val t = target
+                        if (t != null) {
+                            val resumeMs = latest?.takeIf { it.itemId == t.id }?.positionMs ?: 0L
+                            val verb = if (resumeMs > 0) "Resume" else if (latest != null) "Play next" else "Play"
+                            SloopyButton("$verb · S${t.season} E${t.number}" + (if (resumeMs > 0) " · ${fmtMs(resumeMs)}" else ""), primary = true, modifier = Modifier.focusRequester(playFocus), onClick = { playEpisode(t, resumeMs) })
+                            Spacer(Modifier.width(10.dp))
+                        }
+                        SloopyButton(if (id in favSeries) "On your list" else "Add to list", onClick = { vm.toggleItemFavourite("series", id) })
+                    }
+                    Spacer(Modifier.height(14.dp))
+                    // Every season, scrolling; the one on screen is lit.
+                    val seasonsState = rememberLazyListState()
+                    LaunchedEffect(season, info) { val i = info?.seasons?.indexOf(season) ?: -1; if (i >= 0) seasonsState.scrollToItem((i - 3).coerceAtLeast(0)) }
+                    LazyRow(state = seasonsState) {
+                        items(info?.seasons ?: emptyList(), key = { it }) { s ->
+                            SloopyButton("S$s", primary = s == season, onClick = { season = s; seasonPicked = true }, modifier = Modifier.padding(end = 8.dp))
                         }
                     }
                 }
                 Spacer(Modifier.width(48.dp))
-                LazyColumn(Modifier.weight(1f).fillMaxSize()) {
+                // The list opens with the episode to go on with at the top.
+                val listState = rememberLazyListState()
+                LaunchedEffect(season, target) { val i = episodes.indexOfFirst { it.id == target?.id }; listState.scrollToItem(if (i >= 0) i else 0) }
+                LazyColumn(state = listState, modifier = Modifier.weight(1f).fillMaxSize()) {
                     items(episodes, key = { it.id }) { ep ->
                         val watched = latest?.takeIf { it.itemId == ep.id }
-                        EpisodeRow(ep, watched?.positionMs ?: 0, watched?.durationMs ?: 0, onFocus = { if (it) focusedEp = ep else if (focusedEp?.id == ep.id) focusedEp = null }, onClick = {
-                            vm.setEpisodeQueue(id, title, image, info?.seasons?.flatMap { sn -> info?.episodes?.get(sn) ?: emptyList() } ?: emptyList())
-                            if (vm.playVod(ep.id, title, "S${ep.season} E${ep.number} · ${ep.title}", ep.image ?: image, ep.container, "episode", id, watched?.positionMs ?: 0)) onPlay()
-                        })
+                        EpisodeRow(ep, watched?.positionMs ?: 0, watched?.durationMs ?: 0, upNext = watched != null && (watched.positionMs == 0L), onFocus = { if (it) focusedEp = ep else if (focusedEp?.id == ep.id) focusedEp = null }, onClick = { playEpisode(ep, watched?.positionMs ?: 0) })
                     }
                 }
             }
@@ -177,7 +204,7 @@ private fun Backdrop(image: String?, content: @Composable () -> Unit) {
 }
 
 @Composable
-private fun EpisodeRow(ep: Episode, posMs: Long, durMs: Long, onFocus: (Boolean) -> Unit, onClick: () -> Unit) {
+private fun EpisodeRow(ep: Episode, posMs: Long, durMs: Long, upNext: Boolean = false, onFocus: (Boolean) -> Unit, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         shape = ClickableSurfaceDefaults.shape(RectangleShape),
@@ -191,7 +218,7 @@ private fun EpisodeRow(ep: Episode, posMs: Long, durMs: Long, onFocus: (Boolean)
                 Text("E%02d".format(ep.number), style = Sloopy.mono16.copy(color = Sloopy.muted), modifier = Modifier.width(52.dp))
                 Column(Modifier.weight(1f)) {
                     Text(ep.title, style = Sloopy.listName.copy(color = Color.Unspecified), maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    Text(listOfNotNull(ep.durationSecs?.let { "${it / 60} min" }, ep.airDate, if (posMs > 0 && durMs > 0) "${(posMs * 100 / durMs)}% watched" else null).joinToString("  ·  "), style = Sloopy.listSub)
+                    Text(listOfNotNull(ep.durationSecs?.let { "${it / 60} min" }, ep.airDate, if (posMs > 0 && durMs > 0) "${(posMs * 100 / durMs)}% watched" else if (upNext) "Up next" else null).joinToString("  ·  "), style = Sloopy.listSub)
                 }
             }
             Hairline(color = Sloopy.hair2)
