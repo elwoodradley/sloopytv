@@ -39,6 +39,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
@@ -143,7 +144,8 @@ fun ScoresScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit, 
             else -> rows
         }
     }
-    val card = focusedRow?.takeIf { f -> shown.any { it.game.id == f.game.id } } ?: shown.firstOrNull()
+    // With nothing lit, the card shows the grid's first tile (league order), not the earliest kickoff.
+    val card = focusedRow?.takeIf { f -> shown.any { it.game.id == f.game.id } } ?: shown.minByOrNull { Scores.LEAGUES.indexOf(it.game.league) }
     fun enterContent() {
         val ready = page == "teams" || page == "rz" || page.startsWith("st:") || (!busy && shown.isNotEmpty())
         if (ready) scope.launch { repeat(10) { delay(40); if (runCatching { contentFocus.requestFocus() }.getOrDefault(false)) return@launch } }
@@ -357,9 +359,15 @@ private fun GameGrid(rows: List<SloopyViewModel.GameRow>, hide: Boolean, first: 
             rows.groupBy { it.game.league }.toSortedMap(compareBy { Scores.LEAGUES.indexOf(it) }).forEach { (league, games) -> add(league); addAll(games) }
         }
     }
-    var firstTileIndex = -1
+    // Fixed per list. A plain local reset on every recomposition handed the entry requester to
+    // whichever tile composed next (one scrolled into view in the Premier League section), so
+    // Right from the rail landed there.
+    val firstTileIndex = remember(cells) { cells.indexOfFirst { it is SloopyViewModel.GameRow } }
     LazyVerticalGrid(
-        columns = GridCells.Fixed(COLS), modifier = Modifier.fillMaxSize().padding(top = 12.dp).focusRestorer().focusGroup(),
+        columns = GridCells.Fixed(COLS), modifier = Modifier.fillMaxSize().padding(top = 12.dp).focusRestorer().focusGroup()
+            // Up off the top row (and Down off the last) stays put: it used to land on a rail row,
+            // which switched the page to that day and refetched it.
+            .focusProperties { exit = { dir -> if (dir == FocusDirection.Up || dir == FocusDirection.Down) FocusRequester.Cancel else FocusRequester.Default } },
         horizontalArrangement = Arrangement.spacedBy(12.dp), verticalArrangement = Arrangement.spacedBy(12.dp), contentPadding = PaddingValues(bottom = 40.dp),
     ) {
         itemsIndexed(cells, key = { _, c -> if (c is String) "h:$c" else (c as SloopyViewModel.GameRow).game.id }, span = { _, c -> GridItemSpan(if (c is String) maxLineSpan else 1) }) { i, c ->
@@ -367,8 +375,7 @@ private fun GameGrid(rows: List<SloopyViewModel.GameRow>, hide: Boolean, first: 
                 Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) { Label(Scores.leagueName(c) + "  ·  " + cells.count { it is SloopyViewModel.GameRow && it.game.league == c }) }
             } else {
                 val r = c as SloopyViewModel.GameRow
-                val isFirst = firstTileIndex < 0 || firstTileIndex == i
-                if (firstTileIndex < 0) firstTileIndex = i
+                val isFirst = firstTileIndex == i
                 val g = r.game
                 Surface(
                     onClick = { onOpen(r) }, onLongClick = { onHold(r) },

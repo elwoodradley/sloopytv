@@ -14,15 +14,25 @@ class AffiliatesTest {
         assertEquals(3, Affiliates.rank("FOX", "FOX CLEVELAND"))
         assertEquals(2, Affiliates.rank("FOX", "FOX"))
         assertEquals(2, Affiliates.rank("ABC", "ABC EAST HD"))
-        assertEquals(1, Affiliates.rank("ABC", "ABC OHIO"))
-        assertEquals(1, Affiliates.rank("ABC", "ABC NY"))
+        assertNull(Affiliates.rank("ABC", "ABC OHIO"))
+        assertNull(Affiliates.rank("ABC", "ABC NY"))
+        assertNull(Affiliates.rank("ABC", "ABC COLORADO"))
+    }
+
+    @Test fun a3_feeds_are_out() {
+        assertNull(Affiliates.rank("ABC", "TV A3 NEW YORK 07 WABC ABC NEW YORK"))
+        assertNull(Affiliates.rank("CBS", "A3 NEW YORK 02 WCBS CBS"))
+        assertNull(Affiliates.rank("ESPN", "US A3 ESPN"))
+        assertEquals(4, Affiliates.rank("ABC", "US ABC 7 NEW YORK NY WABC"))
+        assertEquals(4, Affiliates.rank("NBC", "NBC 4 WASHINGTON DC"))
+        assertNull(Affiliates.rank("ABC", "ABC NEW YORK"))
     }
 
     @Test fun country_prefix_is_not_a_city() {
         assertEquals(4, Affiliates.rank("FOX", "US FOX 28 COLUMBUS OH"))
         assertEquals(2, Affiliates.rank("FOX", "UK FOX"))
         assertEquals(2, Affiliates.rank("FOX", "CA FOX HD"))
-        assertEquals(1, Affiliates.rank("ABC", "US ABC OHIO"))
+        assertNull(Affiliates.rank("ABC", "US ABC OHIO"))
     }
 
     @Test fun look_alikes_are_out() {

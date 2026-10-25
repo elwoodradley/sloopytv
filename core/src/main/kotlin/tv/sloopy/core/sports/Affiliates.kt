@@ -6,7 +6,9 @@ package tv.sloopy.core.sports
  * "FOX 28 Columbus OH" has the Sunday game, "FOX SOUL" and the bare national "FOX" do not.
  * The viewer's rule (2026-10-17): a name with a city and a state carries games; a name that is
  * only the network, or only a state, is the national feed with the news and the talk shows.
- * Pure string work so it is testable; the view model applies it to channel keys.
+ * 2026-10-25: a state-only name ("ABC COLORADO") is out altogether, dead except for national
+ * news, and any name carrying the "A3" tag (the provider's low-grade local feeds) is out for
+ * every network. Pure string work so it is testable; the view model applies it to channel keys.
  */
 object Affiliates {
     /** Channels that carry the network's word but are never where the game is. "PRIME" feeds
@@ -20,6 +22,9 @@ object Affiliates {
         "ESPN" to listOf("NEWS", "DEPORTES", "CLASSIC", "PLUS", "ESPN+"),
         "USA" to listOf("TODAY"),
     )
+
+    /** Tags that mark a copy nobody should be sent to, whatever the network: "A3" feeds have a terrible picture (the viewer, 2026-10-25). */
+    private val NEVER = setOf("A3")
 
     /** The networks made of local affiliates; everything else is one channel with copies. */
     val BROADCAST = setOf("ABC", "CBS", "NBC", "FOX", "CW")
@@ -40,8 +45,8 @@ object Affiliates {
 
     /**
      * Rank for [key] (an upper-case channel key, country prefix removed) as a carrier of
-     * [network]; null when the name says it is something else. Higher is better:
-     * 4 city and state, 3 call sign or city, 2 bare network, 1 state only.
+     * [network]; null when the name says it is something else, or carries only a state, or an
+     * A3 tag. Higher is better: 4 city and state, 3 call sign or city, 2 bare network.
      */
     fun rank(network: String, key: String, words: List<String> = listOf(network)): Int? {
         var tokens = key.uppercase().split(' ', '-', '_', '.', ',', '(', ')', '|', '/').filter { it.isNotBlank() }
@@ -53,7 +58,7 @@ object Affiliates {
         val hit = net.any { w -> val ws = w.split(' '); tokens.windowed(ws.size, partialWindows = false).any { it == ws } }
         if (!hit) return null
         val bad = NOT_THIS[network.uppercase()] ?: emptyList()
-        if (tokens.any { it in bad }) return null
+        if (tokens.any { it in bad || it in NEVER }) return null
         // ESPN+, SECN+, PPV and "PLUS" feeds carry event streams, never a regular network's
         // own feed, whatever words their names borrow ("ESPN+ 12: SEC Network booth").
         val plusNet = network.uppercase().let { it.contains('+') || it.contains("PLUS") || it.contains("PPV") }
@@ -66,13 +71,15 @@ object Affiliates {
         }
         val netTokens = net.flatMap { it.split(' ') }.toSet()
         val rest = tokens.filter { it !in netTokens && it !in NOISE && !number.matches(it) }
-        val state = rest.any { it in STATES || it in STATE_NAMES }
+        val abbr = rest.any { it in STATES }
+        val state = abbr || rest.any { it in STATE_NAMES }
         val sign = rest.any { callSign.matches(it) }
-        val city = rest.any { it !in STATES && it !in STATE_NAMES && !callSign.matches(it) }
+        // "NEW YORK NY", "WASHINGTON DC": beside a two-letter state, a state's name is the city.
+        val city = rest.any { it !in STATES && (abbr || it !in STATE_NAMES) && !callSign.matches(it) }
         return when {
             city && state -> 4
             sign || city -> 3
-            state -> 1
+            state -> null   // "ABC COLORADO": the national feed under a state's name, dead for games
             else -> 2
         }
     }

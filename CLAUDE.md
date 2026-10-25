@@ -153,6 +153,18 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.42 (2026-10-25), the user's Sports notes. Channel picking: `Affiliates.rank` returns null
+  for any name with an "A3" token (the provider's low-grade local feeds, "terrible picture") and
+  for a state-only affiliate ("ABC COLORADO", dead except national news); a state's name beside a
+  two-letter state is a city ("NEW YORK NY" = 4). `channelsForNetwork` orders rank → group named
+  for the network ("US| ABC NETWORK" over "US| TV ᶜᶦᵗʸ ᴿᴬᵂ") → US group, and with no list given
+  (the hold-OK picker) draws from ticked, unhidden groups first. The lineup-wide guide pass no
+  longer returns a Dupes primary from an unticked group. Sports focus: `GameGrid`'s entry
+  requester was a plain local reset on every recomposition, so the next tile to compose (one
+  scrolled into view in the Premier League section) took it and Right from the rail landed
+  there; it is now `remember(cells)`. Up off the top row (Down off the last) is cancelled via
+  `focusProperties { exit }`, so it no longer lands on a rail row and switches the day. The
+  card with nothing lit follows the grid's league order. Verified on the emulator (Demo).
 - 0.6.41 (2026-10-24), the wife's notes on series. Crash on Series › Continue watching
   ("Key series19406 was already used", LazyVerticalGrid): the shelf mapped every episode with
   progress to its series tile, so two episodes of one show in progress gave two tiles with one

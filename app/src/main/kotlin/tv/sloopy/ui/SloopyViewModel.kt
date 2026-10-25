@@ -1133,11 +1133,24 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
      * bare national feed, look-alikes such as FOX SOUL or ABC NEWS left out (`Affiliates`).
      * The picker's list and the guess share this order.
      */
-    fun channelsForNetwork(network: String, from: List<ChannelEntity> = channels.value, keyOf: (ChannelEntity) -> String = { tv.sloopy.core.model.Dupes.key(it.name) }): List<ChannelEntity> {
+    fun channelsForNetwork(network: String, from: List<ChannelEntity>? = null, keyOf: (ChannelEntity) -> String = { tv.sloopy.core.model.Dupes.key(it.name) }): List<ChannelEntity> {
+        // No list given (the hold-OK picker): the ticked, unhidden groups, as the guess uses; every
+        // unhidden group only when the ticked ones have nothing for this network.
+        val pool = from ?: run {
+            val hiddenC = hiddenChannels.value; val hiddenG = hiddenGroups.value; val off = sportsGroupsOff.value
+            val all = channels.value.filter { it.id !in hiddenC && it.categoryId !in hiddenG }
+            all.filter { it.categoryId !in off }.ifEmpty { all }
+        }
         val words = tv.sloopy.core.sports.Scores.wordsFor(network)
-        val ranked = from.mapNotNull { c -> tv.sloopy.core.sports.Affiliates.rank(network, keyOf(c), words)?.let { c to it } }
-        val usCats = liveCategories.value.filter { it.name.uppercase().contains("US") }.map { it.id }.toSet()
-        val order = ranked.sortedWith(compareByDescending<Pair<ChannelEntity, Int>> { it.second }.thenByDescending { it.first.categoryId in usCats })
+        val ranked = pool.mapNotNull { c -> tv.sloopy.core.sports.Affiliates.rank(network, keyOf(c), words)?.let { c to it } }
+        val cats = liveCategories.value
+        val usCats = cats.filter { it.name.uppercase().contains("US") }.map { it.id }.toSet()
+        // A group named for the network ("US| ABC NETWORK") holds the real affiliates; the
+        // provider's city and RAW folders carry copies of the same stations with worse feeds
+        // (the viewer, 2026-10-25), so within a rank the network's own group comes first.
+        val netWords = words.map { it.uppercase() }
+        val netCats = cats.filter { c -> val toks = c.name.uppercase().split(' ', '|', '-', '/', ':').filter { it.isNotBlank() }; netWords.any { w -> w.split(' ').all { it in toks } } }.map { it.id }.toSet()
+        val order = ranked.sortedWith(compareByDescending<Pair<ChannelEntity, Int>> { it.second }.thenByDescending { it.first.categoryId in netCats }.thenByDescending { it.first.categoryId in usCats })
         return collapse(order.map { it.first }).take(30)
     }
     fun setScoresDay(d: Int) { if (scoresDay.value != d) { scoresDay.value = d; refreshScores() } }
@@ -1244,7 +1257,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 val plusOk = g.networks.isEmpty() || g.networks.any { it.uppercase().let { n -> n.contains("+") || n.contains("PLUS") || n.contains("PPV") } }
                 val fromGuide = (listingAt[bucket(g)] ?: emptyMap()).entries.filter { (_, nn) -> tv.sloopy.core.sports.Scores.mentions(nn.title, g) == 2 }
                     .flatMap { byEpg[it.key] ?: emptyList() }.filter { plusOk || !plusFeed(it) }.maxByOrNull { tv.sloopy.core.model.Dupes.quality(it.name) }
-                if (fromGuide != null) return@map found(g, dupes.value.byChannel[fromGuide.id]?.primary ?: fromGuide, "guide")
+                if (fromGuide != null) return@map found(g, dupes.value.byChannel[fromGuide.id]?.primary?.takeIf { pc -> live.any { it.id == pc.id } } ?: fromGuide, "guide")
                 val byName = live.filter { (plusOk || !plusFeed(it)) && tv.sloopy.core.sports.Scores.score(nameNorm[it.id] ?: " ", g) == 2 }.maxByOrNull { tv.sloopy.core.model.Dupes.quality(it.name) }
                 if (byName != null) return@map found(g, byName, "name")
                 gameChannelCache[g.id] = Triple(null, "", now)
