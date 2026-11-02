@@ -288,9 +288,37 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                             }
                         }
                         Text("Where recordings are saved: " + tv.sloopy.record.Recorder.describeFolder(folder), style = Sloopy.body, modifier = Modifier.width(760.dp))
+                        var smbForm by remember { mutableStateOf(false) }
                         Row(Modifier.padding(top = 14.dp)) {
                             SloopyButton("Choose a folder or USB drive", primary = true, onClick = { runCatching { pick.launch(null) }.onFailure { vm.toast("This box has no folder picker") } })
+                            Spacer(Modifier.width(8.dp)); SloopyButton("Network share (SMB)", onClick = { smbForm = !smbForm })
                             if (folder != null) { Spacer(Modifier.width(8.dp)); SloopyButton("Use this stick's storage", onClick = { vm.setRecordFolder(null) }) }
+                        }
+                        if (smbForm) {
+                            // A NAS or a shared folder on a PC. Server, share and folder make the
+                            // smb:// path; the sign-in goes to the Vault. Save lists the folder first.
+                            val cur = remember { tv.sloopy.record.Smb.parse(folder) }
+                            var host by remember { mutableStateOf(cur?.host ?: "") }
+                            var share by remember { mutableStateOf(cur?.share ?: "") }
+                            var path by remember { mutableStateOf(cur?.path ?: "") }
+                            var user by remember { mutableStateOf(vm.smbUser()) }
+                            var pass by remember { mutableStateOf("") }
+                            var busy by remember { mutableStateOf(false) }
+                            var note by remember { mutableStateOf<String?>(null) }
+                            Text("A NAS or a shared folder on a computer, over SMB. The TV must be able to reach it on your network; the sign-in is kept on this stick, encrypted.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 12.dp).width(760.dp))
+                            Box(Modifier.padding(top = 8.dp).width(520.dp)) { Field("Server (name or IP)", host, { host = it }, mono = true, placeholder = "192.168.1.20", keyboard = androidx.compose.ui.text.input.KeyboardType.Uri) }
+                            Box(Modifier.width(520.dp)) { Field("Share", share, { share = it }, mono = true, placeholder = "video") }
+                            Box(Modifier.width(520.dp)) { Field("Folder on the share (optional)", path, { path = it }, mono = true, placeholder = "SloopyTV") }
+                            Box(Modifier.width(520.dp)) { Field("User (blank for guest)", user, { user = it }, mono = true, placeholder = "luke") }
+                            Box(Modifier.width(520.dp)) { Field(if (folder != null && cur != null) "Password (blank keeps the saved one)" else "Password", pass, { pass = it }, mono = true, password = true) }
+                            Row(Modifier.padding(top = 10.dp)) {
+                                SloopyButton(if (busy) "Checking…" else "Save and test", primary = true, enabled = !busy, onClick = {
+                                    busy = true; note = null
+                                    vm.saveSmbFolder(host, share, path, user, pass) { err -> busy = false; note = err ?: "Connected. Recordings will be saved there."; if (err == null) pass = "" }
+                                })
+                                Spacer(Modifier.width(8.dp)); SloopyButton("Close", onClick = { smbForm = false })
+                            }
+                            if (note != null) Text(note!!, style = Sloopy.body.copy(color = if (note!!.startsWith("Connected")) Sloopy.text else Sloopy.amber), modifier = Modifier.padding(top = 8.dp).width(760.dp))
                         }
                         Text("Recording the channel you are watching rides the same stream, so it costs no second connection. Recording another channel while you watch needs a second connection on your account.", style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 16.dp).width(760.dp))
                         Section("Season passes")

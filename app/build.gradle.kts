@@ -119,6 +119,7 @@ dependencies {
     ksp(libs.room.compiler)
 
     implementation(libs.okhttp)
+    implementation(libs.smbj)   // SMB network shares for recordings (record/Smb.kt); the one network path outside AndroidHttp
     implementation(libs.coil.compose)
     implementation(libs.coil.okhttp)
     implementation(libs.nanohttpd)

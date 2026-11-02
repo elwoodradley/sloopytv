@@ -17,6 +17,8 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // ~/.m2: artifacts fetched with curl when the JVM cannot reach the network (2026-11-01).
+        mavenLocal()
     }
 }
 

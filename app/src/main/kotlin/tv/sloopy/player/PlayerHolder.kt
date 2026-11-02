@@ -81,7 +81,8 @@ class PlayerHolder(context: Context) {
             DefaultMediaSourceFactory(appContext)
                 .setDataSourceFactory(
                     // http(s) through OkHttp; content:// and file:// (recordings) through the platform sources.
-                    RecordTee.Factory(androidx.media3.datasource.DefaultDataSource.Factory(appContext, OkHttpDataSource.Factory(AndroidHttp.client).setUserAgent(AndroidHttp.USER_AGENT)))
+                    // smb:// (recordings on a network share) through SmbDataSource.
+                    RecordTee.Factory(SmbDataSource.Factory(appContext, androidx.media3.datasource.DefaultDataSource.Factory(appContext, OkHttpDataSource.Factory(AndroidHttp.client).setUserAgent(AndroidHttp.USER_AGENT))))
                 )
         )
         .setLoadControl(

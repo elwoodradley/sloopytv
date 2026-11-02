@@ -153,6 +153,32 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.43 (2026-11-01). (1) "Guide cut off halfway down the screen" (user's photo): the guide
+  header's "Guide file refused · SloopyTV: HTTP 404 · TiviMate: HTTP 404 · …" note had a fixed
+  1100dp width, so with the label, the gaps and the clock the Row overflowed 1440dp; the clock
+  was measured at zero width and wrapped one digit per line, the header grew to ~200dp, and the
+  panel and grid moved down. Now the note is `weight(1f, fill = false)` and `Clock` is
+  `maxLines = 1, softWrap = false`. Only showed while the panel refused the guide file (his
+  does, HTTP 404 on every agent since late October), which is why it came and went. (2)
+  Recordings on a network share: `record/Smb.kt` (smbj 0.13.0, SMB 2/3) with the folder setting
+  `smb://host/share/folder` in Prefs and the user and password in the Vault (`smb_user`,
+  `smb_password`; "DOMAIN\user" allowed, blank = anonymous). `Recorder.openOutput/delete/
+  describeFolder` branch on the scheme; `player/SmbDataSource` (positioned reads; `Routing`
+  sends smb:// there and everything else to DefaultDataSource, wrapped by `RecordTee.Factory`
+  in `PlayerHolder`) plays them back. Settings › Recordings › "Network share (SMB)" opens a
+  form (server, share, folder, user, password); Save and test lists the folder once and only
+  then makes it the recording folder (`vm.saveSmbFolder`). smbj is the one network path
+  outside AndroidHttp (SMB is not HTTP); keep rules in proguard-rules.pro (its event bus finds
+  handlers by annotation). Release APK 3.9 → 5.4 MB (BouncyCastle rides along). Connections
+  are cached per host by the SMBClient and never closed; sessions close per use. NOT exercised
+  against a real share: the sandbox would not install an SMB server, so the first real test is
+  the user's NAS; the emulator check covered playback through the routing layer and the form.
+  (3) Machine note, 2026-11-01: on this Mac the JVM, Go (gh) and Python cannot open outbound
+  TCP at all (IPv6 is black-holed and even IPv4 connects time out) while curl works. Gradle
+  hung for 20 minutes on the smbj download. Workaround: `scratchpad/fetch_m2.py`-style curl
+  of the POM/JAR tree into `~/.m2/repository`, `mavenLocal()` added to settings.gradle.kts,
+  build with `--offline`; `gh release create` via the REST API with curl when gh times out.
+  `~/.gradle/gradle.properties` carries `-Djava.net.preferIPv4Stack=true` (harmless).
 - 0.6.42 (2026-10-25), the user's Sports notes. Channel picking: `Affiliates.rank` returns null
   for any name with an "A3" token (the provider's low-grade local feeds, "terrible picture") and
   for a state-only affiliate ("ABC COLORADO", dead except national news); a state's name beside a

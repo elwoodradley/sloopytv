@@ -1326,6 +1326,22 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val recordFolder: StateFlow<String?> = prefs.recordFolder.stateIn(viewModelScope, SharingStarted.Eagerly, null)
     fun setRecordFolder(uri: String?) = viewModelScope.launch { prefs.setRecordFolder(uri) }
+    /** The share's sign-in name, from the Vault (the password never comes back out). */
+    fun smbUser(): String = graph.vault.getString(tv.sloopy.record.Smb.VAULT_USER) ?: ""
+    /**
+     * Settings › Recordings › Network share: keeps the user and password in the Vault, lists the
+     * folder once to prove the sign-in works, and only then makes it the recording folder.
+     * A blank password keeps the one already saved. [onDone] gets null on success, else the reason.
+     */
+    fun saveSmbFolder(host: String, share: String, path: String, user: String, password: String, onDone: (String?) -> Unit) = viewModelScope.launch {
+        if (host.isBlank() || share.isBlank()) { onDone("Server and share are needed"); return@launch }
+        val url = tv.sloopy.record.Smb.url(host, share, path)
+        graph.vault.putString(tv.sloopy.record.Smb.VAULT_USER, user.trim())
+        if (password.isNotEmpty()) graph.vault.putString(tv.sloopy.record.Smb.VAULT_PASSWORD, password)
+        val r = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { runCatching { tv.sloopy.record.Smb.test(getApplication(), url) } }
+        r.onSuccess { prefs.setRecordFolder(url); onDone(null) }
+            .onFailure { TLog.w { "smb test: ${TLog.userMessage(it)}" }; onDone(TLog.userMessage(it)) }
+    }
     init { viewModelScope.launch { graph.db.recordings().finishStale() } }
 
     /** Records [channel] from [startEpoch] to [stopEpoch]; starts at once when the start has passed. */

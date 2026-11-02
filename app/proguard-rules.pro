@@ -24,3 +24,13 @@
 # XmlPull interfaces come from the Android framework at runtime.
 -dontwarn org.xmlpull.**
 -dontwarn org.kxml2.**
+
+# smbj (SMB shares for recordings): its event bus finds handlers by annotation at runtime.
+-keep class com.hierynomus.** { *; }
+-keep class net.engio.mbassy.** { *; }
+-dontwarn com.hierynomus.**
+-dontwarn net.engio.mbassy.**
+-dontwarn org.bouncycastle.**
+-dontwarn org.slf4j.**
+-dontwarn org.ietf.jgss.**
+-dontwarn javax.security.**

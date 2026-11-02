@@ -64,10 +64,12 @@ object Recorder {
     /** A short name for the folder setting: the last path segment of a chosen tree, else the built-in place. */
     fun describeFolder(folder: String?): String {
         if (folder.isNullOrBlank()) return "This stick's own storage (small). Plug in a USB drive and choose it for long recordings."
+        Smb.parse(folder)?.let { return "Network share " + Smb.describe(it) }
         return runCatching { DocumentsContract.getTreeDocumentId(Uri.parse(folder)).substringAfter(':').ifBlank { "drive root" } }.getOrDefault("Chosen folder")
     }
 
     fun openOutput(context: Context, folder: String?, name: String): Pair<Uri, OutputStream> {
+        if (Smb.isSmb(folder)) { val (url, out) = Smb.openOutput(context, folder!!, name); return Uri.parse(url) to out }
         if (!folder.isNullOrBlank() && folder.startsWith("content://")) {
             val tree = Uri.parse(folder)
             val dir = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
@@ -84,7 +86,11 @@ object Recorder {
         if (uri.isNullOrBlank()) return
         val u = Uri.parse(uri)
         runCatching {
-            if (u.scheme == "content") DocumentsContract.deleteDocument(context.contentResolver, u) else u.path?.let { File(it).delete() }
+            when (u.scheme) {
+                "content" -> DocumentsContract.deleteDocument(context.contentResolver, u)
+                "smb" -> Smb.delete(context, uri)
+                else -> u.path?.let { File(it).delete() }
+            }
         }
     }
 

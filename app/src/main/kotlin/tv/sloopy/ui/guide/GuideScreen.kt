@@ -307,7 +307,10 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             Label("Guide  ·  " + dayLabel(nowEpoch), bright = true)
             val epgError by vm.epgError.collectAsState()
             val epgNote by vm.catalog.epgNote.collectAsState()
-            if (epgError != null) { Spacer(Modifier.width(28.dp)); Text("Guide file refused · " + epgNote.ifBlank { epgError!! } + " · filling from the provider's channel tables", style = Sloopy.label.copy(color = Sloopy.amber), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.width(1100.dp)) }
+            if (epgError != null) { Spacer(Modifier.width(28.dp)); Text("Guide file refused · " + epgNote.ifBlank { epgError!! } + " · filling from the provider's channel tables", style = Sloopy.label.copy(color = Sloopy.amber), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)) }
+            // The note takes what is left, never a fixed width: at 1100dp it overflowed the row, the clock
+            // was measured at zero width and wrapped one digit per line, and the tall header pushed the
+            // panel and the grid halfway down the screen (the user's photo, 2026-11-01).
             Spacer(Modifier.weight(1f))
             val sweep by vm.sweepProgress.collectAsState()
             val refreshing by vm.catalog.refresh.collectAsState()
