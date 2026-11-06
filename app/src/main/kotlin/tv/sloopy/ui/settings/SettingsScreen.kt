@@ -635,6 +635,14 @@ fun SettingsScreen(vm: SloopyViewModel, go: (String) -> Unit, onBack: () -> Unit
                         }
                         val gstats by vm.guideStats.collectAsState()
                         if (gstats.isNotBlank()) Text(gstats, style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 10.dp))
+                        Text(remember { tv.sloopy.data.Storage.deviceLine(context) }, style = Sloopy.body.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 4.dp))
+                        var rebuildMsg by remember { mutableStateOf<String?>(null) }
+                        var rebuilding by remember { mutableStateOf(false) }
+                        Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+                            SloopyButton(if (rebuilding) "Rebuilding…" else "Rebuild the guide", enabled = !rebuilding, onClick = { rebuilding = true; scope.launch { rebuildMsg = vm.rebuildGuide(); rebuilding = false } })
+                            Spacer(Modifier.width(16.dp))
+                            Text(rebuildMsg ?: "Throws away every stored programme, compacts the database and downloads the guide again. Favourites and settings are untouched.", style = Sloopy.body.copy(color = Sloopy.textSoft), modifier = Modifier.width(820.dp))
+                        }
                         val setLog = remember { tv.sloopy.SettingsLog.read(context) }
                         val installed = remember { tv.sloopy.SettingsLog.installLine(context) }
                         Section("Settings history")

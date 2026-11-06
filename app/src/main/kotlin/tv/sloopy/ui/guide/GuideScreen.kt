@@ -311,6 +311,9 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
             // The note takes what is left, never a fixed width: at 1100dp it overflowed the row, the clock
             // was measured at zero width and wrapped one digit per line, and the tall header pushed the
             // panel and the grid halfway down the screen (the user's photo, 2026-11-01).
+            val spaceNote by vm.catalog.spaceNote.collectAsState()
+            val storageFull by tv.sloopy.data.Storage.full.collectAsState()
+            (storageFull ?: spaceNote)?.let { Spacer(Modifier.width(28.dp)); Text(it, style = Sloopy.label.copy(color = Sloopy.amber), maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false)) }
             Spacer(Modifier.weight(1f))
             val sweep by vm.sweepProgress.collectAsState()
             val refreshing by vm.catalog.refresh.collectAsState()

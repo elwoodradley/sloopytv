@@ -153,6 +153,32 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.44 (2026-11-05), the buddy's Chromecast: "closed twice in a row", crash line
+  `IOException: write failed: ENOSPC`, About "database 1029 MB" with 299,805 programmes (the
+  user's Shield: ~950k rows in 192 MB). Cause: an import killed partway (ANR kill, reboot) left
+  its rows under the next generation number, and the next attempt reused that number on top of
+  them, so each interruption stacked another partial copy; a later clean import deleted the rows
+  but SQLite never shrinks a file, so it sat at its high-water mark until an 8 GB box was full;
+  then a DataStore write threw on a `viewModelScope` job and the app closed. Now: (1)
+  `data/Storage.kt`: `isNoSpace` (ENOSPC / SQLiteFullException / message), `full` flow,
+  `freeBytes`, `deviceLine`. Every `Prefs` write goes through a guarded `edit` (a full disk
+  raises the warning and keeps the old value); the view model launches on `safeScope`
+  (viewModelScope + `noSpaceHandler`: no-space → warning, anything else → the crash handler,
+  so bugs stay loud); `detachedScope` carries the same handler. (2) `Catalog.refreshEpg`:
+  `prune` first (gen != live, or ended before the catch-up window), a space check (skip with
+  `spaceNote` under max(200 MB, db/2) free), import, then the swap (meta + deleteOtherGens) in
+  one `withTransaction`, then `compact()` (checkpoint + `incremental_vacuum`). The import keeps
+  only `KEEP_BACK_S` 2 days back and `KEEP_FWD_S` 8 days ahead and caps descriptions at
+  `DESC_MAX` 600; the per-channel sweep does the same in a transaction and stops while
+  `Storage.full`. (3) `Catalog.maintain(p)` at launch (`ensureFresh`): prune, checkpoint, and a
+  one-time `PRAGMA auto_vacuum = INCREMENTAL` + `VACUUM` conversion when the disk has room
+  for the copy (root shows PREPARING THE GUIDE; 7 ms on the demo, expect ~30 s on a 200 MB
+  file), else `incremental_vacuum`. (4) About: device line (model, Android, free of total, RAM),
+  free MB on the guide-stats line, "Rebuild the guide" (`catalog.wipeGuide` + `refresh(force)`).
+  (5) Guide header shows `Storage.full` / `spaceNote` in amber. (6) Default guide interval 3 →
+  6 h. Rule: budgets are set for the weakest box (Chromecast / Fire Stick: 2 GB RAM, ~4 GB
+  free), not the Shield. His recovery on the full box is Clear data + "Transfer from another
+  stick" with his code; nothing can install on a full disk.
 - 0.6.43 (2026-11-01). (1) "Guide cut off halfway down the screen" (user's photo): the guide
   header's "Guide file refused · SloopyTV: HTTP 404 · TiviMate: HTTP 404 · …" note had a fixed
   1100dp width, so with the label, the gaps and the clock the Row overflowed 1440dp; the clock

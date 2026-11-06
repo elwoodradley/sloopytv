@@ -124,6 +124,10 @@ interface ProgrammeDao {
     @Query("DELETE FROM programmes WHERE providerId = :p AND gen != :keepGen")
     suspend fun deleteOtherGens(p: String, keepGen: Int)
 
+    /** Dead rows: any generation but the live one (an import that was killed) and anything that ended before the catch-up window. */
+    @Query("DELETE FROM programmes WHERE providerId = :p AND (gen != :keepGen OR stopEpoch < :before)")
+    suspend fun prune(p: String, keepGen: Int, before: Long)
+
     @Query("DELETE FROM programmes WHERE providerId = :p AND gen = :gen")
     suspend fun deleteGen(p: String, gen: Int)
 

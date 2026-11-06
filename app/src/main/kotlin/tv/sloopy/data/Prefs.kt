@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.core.DataStore
 import androidx.datastore.preferences.core.Preferences
 import androidx.datastore.preferences.core.booleanPreferencesKey
+import androidx.datastore.preferences.core.MutablePreferences
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.intPreferencesKey
 import androidx.datastore.preferences.core.longPreferencesKey
@@ -17,6 +18,13 @@ private val Context.store: DataStore<Preferences> by preferencesDataStore(name =
 
 /** Non-secret settings. Secrets never go here; see [Vault]. */
 class Prefs(private val context: Context) {
+    /**
+     * Every write goes through here. A full disk (ENOSPC) logs a warning, raises [Storage.full]
+     * and keeps the old value, instead of closing the app; any other failure still throws.
+     */
+    private suspend fun edit(block: suspend (MutablePreferences) -> Unit): Preferences? =
+        try { ds.edit(block) } catch (e: java.io.IOException) { if (Storage.isNoSpace(e)) { Storage.noteFull(e); null } else throw e }
+
     private val ds get() = context.store
 
     private val activeProvider = stringPreferencesKey("active_provider")
@@ -25,210 +33,210 @@ class Prefs(private val context: Context) {
     private val epgRefreshedAt = longPreferencesKey("epg_refreshed_at")
 
     val activeProviderId: Flow<String?> = ds.data.map { it[activeProvider] }
-    suspend fun setActiveProvider(id: String?) = ds.edit { if (id == null) it.remove(activeProvider) else it[activeProvider] = id }
+    suspend fun setActiveProvider(id: String?) = edit { if (id == null) it.remove(activeProvider) else it[activeProvider] = id }
 
     private fun lastChannelKey(providerId: String) = longPreferencesKey("last_channel_$providerId")
     suspend fun lastChannel(providerId: String): Long? = ds.data.first()[lastChannelKey(providerId)]
-    suspend fun setLastChannel(providerId: String, channelId: Long) = ds.edit { it[lastChannelKey(providerId)] = channelId }
+    suspend fun setLastChannel(providerId: String, channelId: Long) = edit { it[lastChannelKey(providerId)] = channelId }
 
     private fun lastGroupKey(providerId: String) = stringPreferencesKey("last_group_$providerId")
     suspend fun lastGroup(providerId: String): String? = ds.data.first()[lastGroupKey(providerId)]
-    suspend fun setLastGroup(providerId: String, group: String?) = ds.edit { if (group == null) it.remove(lastGroupKey(providerId)) else it[lastGroupKey(providerId)] = group }
+    suspend fun setLastGroup(providerId: String, group: String?) = edit { if (group == null) it.remove(lastGroupKey(providerId)) else it[lastGroupKey(providerId)] = group }
 
     private fun refreshKey(providerId: String, what: String) = longPreferencesKey("refreshed_${what}_$providerId")
     suspend fun refreshedAt(providerId: String, what: String): Long = ds.data.first()[refreshKey(providerId, what)] ?: 0L
-    suspend fun setRefreshedAt(providerId: String, what: String, at: Long = System.currentTimeMillis()) = ds.edit { it[refreshKey(providerId, what)] = at }
+    suspend fun setRefreshedAt(providerId: String, what: String, at: Long = System.currentTimeMillis()) = edit { it[refreshKey(providerId, what)] = at }
     /** The User-Agent the provider's guide file accepted last time, tried first next time. */
     suspend fun epgUserAgent(providerId: String): String? = ds.data.first()[stringPreferencesKey("epg_ua_$providerId")]
-    suspend fun setEpgUserAgent(providerId: String, ua: String?) = ds.edit { if (ua == null) it.remove(stringPreferencesKey("epg_ua_$providerId")) else it[stringPreferencesKey("epg_ua_$providerId")] = ua }
+    suspend fun setEpgUserAgent(providerId: String, ua: String?) = edit { if (ua == null) it.remove(stringPreferencesKey("epg_ua_$providerId")) else it[stringPreferencesKey("epg_ua_$providerId")] = ua }
 
     val introEnabled: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("intro_enabled")] ?: true }
-    suspend fun setIntroEnabled(v: Boolean) = ds.edit { it[booleanPreferencesKey("intro_enabled")] = v }
+    suspend fun setIntroEnabled(v: Boolean) = edit { it[booleanPreferencesKey("intro_enabled")] = v }
 
     val osdSeconds: Flow<Int> = ds.data.map { it[intPreferencesKey("osd_seconds")] ?: 4 }
 
     /** "small" | "medium" | "large": how much stream the player keeps ahead. */
     val bufferSize: Flow<String> = ds.data.map { it[stringPreferencesKey("buffer_size")] ?: "large" }
-    suspend fun setBufferSize(v: String) = ds.edit { it[stringPreferencesKey("buffer_size")] = v }
+    suspend fun setBufferSize(v: String) = edit { it[stringPreferencesKey("buffer_size")] = v }
 
     /** Hours between guide downloads. */
-    val epgIntervalHours: Flow<Int> = ds.data.map { it[intPreferencesKey("epg_interval_h")] ?: 3 }
-    suspend fun setEpgIntervalHours(v: Int) = ds.edit { it[intPreferencesKey("epg_interval_h")] = v }
+    val epgIntervalHours: Flow<Int> = ds.data.map { it[intPreferencesKey("epg_interval_h")] ?: 6 }
+    suspend fun setEpgIntervalHours(v: Int) = edit { it[intPreferencesKey("epg_interval_h")] = v }
 
     /** "builtin" | "vlc": who plays streams. */
     val externalPlayer: Flow<String> = ds.data.map { it[stringPreferencesKey("player")] ?: "builtin" }
-    suspend fun setExternalPlayer(v: String) = ds.edit { it[stringPreferencesKey("player")] = v }
+    suspend fun setExternalPlayer(v: String) = edit { it[stringPreferencesKey("player")] = v }
 
     val clock12: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("clock_12h")] ?: false }
-    suspend fun setClock12(v: Boolean) { if (clock12.first() != v) tv.sloopy.SettingsLog.note(context, "clock set to " + (if (v) "12 hour" else "24 hour")); ds.edit { it[booleanPreferencesKey("clock_12h")] = v } }
+    suspend fun setClock12(v: Boolean) { if (clock12.first() != v) tv.sloopy.SettingsLog.note(context, "clock set to " + (if (v) "12 hour" else "24 hour")); edit { it[booleanPreferencesKey("clock_12h")] = v } }
 
     val theme: Flow<String> = ds.data.map { it[stringPreferencesKey("theme")] ?: "phosphor" }
-    suspend fun setTheme(v: String) = ds.edit { it[stringPreferencesKey("theme")] = v }
+    suspend fun setTheme(v: String) = edit { it[stringPreferencesKey("theme")] = v }
 
     /** Ask the display for a refresh rate that matches the stream (50 Hz for European channels). */
     val frameRateMatch: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("frame_rate_match")] ?: false }
-    suspend fun setFrameRateMatch(v: Boolean) { if (frameRateMatch.first() != v) tv.sloopy.SettingsLog.note(context, "frame-rate matching " + (if (v) "on" else "off")); ds.edit { it[booleanPreferencesKey("frame_rate_match")] = v } }
+    suspend fun setFrameRateMatch(v: Boolean) { if (frameRateMatch.first() != v) tv.sloopy.SettingsLog.note(context, "frame-rate matching " + (if (v) "on" else "off")); edit { it[booleanPreferencesKey("frame_rate_match")] = v } }
 
     /** "provider" | "number" | "name", per group. */
     private fun sortKey(providerId: String, group: String) = stringPreferencesKey("channel_sort_${providerId}_$group")
     fun channelSort(providerId: String, group: String): Flow<String> = ds.data.map { it[sortKey(providerId, group)] ?: "provider" }
-    suspend fun setChannelSort(providerId: String, group: String, v: String) = ds.edit { it[sortKey(providerId, group)] = v }
+    suspend fun setChannelSort(providerId: String, group: String, v: String) = edit { it[sortKey(providerId, group)] = v }
 
     /** The transfer code this stick syncs under, if sync is on. */
     val syncCode: Flow<String?> = ds.data.map { it[stringPreferencesKey("sync_code")] }
-    suspend fun setSyncCode(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("sync_code")) else it[stringPreferencesKey("sync_code")] = v }
+    suspend fun setSyncCode(v: String?) = edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("sync_code")) else it[stringPreferencesKey("sync_code")] = v }
     val syncedAt: Flow<Long> = ds.data.map { it[longPreferencesKey("synced_at")] ?: 0L }
-    suspend fun setSyncedAt(v: Long) = ds.edit { it[longPreferencesKey("synced_at")] = v }
+    suspend fun setSyncedAt(v: Long) = edit { it[longPreferencesKey("synced_at")] = v }
 
     /** A document-tree URI the viewer picked for recordings; null means the app's own storage. */
     val recordFolder: Flow<String?> = ds.data.map { it[stringPreferencesKey("record_folder")] }
-    suspend fun setRecordFolder(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("record_folder")) else it[stringPreferencesKey("record_folder")] = v }
+    suspend fun setRecordFolder(v: String?) = edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("record_folder")) else it[stringPreferencesKey("record_folder")] = v }
 
     val seenAnnouncement: Flow<String> = ds.data.map { it[stringPreferencesKey("seen_announcement")] ?: "" }
-    suspend fun setSeenAnnouncement(v: String) = ds.edit { it[stringPreferencesKey("seen_announcement")] = v }
+    suspend fun setSeenAnnouncement(v: String) = edit { it[stringPreferencesKey("seen_announcement")] = v }
 
     // Season passes: team names per provider; booked keys and "needs a look" candidates.
     private fun passKey(providerId: String, what: String) = stringPreferencesKey("pass_${what}_$providerId")
     fun seasonPasses(providerId: String): Flow<List<String>> = ds.data.map { p -> p[passKey(providerId, "teams")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
-    suspend fun setSeasonPasses(providerId: String, teams: List<String>) = ds.edit { it[passKey(providerId, "teams")] = teams.joinToString("\u0001") }
+    suspend fun setSeasonPasses(providerId: String, teams: List<String>) = edit { it[passKey(providerId, "teams")] = teams.joinToString("\u0001") }
     fun passBooked(providerId: String): Flow<Set<String>> = ds.data.map { p -> p[passKey(providerId, "booked")]?.split('\u0001')?.filter { it.isNotBlank() }?.toSet() ?: emptySet() }
-    suspend fun setPassBooked(providerId: String, keys: Set<String>) = ds.edit { it[passKey(providerId, "booked")] = keys.joinToString("\u0001") }
+    suspend fun setPassBooked(providerId: String, keys: Set<String>) = edit { it[passKey(providerId, "booked")] = keys.joinToString("\u0001") }
     /** "channelId|startEpoch|title" entries the scan was unsure about. */
     fun passUnsure(providerId: String): Flow<List<String>> = ds.data.map { p -> p[passKey(providerId, "unsure")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
-    suspend fun setPassUnsure(providerId: String, items: List<String>) = ds.edit { it[passKey(providerId, "unsure")] = items.joinToString("\u0001") }
+    suspend fun setPassUnsure(providerId: String, items: List<String>) = edit { it[passKey(providerId, "unsure")] = items.joinToString("\u0001") }
 
     /** channelId -> times tuned, for the Tonight screen's idea of what you actually watch. */
     private fun watchKey(providerId: String) = stringPreferencesKey("watch_counts_$providerId")
     fun watchCounts(providerId: String): Flow<Map<Long, Int>> = ds.data.map { p -> p[watchKey(providerId)]?.split(',')?.mapNotNull { e -> val i = e.indexOf('='); if (i < 0) null else e.substring(0, i).toLongOrNull()?.let { id -> e.substring(i + 1).toIntOrNull()?.let { id to it } } }?.toMap() ?: emptyMap() }
-    suspend fun bumpWatch(providerId: String, channelId: Long) = ds.edit { p ->
+    suspend fun bumpWatch(providerId: String, channelId: Long) = edit { p ->
         val cur = p[watchKey(providerId)]?.split(',')?.mapNotNull { e -> val i = e.indexOf('='); if (i < 0) null else e.substring(0, i).toLongOrNull()?.let { id -> e.substring(i + 1).toIntOrNull()?.let { id to it } } }?.toMap()?.toMutableMap() ?: mutableMapOf()
         cur[channelId] = (cur[channelId] ?: 0) + 1
         p[watchKey(providerId)] = cur.entries.sortedByDescending { it.value }.take(200).joinToString(",") { "${it.key}=${it.value}" }
     }
     val tonightNotInterested: Flow<Set<String>> = ds.data.map { p -> p[stringPreferencesKey("tonight_no")]?.split('\u0001')?.filter { it.isNotBlank() }?.toSet() ?: emptySet() }
-    suspend fun addTonightNotInterested(title: String) = ds.edit { p -> val cur = p[stringPreferencesKey("tonight_no")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList(); p[stringPreferencesKey("tonight_no")] = (cur + title.lowercase()).takeLast(300).joinToString("\u0001") }
+    suspend fun addTonightNotInterested(title: String) = edit { p -> val cur = p[stringPreferencesKey("tonight_no")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList(); p[stringPreferencesKey("tonight_no")] = (cur + title.lowercase()).takeLast(300).joinToString("\u0001") }
     val tonightSportsAnywhere: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("tonight_sports")] ?: false }
-    suspend fun setTonightSportsAnywhere(v: Boolean) = ds.edit { it[booleanPreferencesKey("tonight_sports")] = v }
+    suspend fun setTonightSportsAnywhere(v: Boolean) = edit { it[booleanPreferencesKey("tonight_sports")] = v }
     val tonightNewOnDemand: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("tonight_vod")] ?: false }
     val tonightPopular: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("tonight_popular")] ?: true }
-    suspend fun setTonightPopular(v: Boolean) = ds.edit { it[booleanPreferencesKey("tonight_popular")] = v }
-    suspend fun setTonightNewOnDemand(v: Boolean) = ds.edit { it[booleanPreferencesKey("tonight_vod")] = v }
+    suspend fun setTonightPopular(v: Boolean) = edit { it[booleanPreferencesKey("tonight_popular")] = v }
+    suspend fun setTonightNewOnDemand(v: Boolean) = edit { it[booleanPreferencesKey("tonight_vod")] = v }
 
     /** Scores: network word (CBS, FOX…) -> channel id the viewer confirmed. */
     private fun netKey(providerId: String) = stringPreferencesKey("network_map_$providerId")
     fun networkMap(providerId: String): Flow<Map<String, Long>> = ds.data.map { p -> p[netKey(providerId)]?.split('\u0001')?.mapNotNull { e -> val i = e.lastIndexOf('='); if (i < 0) null else e.substring(i + 1).toLongOrNull()?.let { e.substring(0, i) to it } }?.toMap() ?: emptyMap() }
-    suspend fun setNetworkMap(providerId: String, m: Map<String, Long>) = ds.edit { it[netKey(providerId)] = m.entries.joinToString("\u0001") { "${it.key}=${it.value}" } }
+    suspend fun setNetworkMap(providerId: String, m: Map<String, Long>) = edit { it[netKey(providerId)] = m.entries.joinToString("\u0001") { "${it.key}=${it.value}" } }
 
     // Friends: opt-in presence and send-to-TV through the code server.
     val friendCode: Flow<String?> = ds.data.map { it[stringPreferencesKey("friend_code")] }
-    suspend fun setFriendCode(v: String?) = ds.edit { if (v == null) it.remove(stringPreferencesKey("friend_code")) else it[stringPreferencesKey("friend_code")] = v }
+    suspend fun setFriendCode(v: String?) = edit { if (v == null) it.remove(stringPreferencesKey("friend_code")) else it[stringPreferencesKey("friend_code")] = v }
     val friendNick: Flow<String> = ds.data.map { it[stringPreferencesKey("friend_nick")] ?: "" }
-    suspend fun setFriendNick(v: String) = ds.edit { it[stringPreferencesKey("friend_nick")] = v.trim().take(24) }
+    suspend fun setFriendNick(v: String) = edit { it[stringPreferencesKey("friend_nick")] = v.trim().take(24) }
     val shareWatching: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("share_watching")] ?: false }
-    suspend fun setShareWatching(v: Boolean) = ds.edit { it[booleanPreferencesKey("share_watching")] = v }
+    suspend fun setShareWatching(v: Boolean) = edit { it[booleanPreferencesKey("share_watching")] = v }
     /** "code=name" entries. */
     val friends: Flow<List<Pair<String, String>>> = ds.data.map { p -> p[stringPreferencesKey("friends")]?.split('\u0001')?.mapNotNull { e -> val i = e.indexOf('='); if (i < 0) null else e.substring(0, i) to e.substring(i + 1) } ?: emptyList() }
-    suspend fun setFriends(list: List<Pair<String, String>>) = ds.edit { it[stringPreferencesKey("friends")] = list.joinToString("\u0001") { "${it.first}=${it.second}" } }
+    suspend fun setFriends(list: List<Pair<String, String>>) = edit { it[stringPreferencesKey("friends")] = list.joinToString("\u0001") { "${it.first}=${it.second}" } }
 
     // Profiles: JSON list; the active one; empty = everything.
     val profiles: Flow<String> = ds.data.map { it[stringPreferencesKey("profiles")] ?: "[]" }
-    suspend fun setProfiles(json: String) = ds.edit { it[stringPreferencesKey("profiles")] = json }
+    suspend fun setProfiles(json: String) = edit { it[stringPreferencesKey("profiles")] = json }
     val activeProfile: Flow<String> = ds.data.map { it[stringPreferencesKey("active_profile")] ?: "" }
-    suspend fun setActiveProfile(id: String) = ds.edit { it[stringPreferencesKey("active_profile")] = id }
+    suspend fun setActiveProfile(id: String) = edit { it[stringPreferencesKey("active_profile")] = id }
 
     val license: Flow<String?> = ds.data.map { it[stringPreferencesKey("license")] }
-    suspend fun setLicense(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("license")) else it[stringPreferencesKey("license")] = v.trim() }
+    suspend fun setLicense(v: String?) = edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("license")) else it[stringPreferencesKey("license")] = v.trim() }
     /** The key for Friends when the operator sells it separately. */
     val friendsLicense: Flow<String?> = ds.data.map { it[stringPreferencesKey("friends_license")] }
-    suspend fun setFriendsLicense(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("friends_license")) else it[stringPreferencesKey("friends_license")] = v.trim() }
+    suspend fun setFriendsLicense(v: String?) = edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("friends_license")) else it[stringPreferencesKey("friends_license")] = v.trim() }
     val licenseCheckedAt: Flow<Long> = ds.data.map { it[longPreferencesKey("license_checked_at")] ?: 0L }
-    suspend fun setLicenseCheckedAt(v: Long) = ds.edit { it[longPreferencesKey("license_checked_at")] = v }
+    suspend fun setLicenseCheckedAt(v: Long) = edit { it[longPreferencesKey("license_checked_at")] = v }
 
     suspend fun allChannelSorts(): Map<String, String> = ds.data.first().asMap()
         .filterKeys { it.name.startsWith("channel_sort_") }.map { (k, v) -> k.name.removePrefix("channel_sort_") to v.toString() }.toMap()
-    suspend fun restoreChannelSorts(m: Map<String, String>) = ds.edit { p -> m.forEach { (k, v) -> p[stringPreferencesKey("channel_sort_$k")] = v } }
+    suspend fun restoreChannelSorts(m: Map<String, String>) = edit { p -> m.forEach { (k, v) -> p[stringPreferencesKey("channel_sort_$k")] = v } }
 
     // The Toad: the last few things asked, and the group tags it gave this provider.
     val toadRecent: Flow<List<String>> = ds.data.map { p -> p[stringPreferencesKey("toad_recent")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
-    suspend fun pushToad(q: String) = ds.edit { p -> val cur = p[stringPreferencesKey("toad_recent")]?.split('\u0001')?.filter { it.isNotBlank() && !it.equals(q, true) } ?: emptyList(); p[stringPreferencesKey("toad_recent")] = (listOf(q) + cur).take(8).joinToString("\u0001") }
+    suspend fun pushToad(q: String) = edit { p -> val cur = p[stringPreferencesKey("toad_recent")]?.split('\u0001')?.filter { it.isNotBlank() && !it.equals(q, true) } ?: emptyList(); p[stringPreferencesKey("toad_recent")] = (listOf(q) + cur).take(8).joinToString("\u0001") }
     fun groupTags(providerId: String): Flow<Map<String, String>> = ds.data.map { p ->
         p[stringPreferencesKey("toad_tags_$providerId")]?.split('\u0001')?.mapNotNull { e -> val i = e.indexOf('\u0002'); if (i <= 0) null else e.substring(0, i) to e.substring(i + 1) }?.toMap() ?: emptyMap()
     }
     fun groupTagsDigest(providerId: String): Flow<String?> = ds.data.map { it[stringPreferencesKey("toad_tags_digest_$providerId")] }
-    suspend fun setGroupTags(providerId: String, tags: Map<String, String>, digest: String) = ds.edit { p ->
+    suspend fun setGroupTags(providerId: String, tags: Map<String, String>, digest: String) = edit { p ->
         p[stringPreferencesKey("toad_tags_$providerId")] = tags.entries.joinToString("\u0001") { it.key + "\u0002" + it.value }
         p[stringPreferencesKey("toad_tags_digest_$providerId")] = digest
     }
     // Sports: teams followed (league|id|name|abbr|logo), the hide-scores switch, and a week-old team list per league.
     /** The Sports hub rail in the viewer's order (page keys); pages it does not name follow in the default order. */
     val sportsRailOrder: Flow<List<String>> = ds.data.map { p -> p[stringPreferencesKey("sports_rail")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
-    suspend fun setSportsRailOrder(list: List<String>) = ds.edit { it[stringPreferencesKey("sports_rail")] = list.joinToString("\u0001") }
+    suspend fun setSportsRailOrder(list: List<String>) = edit { it[stringPreferencesKey("sports_rail")] = list.joinToString("\u0001") }
     val followedTeams: Flow<List<String>> = ds.data.map { p -> p[stringPreferencesKey("followed_teams")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
-    suspend fun setFollowedTeams(list: List<String>) = ds.edit { it[stringPreferencesKey("followed_teams")] = list.distinct().joinToString("\u0001") }
+    suspend fun setFollowedTeams(list: List<String>) = edit { it[stringPreferencesKey("followed_teams")] = list.distinct().joinToString("\u0001") }
     val hideScores: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("hide_scores")] ?: false }
-    suspend fun setHideScores(v: Boolean) = ds.edit { it[booleanPreferencesKey("hide_scores")] = v }
+    suspend fun setHideScores(v: Boolean) = edit { it[booleanPreferencesKey("hide_scores")] = v }
     suspend fun teamList(league: String): Pair<Long, List<String>>? = ds.data.first().let { p -> val at = p[longPreferencesKey("teams_at_$league")] ?: return null; at to (p[stringPreferencesKey("teams_$league")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList()) }
-    suspend fun setTeamList(league: String, list: List<String>) = ds.edit { it[stringPreferencesKey("teams_$league")] = list.joinToString("\u0001"); it[longPreferencesKey("teams_at_$league")] = System.currentTimeMillis() }
+    suspend fun setTeamList(league: String, list: List<String>) = edit { it[stringPreferencesKey("teams_$league")] = list.joinToString("\u0001"); it[longPreferencesKey("teams_at_$league")] = System.currentTimeMillis() }
     val searchHistory: Flow<List<String>> = ds.data.map { p -> p[stringPreferencesKey("search_history")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList() }
-    suspend fun pushSearch(q: String) = ds.edit { p ->
+    suspend fun pushSearch(q: String) = edit { p ->
         val cur = p[stringPreferencesKey("search_history")]?.split('\u0001')?.filter { it.isNotBlank() } ?: emptyList()
         p[stringPreferencesKey("search_history")] = (listOf(q.trim()) + cur.filter { !it.equals(q.trim(), ignoreCase = true) }).take(10).joinToString("\u0001")
     }
-    suspend fun clearSearchHistory() = ds.edit { it.remove(stringPreferencesKey("search_history")) }
-    suspend fun setOsdSeconds(v: Int) { if (osdSeconds.first() != v) tv.sloopy.SettingsLog.note(context, "channel badge set to $v s"); ds.edit { it[intPreferencesKey("osd_seconds")] = v } }
+    suspend fun clearSearchHistory() = edit { it.remove(stringPreferencesKey("search_history")) }
+    suspend fun setOsdSeconds(v: Int) { if (osdSeconds.first() != v) tv.sloopy.SettingsLog.note(context, "channel badge set to $v s"); edit { it[intPreferencesKey("osd_seconds")] = v } }
 
     private fun orderKey(providerId: String) = stringPreferencesKey("group_order_$providerId")
     fun groupOrder(providerId: String): Flow<List<String>> = ds.data.map { p -> p[orderKey(providerId)]?.split('\u0001')?.filter { it.isNotEmpty() } ?: emptyList() }
-    suspend fun setGroupOrder(providerId: String, ids: List<String>) = ds.edit { it[orderKey(providerId)] = ids.joinToString("\u0001") }
+    suspend fun setGroupOrder(providerId: String, ids: List<String>) = edit { it[orderKey(providerId)] = ids.joinToString("\u0001") }
 
     private fun recentKey(providerId: String) = stringPreferencesKey("recent_$providerId")
     fun recentChannels(providerId: String): Flow<List<Long>> = ds.data.map { p -> p[recentKey(providerId)]?.split(',')?.mapNotNull { it.toLongOrNull() } ?: emptyList() }
-    suspend fun pushRecent(providerId: String, channelId: Long) = ds.edit { p ->
+    suspend fun pushRecent(providerId: String, channelId: Long) = edit { p ->
         val cur = p[recentKey(providerId)]?.split(',')?.mapNotNull { it.toLongOrNull() } ?: emptyList()
         p[recentKey(providerId)] = (listOf(channelId) + cur.filter { it != channelId }).take(11).joinToString(",")
     }
 
     val codeServer: Flow<String?> = ds.data.map { it[stringPreferencesKey("code_server")] }
-    suspend fun setCodeServer(v: String?) = ds.edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("code_server")) else it[stringPreferencesKey("code_server")] = v.trim() }
+    suspend fun setCodeServer(v: String?) = edit { if (v.isNullOrBlank()) it.remove(stringPreferencesKey("code_server")) else it[stringPreferencesKey("code_server")] = v.trim() }
 
     val pinSalt: Flow<String?> = ds.data.map { it[stringPreferencesKey("pin_salt")] }
     val pinHash: Flow<String?> = ds.data.map { it[stringPreferencesKey("pin_hash")] }
-    suspend fun setPin(saltHex: String?, hashHex: String?) = ds.edit {
+    suspend fun setPin(saltHex: String?, hashHex: String?) = edit {
         if (saltHex == null || hashHex == null) { it.remove(stringPreferencesKey("pin_salt")); it.remove(stringPreferencesKey("pin_hash")) }
         else { it[stringPreferencesKey("pin_salt")] = saltHex; it[stringPreferencesKey("pin_hash")] = hashHex }
     }
 
     /** Groups the Sports hub must not pick channels from (the viewer's tick list; everything else is in). */
     fun sportsGroupsOff(providerId: String): Flow<Set<String>> = ds.data.map { p -> p[stringPreferencesKey("sports_off_$providerId")]?.split('\u0001')?.filter { it.isNotEmpty() }?.toSet() ?: emptySet() }
-    suspend fun setSportsGroupsOff(providerId: String, groups: Set<String>) = ds.edit { it[stringPreferencesKey("sports_off_$providerId")] = groups.joinToString("\u0001") }
+    suspend fun setSportsGroupsOff(providerId: String, groups: Set<String>) = edit { it[stringPreferencesKey("sports_off_$providerId")] = groups.joinToString("\u0001") }
     private fun hiddenKey(providerId: String) = stringPreferencesKey("hidden_groups_$providerId")
     fun hiddenGroups(providerId: String): Flow<Set<String>> = ds.data.map { p -> p[hiddenKey(providerId)]?.split('\u0001')?.filter { it.isNotEmpty() }?.toSet() ?: emptySet() }
-    suspend fun setHiddenGroups(providerId: String, groups: Set<String>) = ds.edit { it[hiddenKey(providerId)] = groups.joinToString("\u0001") }
+    suspend fun setHiddenGroups(providerId: String, groups: Set<String>) = edit { it[hiddenKey(providerId)] = groups.joinToString("\u0001") }
 
     private fun hiddenChanKey(providerId: String) = stringPreferencesKey("hidden_channels_$providerId")
     fun hiddenChannels(providerId: String): Flow<Set<Long>> = ds.data.map { p -> p[hiddenChanKey(providerId)]?.split(',')?.mapNotNull { it.toLongOrNull() }?.toSet() ?: emptySet() }
-    suspend fun setHiddenChannels(providerId: String, ids: Set<Long>) = ds.edit { it[hiddenChanKey(providerId)] = ids.joinToString(",") }
+    suspend fun setHiddenChannels(providerId: String, ids: Set<Long>) = edit { it[hiddenChanKey(providerId)] = ids.joinToString(",") }
 
     // Duplicate channels: one row per channel unless the viewer splits a cluster; confirmed and
     // dismissed "possible" pairs; the copy the viewer prefers per cluster.
     /** Guide: the groups panel folds away after a pick (the original behaviour) instead of staying beside the grid. */
     val foldGroups: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("fold_groups")] ?: false }
-    suspend fun setFoldGroups(v: Boolean) = ds.edit { it[booleanPreferencesKey("fold_groups")] = v }
+    suspend fun setFoldGroups(v: Boolean) = edit { it[booleanPreferencesKey("fold_groups")] = v }
     val collapseDupes: Flow<Boolean> = ds.data.map { it[booleanPreferencesKey("collapse_dupes")] ?: true }
-    suspend fun setCollapseDupes(v: Boolean) = ds.edit { it[booleanPreferencesKey("collapse_dupes")] = v }
+    suspend fun setCollapseDupes(v: Boolean) = edit { it[booleanPreferencesKey("collapse_dupes")] = v }
     private fun dupKey(providerId: String, what: String) = stringPreferencesKey("dup_${what}_$providerId")
     fun dupSplit(providerId: String): Flow<Set<String>> = ds.data.map { p -> p[dupKey(providerId, "split")]?.split('\u0001')?.filter { it.isNotEmpty() }?.toSet() ?: emptySet() }
-    suspend fun setDupSplit(providerId: String, keys: Set<String>) = ds.edit { it[dupKey(providerId, "split")] = keys.joinToString("\u0001") }
+    suspend fun setDupSplit(providerId: String, keys: Set<String>) = edit { it[dupKey(providerId, "split")] = keys.joinToString("\u0001") }
     /** Pairs "a:b" of channel ids the viewer confirmed are the same channel. */
     fun dupMerged(providerId: String): Flow<Set<String>> = ds.data.map { p -> p[dupKey(providerId, "merged")]?.split('\u0001')?.filter { it.isNotEmpty() }?.toSet() ?: emptySet() }
-    suspend fun setDupMerged(providerId: String, pairs: Set<String>) = ds.edit { it[dupKey(providerId, "merged")] = pairs.joinToString("\u0001") }
+    suspend fun setDupMerged(providerId: String, pairs: Set<String>) = edit { it[dupKey(providerId, "merged")] = pairs.joinToString("\u0001") }
     fun dupDismissed(providerId: String): Flow<Set<String>> = ds.data.map { p -> p[dupKey(providerId, "dismissed")]?.split('\u0001')?.filter { it.isNotEmpty() }?.toSet() ?: emptySet() }
-    suspend fun setDupDismissed(providerId: String, pairs: Set<String>) = ds.edit { it[dupKey(providerId, "dismissed")] = pairs.joinToString("\u0001") }
+    suspend fun setDupDismissed(providerId: String, pairs: Set<String>) = edit { it[dupKey(providerId, "dismissed")] = pairs.joinToString("\u0001") }
     /** cluster key -> channel id. */
     fun dupPreferred(providerId: String): Flow<Map<String, Long>> = ds.data.map { p -> p[dupKey(providerId, "preferred")]?.split('\u0001')?.mapNotNull { e -> val i = e.lastIndexOf('='); if (i < 0) null else e.substring(i + 1).toLongOrNull()?.let { e.substring(0, i) to it } }?.toMap() ?: emptyMap() }
-    suspend fun setDupPreferred(providerId: String, m: Map<String, Long>) = ds.edit { it[dupKey(providerId, "preferred")] = m.entries.joinToString("\u0001") { "${it.key}=${it.value}" } }
+    suspend fun setDupPreferred(providerId: String, m: Map<String, Long>) = edit { it[dupKey(providerId, "preferred")] = m.entries.joinToString("\u0001") { "${it.key}=${it.value}" } }
 
     private fun lockedKey(providerId: String) = stringPreferencesKey("locked_groups_$providerId")
     fun lockedGroups(providerId: String): Flow<Set<String>> = ds.data.map { p -> p[lockedKey(providerId)]?.split('\u0001')?.filter { it.isNotEmpty() }?.toSet() ?: emptySet() }
-    suspend fun setLockedGroups(providerId: String, groups: Set<String>) = ds.edit { it[lockedKey(providerId)] = groups.joinToString("\u0001") }
+    suspend fun setLockedGroups(providerId: String, groups: Set<String>) = edit { it[lockedKey(providerId)] = groups.joinToString("\u0001") }
 }

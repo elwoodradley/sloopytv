@@ -1,5 +1,6 @@
 package tv.sloopy.data
 
+import androidx.room.withTransaction
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -46,6 +47,9 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
     private val lock = Mutex()
     private val _refresh = MutableStateFlow<RefreshState>(RefreshState.Idle)
     val refresh: StateFlow<RefreshState> = _refresh
+    private val _spaceNote = MutableStateFlow<String?>(null)
+    /** "Storage is low on this box · …": the guide download is being skipped for lack of room. */
+    val spaceNote: StateFlow<String?> = _spaceNote
     private val _epgNote = kotlinx.coroutines.flow.MutableStateFlow("")
     /** What happened on the last guide-file attempt, for the guide header: which identity got through, or every answer. */
     val epgNote: StateFlow<String> = _epgNote
@@ -143,8 +147,26 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
     suspend fun refreshEpg(record: ProviderRecord, force: Boolean = false, minIntervalMs: Long = EPG_MIN_INTERVAL_MS): Int = withContext(Dispatchers.IO) {
         val age = System.currentTimeMillis() - prefs.refreshedAt(record.id, "epg")
         if (!force && age < minIntervalMs && db.programmes().count(record.id, epgGen(record.id)) > 0) return@withContext 0
+        val cur = epgGen(record.id)
+        val now = System.currentTimeMillis() / 1000
+        // Dead rows out first: leftovers of an import that was killed carry the very number about
+        // to be written again (they stacked up on the buddy's Chromecast until the disk was full),
+        // and anything that ended before the catch-up window is never shown.
+        runCatching { db.programmes().prune(record.id, cur, now - KEEP_BACK_S) }.onFailure { if (Storage.isNoSpace(it)) Storage.noteFull(it) }
+        // Room for the import: a new generation sits beside the old one until the swap.
+        val path = db.openHelper.writableDatabase.path ?: ""
+        val dbBytes = runCatching { java.io.File(path).length() }.getOrDefault(0L)
+        val free = Storage.freeBytes(path)
+        val need = maxOf(MIN_FREE_BYTES, dbBytes / 2)
+        if (free in 0 until need) {
+            _spaceNote.value = "Storage is low on this box · ${Storage.mb(free)} MB free · the guide is not downloaded until ${Storage.mb(need)} MB is free"
+            TLog.w { "guide skipped: ${Storage.mb(free)} MB free, ${Storage.mb(need)} needed" }
+            return@withContext 0
+        }
+        _spaceNote.value = null
+        Storage.clearIfRoom(path)
         _refresh.value = RefreshState.Running("Guide")
-        val newGen = epgGen(record.id) + 1
+        val newGen = cur + 1
         val count: Int
         try {
             count = when (record.kind) {
@@ -158,15 +180,75 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
                 }
             }
         } catch (e: Exception) {
-            db.programmes().deleteGen(record.id, newGen)
+            if (Storage.isNoSpace(e)) Storage.noteFull(e)
+            runCatching { db.programmes().deleteGen(record.id, newGen) }
             throw e
         }
-        db.meta().set(MetaEntity(record.id, "epgGen", newGen.toString()))
+        // The swap is one transaction: the live generation is always a complete one.
+        db.withTransaction {
+            db.meta().set(MetaEntity(record.id, "epgGen", newGen.toString()))
+            db.programmes().deleteOtherGens(record.id, newGen)
+        }
         gens[record.id] = newGen
-        db.programmes().deleteOtherGens(record.id, newGen)
         resolveEpgIds(record.id)
         prefs.setRefreshedAt(record.id, "epg")
+        compact()
         count
+    }
+
+    /** After an import: fold the log into the file and hand freed pages back to the disk. */
+    private fun compact() = runCatching {
+        val w = db.openHelper.writableDatabase
+        w.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+        w.query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
+        w.path?.let { Storage.clearIfRoom(it) }
+    }.onFailure { TLog.w { "compact: ${TLog.userMessage(it)}" } }
+
+    /**
+     * Launch hygiene. Dead rows out, then the file is made to follow its contents: once, when
+     * there is room for the copy, the database is converted to incremental auto-vacuum (a VACUUM,
+     * so the root shows PREPARING THE GUIDE for the duration), and from then on freed pages go
+     * back to the disk after every import. Without this SQLite keeps a file at its high-water
+     * mark for ever: 300k rows in a 1 GB file on the buddy's Chromecast.
+     */
+    suspend fun maintain(p: String) = withContext(Dispatchers.IO) {
+        val now = System.currentTimeMillis() / 1000
+        runCatching { db.programmes().prune(p, epgGen(p), now - KEEP_BACK_S) }.onFailure { if (Storage.isNoSpace(it)) Storage.noteFull(it) }
+        runCatching {
+            val w = db.openHelper.writableDatabase
+            val path = w.path ?: return@runCatching
+            w.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+            val mode = w.query("PRAGMA auto_vacuum").use { if (it.moveToFirst()) it.getInt(0) else 0 }
+            if (mode != 2) {
+                val bytes = java.io.File(path).length()
+                val free = Storage.freeBytes(path)
+                if (bytes < 64L * 1024 * 1024 || free > bytes * 3 / 2 + 64L * 1024 * 1024) {
+                    SloopyDb.migrating.value = true
+                    try {
+                        val t0 = System.currentTimeMillis()
+                        w.execSQL("PRAGMA auto_vacuum = INCREMENTAL")
+                        w.execSQL("VACUUM")
+                        TLog.i { "database converted to incremental vacuum in ${System.currentTimeMillis() - t0} ms" }
+                    } finally { SloopyDb.migrating.value = false }
+                }
+            } else w.query("PRAGMA incremental_vacuum").use { it.moveToFirst() }
+            Storage.clearIfRoom(path)
+        }.onFailure { TLog.w { "maintain: ${TLog.userMessage(it)}" }; if (Storage.isNoSpace(it)) Storage.noteFull(it) }
+    }
+
+    /** Settings › About › Rebuild the guide: every programme row out and the file compacted; the caller re-downloads. */
+    suspend fun wipeGuide(p: String) = withContext(Dispatchers.IO) {
+        try {
+            db.programmes().deleteAll(p)
+            db.epgChannels().deleteAll(p)
+        } catch (e: Exception) { if (Storage.isNoSpace(e)) Storage.noteFull(e); throw e }
+        runCatching {
+            val w = db.openHelper.writableDatabase
+            w.query("PRAGMA wal_checkpoint(TRUNCATE)").use { it.moveToFirst() }
+            w.execSQL("VACUUM")
+            w.path?.let { Storage.clearIfRoom(it) }
+        }.onFailure { TLog.w { "wipe: ${TLog.userMessage(it)}" } }
+        _spaceNote.value = null
     }
 
     private suspend fun importXmltv(p: String, gen: Int, url: String): Int {
@@ -176,12 +258,17 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
         val dao = db.programmes()
         val cdao = db.epgChannels()
         db.epgChannels().deleteAll(p)
+        // Only the window the app ever shows is stored: the catch-up days behind, the reminder
+        // and season-pass horizon ahead. A 14-day file for a 10k lineup is otherwise mostly dead weight.
+        val now = System.currentTimeMillis() / 1000
+        val keepFrom = now - KEEP_BACK_S; val keepTo = now + KEEP_FWD_S
         val sink = object : XmltvParser.Sink {
             override fun channel(c: XmltvChannel) {
                 chans.add(EpgChannelEntity(p, c.id, c.name, c.icon, normalise(c.name)))
                 if (chans.size >= BATCH) { cdao.insertBatchBlocking(chans); chans.clear() }
             }
             override fun programme(pr: Programme) {
+                if (pr.stopEpoch < keepFrom || pr.startEpoch > keepTo) return
                 batch.add(pr.toEntity(p, gen))
                 if (batch.size >= BATCH) {
                     dao.insertBatchBlocking(batch); total += batch.size; batch.clear()
@@ -221,7 +308,7 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
 
     private fun Programme.toEntity(p: String, gen: Int) = ProgrammeEntity(
         providerId = p, gen = gen, epgId = epgId, startEpoch = startEpoch, stopEpoch = stopEpoch,
-        title = title, description = description, category = category, episode = episode, icon = icon,
+        title = title, description = description?.take(DESC_MAX), category = category, episode = episode, icon = icon?.take(300),
     )
 
     /**
@@ -256,13 +343,19 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
      */
     suspend fun fetchChannelEpg(record: ProviderRecord, channel: ChannelEntity): Int = withContext(Dispatchers.IO) {
         if (record.kind != ProviderKind.XTREAM) return@withContext 0
-        val list = XtreamApi(AndroidHttp.core, record.xtream()).fullEpg(channel.id)
+        if (Storage.full.value != null) return@withContext 0   // nothing to gain from more failing writes
+        val now = System.currentTimeMillis() / 1000
+        val list = XtreamApi(AndroidHttp.core, record.xtream()).fullEpg(channel.id).filter { it.stopEpoch >= now - KEEP_BACK_S && it.startEpoch <= now + KEEP_FWD_S }
         val gen = epgGen(record.id)
         val key = channelEpgKey(channel)
-        db.programmes().deleteFor(record.id, gen, key)
-        db.programmes().insertBatchBlocking(list.map {
-            ProgrammeEntity(providerId = record.id, gen = gen, epgId = key, startEpoch = it.startEpoch, stopEpoch = it.stopEpoch, title = it.title, description = it.description, category = null, episode = null, icon = null)
-        })
+        try {
+            db.withTransaction {
+                db.programmes().deleteFor(record.id, gen, key)
+                db.programmes().insertBatchBlocking(list.map {
+                    ProgrammeEntity(providerId = record.id, gen = gen, epgId = key, startEpoch = it.startEpoch, stopEpoch = it.stopEpoch, title = it.title, description = it.description?.take(DESC_MAX), category = null, episode = null, icon = null)
+                })
+            }
+        } catch (e: Exception) { if (Storage.isNoSpace(e)) Storage.noteFull(e); throw e }
         list.size
     }
 
@@ -343,6 +436,13 @@ class Catalog(private val db: SloopyDb, private val providers: ProviderStore, pr
             "okhttp/4.12.0",
         )
         const val EPG_MIN_INTERVAL_MS = 6L * 3600 * 1000
+        /** The guide window kept on the box: catch-up behind, reminders and season passes ahead. */
+        const val KEEP_BACK_S = 2L * 86_400
+        const val KEEP_FWD_S = 8L * 86_400
+        /** One programme's description; a provider's novel-length blurbs are what make rows big. */
+        const val DESC_MAX = 600
+        /** Below this much free space the guide is not downloaded at all. */
+        const val MIN_FREE_BYTES = 200L * 1024 * 1024
 
         private val junk = Regex("""\b(uk|us|usa|ca|de|fr|es|it|nl|au|ie)\b|\b(hd|fhd|uhd|4k|sd|hevc|h265|raw|backup|vip)\b|[^a-z0-9]""")
         fun normalise(name: String): String = junk.replace(name.lowercase(), "")

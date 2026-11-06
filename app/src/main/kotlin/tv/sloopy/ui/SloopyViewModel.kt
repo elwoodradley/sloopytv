@@ -65,6 +65,16 @@ sealed class Playing {
 @UnstableApi
 class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val graph = SloopyApp.graph(app)
+    /**
+     * One rule for every launched job: a write that fails for lack of space (a full Chromecast,
+     * 2026-11-05) becomes the storage warning and the job ends; anything else still reaches the
+     * crash handler, so bugs stay loud.
+     */
+    private val noSpaceHandler = kotlinx.coroutines.CoroutineExceptionHandler { _, t ->
+        if (tv.sloopy.data.Storage.isNoSpace(t)) tv.sloopy.data.Storage.noteFull(t)
+        else Thread.getDefaultUncaughtExceptionHandler()?.uncaughtException(Thread.currentThread(), t) ?: throw t
+    }
+    private val safeScope = kotlinx.coroutines.CoroutineScope(viewModelScope.coroutineContext + noSpaceHandler)
     val catalog: Catalog get() = graph.catalog
     val prefs get() = graph.prefs
     val providers: ProviderStore get() = graph.providers
@@ -110,7 +120,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         if (pr == null) cats else cats.filter { it.id in pr.groups }
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
 
-    fun moveGroup(id: String, delta: Int) = viewModelScope.launch {
+    fun moveGroup(id: String, delta: Int) = safeScope.launch {
         val p = active.value ?: return@launch
         val ids = liveCategories.value.map { it.id }.toMutableList()
         val i = ids.indexOf(id); val j = i + delta
@@ -124,7 +134,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val favouriteSeriesIds: StateFlow<Set<Long>> = active.flatMapLatest { p -> if (p == null) flowOf(emptyList()) else graph.db.favouriteItems().ids(p.id, "series") }
         .map { it.toSet() }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
 
-    fun toggleItemFavourite(kind: String, id: Long) = viewModelScope.launch {
+    fun toggleItemFavourite(kind: String, id: Long) = safeScope.launch {
         val p = active.value ?: return@launch
         val set = if (kind == "vod") favouriteVodIds.value else favouriteSeriesIds.value
         if (id in set) graph.db.favouriteItems().remove(p.id, kind, id)
@@ -145,7 +155,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val hiddenChannels: StateFlow<Set<Long>> = active.flatMapLatest { p ->
         if (p == null) flowOf(emptySet()) else prefs.hiddenChannels(p.id)
     }.stateIn(viewModelScope, SharingStarted.Eagerly, emptySet())
-    fun setChannelHidden(id: Long, hidden: Boolean) = viewModelScope.launch {
+    fun setChannelHidden(id: Long, hidden: Boolean) = safeScope.launch {
         val p = active.value ?: return@launch
         val cur = hiddenChannels.value.toMutableSet()
         if (hidden) cur.add(id) else cur.remove(id)
@@ -156,23 +166,23 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val reminders: StateFlow<List<tv.sloopy.data.db.ReminderEntity>> = active.flatMapLatest { p -> if (p == null) flowOf(emptyList()) else graph.db.reminders().all(p.id) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     fun hasReminder(channelId: Long, startEpoch: Long): Boolean = reminders.value.any { it.channelId == channelId && it.startEpoch == startEpoch }
-    fun addReminder(c: ChannelEntity, title: String, startEpoch: Long, stopEpoch: Long) = viewModelScope.launch {
+    fun addReminder(c: ChannelEntity, title: String, startEpoch: Long, stopEpoch: Long) = safeScope.launch {
         val p = active.value ?: return@launch
         graph.db.reminders().deleteFor(p.id, c.id, startEpoch)
         graph.db.reminders().insert(tv.sloopy.data.db.ReminderEntity(providerId = p.id, channelId = c.id, channelName = c.name, title = title, startEpoch = startEpoch, stopEpoch = stopEpoch))
         _toast.value = "Reminder set: $title at ${tv.sloopy.ui.common.TimeFmt.hhmm(startEpoch)}. SloopyTV has to be open."
     }
-    fun removeReminder(c: ChannelEntity, startEpoch: Long) = viewModelScope.launch { active.value?.let { graph.db.reminders().deleteFor(it.id, c.id, startEpoch) } }
+    fun removeReminder(c: ChannelEntity, startEpoch: Long) = safeScope.launch { active.value?.let { graph.db.reminders().deleteFor(it.id, c.id, startEpoch) } }
     /** The reminder whose programme is starting, shown as a prompt over whatever is on screen. */
     private val _dueReminder = MutableStateFlow<tv.sloopy.data.db.ReminderEntity?>(null)
     val dueReminder: StateFlow<tv.sloopy.data.db.ReminderEntity?> = _dueReminder
     fun dismissReminder(r: tv.sloopy.data.db.ReminderEntity, watch: Boolean) {
-        viewModelScope.launch { graph.db.reminders().delete(r.id) }
+        safeScope.launch { graph.db.reminders().delete(r.id) }
         _dueReminder.value = null
         if (watch) channels.value.firstOrNull { it.id == r.channelId }?.let { tune(it); goHome() }
     }
     init {
-        viewModelScope.launch {
+        safeScope.launch {
             while (true) {
                 val now = System.currentTimeMillis() / 1000
                 runCatching { graph.db.reminders().purge(now); if (_dueReminder.value == null) _dueReminder.value = graph.db.reminders().due(now) }
@@ -181,7 +191,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
-    fun setHidden(groupId: String, hidden: Boolean) = viewModelScope.launch {
+    fun setHidden(groupId: String, hidden: Boolean) = safeScope.launch {
         val p = active.value ?: return@launch
         val cur = hiddenGroups.value.toMutableSet()
         if (hidden) cur.add(groupId) else cur.remove(groupId)
@@ -196,9 +206,9 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val channelSort: StateFlow<String> = combine(active, _group) { p, g -> p?.id to g }
         .flatMapLatest { (pid, g) -> if (pid == null) flowOf("provider") else prefs.channelSort(pid, g) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, "provider")
-    fun setChannelSort(mode: String) = viewModelScope.launch { active.value?.let { prefs.setChannelSort(it.id, _group.value, mode) } }
+    fun setChannelSort(mode: String) = safeScope.launch { active.value?.let { prefs.setChannelSort(it.id, _group.value, mode) } }
     /** "az" sorts the groups by name; "provider" restores the provider's order. */
-    fun sortGroups(mode: String) = viewModelScope.launch {
+    fun sortGroups(mode: String) = safeScope.launch {
         val p = active.value ?: return@launch
         prefs.setGroupOrder(p.id, if (mode == "az") rawLiveCategories.value.sortedBy { it.name.lowercase() }.map { it.id } else emptyList())
     }
@@ -253,19 +263,19 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun copiesOf(c: ChannelEntity): List<ChannelEntity> = dupes.value.byChannel[c.id]?.members ?: listOf(c)
     fun clusterOf(c: ChannelEntity): Cluster? = dupes.value.byChannel[c.id]?.takeIf { it.members.size > 1 }
-    fun preferCopy(c: ChannelEntity) = viewModelScope.launch {
+    fun preferCopy(c: ChannelEntity) = safeScope.launch {
         val p = active.value ?: return@launch
         val cl = dupes.value.byChannel[c.id] ?: return@launch
         prefs.setDupPreferred(p.id, dupPreferred.value + (cl.key to c.id))
         if (currentChannel.value?.let { dupes.value.byChannel[it.id]?.key } == cl.key) tune(c)
     }
-    fun splitCluster(c: ChannelEntity) = viewModelScope.launch {
+    fun splitCluster(c: ChannelEntity) = safeScope.launch {
         val p = active.value ?: return@launch
         val cl = dupes.value.byChannel[c.id] ?: return@launch
         prefs.setDupSplit(p.id, dupSplit.value + cl.key)
     }
-    fun unsplitCluster(key: String) = viewModelScope.launch { active.value?.let { prefs.setDupSplit(it.id, dupSplit.value - key) } }
-    fun mergePossible(a: ChannelEntity, b: ChannelEntity, same: Boolean) = viewModelScope.launch {
+    fun unsplitCluster(key: String) = safeScope.launch { active.value?.let { prefs.setDupSplit(it.id, dupSplit.value - key) } }
+    fun mergePossible(a: ChannelEntity, b: ChannelEntity, same: Boolean) = safeScope.launch {
         val p = active.value ?: return@launch
         val tag = "${minOf(a.id, b.id)}:${maxOf(a.id, b.id)}"
         if (same) prefs.setDupMerged(p.id, dupMerged.value + tag) else prefs.setDupDismissed(p.id, dupDismissed.value + tag)
@@ -346,14 +356,14 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val updatePrompt: StateFlow<tv.sloopy.update.UpdateInfo?> = _updatePrompt
     fun dismissUpdatePrompt() { _updatePrompt.value = null }
 
-    fun checkForUpdate(force: Boolean = false) = viewModelScope.launch {
+    fun checkForUpdate(force: Boolean = false) = safeScope.launch {
         val r = updater.check(force)
         if (r is tv.sloopy.update.UpdateState.Available && announcedUpdate != r.info.version) {
             announcedUpdate = r.info.version
             _updatePrompt.value = r.info
         }
     }
-    fun installUpdate() = viewModelScope.launch {
+    fun installUpdate() = safeScope.launch {
         val s = updateState.value
         if (s is tv.sloopy.update.UpdateState.Ready && updater.relaunch()) return@launch
         val info = (s as? tv.sloopy.update.UpdateState.Available)?.info ?: (s as? tv.sloopy.update.UpdateState.NeedsPermission)?.info
@@ -389,7 +399,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
     init {
-        viewModelScope.launch {
+        safeScope.launch {
             codeServer.collect { server ->
                 _payConfig.value = tv.sloopy.pay.License.config(server) ?: tv.sloopy.pay.PayConfig("", "", "")
                 // A week after the last check, confirm the key is still good; refunds revoke it, no network keeps it.
@@ -413,9 +423,9 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val announcement: StateFlow<tv.sloopy.pay.PayConfig?> = combine(_payConfig, prefs.seenAnnouncement) { c, seen ->
         if (c != null && c.announcementText.isNotBlank() && c.announcementId != seen) c else null
     }.stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    fun dismissAnnouncement() = viewModelScope.launch { _payConfig.value?.let { prefs.setSeenAnnouncement(it.announcementId) } }
+    fun dismissAnnouncement() = safeScope.launch { _payConfig.value?.let { prefs.setSeenAnnouncement(it.announcementId) } }
     /** Sends a dead-channel report to the operator. Only reachable when the operator has reports on. */
-    fun reportChannel(c: ChannelEntity, error: String?) = viewModelScope.launch {
+    fun reportChannel(c: ChannelEntity, error: String?) = safeScope.launch {
         val server = codeServer.value
         val group = liveCategories.value.firstOrNull { it.id == c.categoryId }?.name
         val body = kotlinx.serialization.json.buildJsonObject {
@@ -449,7 +459,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val healedFrom: StateFlow<ChannelEntity?> = _healedFrom
     init {
         player.onFailed = { _ -> onStreamFailed() }
-        viewModelScope.launch { currentChannel.collect { c -> if (c != null && c.id != healTarget && dupes.value.byChannel[c.id]?.key != healTarget?.let { dupes.value.byChannel[it]?.key }) { healTried.clear(); healTarget = c.id; _healedFrom.value = null; _diagnosis.value = null } } }
+        safeScope.launch { currentChannel.collect { c -> if (c != null && c.id != healTarget && dupes.value.byChannel[c.id]?.key != healTarget?.let { dupes.value.byChannel[it]?.key }) { healTried.clear(); healTarget = c.id; _healedFrom.value = null; _diagnosis.value = null } } }
     }
     private fun onStreamFailed() {
         val p = active.value ?: return
@@ -465,7 +475,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             return
         }
         // Nothing to switch to: find out whether it is you or them.
-        viewModelScope.launch {
+        safeScope.launch {
             _diagnosis.value = tv.sloopy.data.Verdict("Checking…", "Testing the connection, the provider and two other channels.")
             val others = visibleChannels.value.ifEmpty { channels.value }
             _diagnosis.value = runCatching { tv.sloopy.data.Diagnosis.run(p, codeServer.value, c, others) { ch -> runCatching { catalog.liveUrl(p, ch) }.getOrNull() } }
@@ -502,7 +512,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             append("]}")
         }
     }
-    private fun hubOp(ev: tv.sloopy.pair.RemoteEvent.Hub) = viewModelScope.launch {
+    private fun hubOp(ev: tv.sloopy.pair.RemoteEvent.Hub) = safeScope.launch {
         val p = active.value ?: return@launch
         val b = ev.body
         fun str(k: String) = (b[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull
@@ -532,7 +542,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         // Debug builds only: the address (with token) in the app's private files, so the emulator's
         // hub can be opened from a desktop browser over adb forward without reading a QR.
         if (tv.sloopy.BuildConfig.DEBUG) runCatching { java.io.File(getApplication<android.app.Application>().filesDir, "remote_address.txt").writeText(s.hubAddress) }
-        viewModelScope.launch {
+        safeScope.launch {
             s.events.collect { ev ->
                 when (ev) {
                     is tv.sloopy.pair.RemoteEvent.Type -> remoteText.tryEmit(ev.text to ev.submit)
@@ -548,14 +558,14 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val seasonPasses: StateFlow<List<String>> = perProvider({ prefs.seasonPasses(it) }, emptyList())
     val passUnsure: StateFlow<List<String>> = perProvider({ prefs.passUnsure(it) }, emptyList())
     private val scores = tv.sloopy.core.sports.Scores(tv.sloopy.data.AndroidHttp.core)
-    fun addSeasonPass(team: String) = viewModelScope.launch {
+    fun addSeasonPass(team: String) = safeScope.launch {
         val p = active.value ?: return@launch
         val t = team.trim(); if (t.isBlank()) return@launch
         prefs.setSeasonPasses(p.id, (seasonPasses.value + t).distinctBy { it.lowercase() })
         scanSeasonPasses(); _toast.value = "Season pass: $t. Games are booked as the guide fills in."
     }
-    fun removeSeasonPass(team: String) = viewModelScope.launch { active.value?.let { prefs.setSeasonPasses(it.id, seasonPasses.value - team) } }
-    fun resolveUnsure(entry: String, book: Boolean) = viewModelScope.launch {
+    fun removeSeasonPass(team: String) = safeScope.launch { active.value?.let { prefs.setSeasonPasses(it.id, seasonPasses.value - team) } }
+    fun resolveUnsure(entry: String, book: Boolean) = safeScope.launch {
         val p = active.value ?: return@launch
         prefs.setPassUnsure(p.id, passUnsure.value - entry)
         if (!book) return@launch
@@ -565,7 +575,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     }
     private val SPORT = Regex("\\b(NFL|FOOTBALL|NCAA|COLLEGE|GAME|VS\\.?|V\\.?|AT|@|BASKETBALL|NBA|HOCKEY|NHL|MLB|BASEBALL)\\b", RegexOption.IGNORE_CASE)
     /** Books every upcoming game of each pass team the guide and ESPN's schedule agree on. */
-    fun scanSeasonPasses() = viewModelScope.launch {
+    fun scanSeasonPasses() = safeScope.launch {
         val p = active.value ?: return@launch
         val teams = seasonPasses.value; if (teams.isEmpty()) return@launch
         val now = System.currentTimeMillis() / 1000
@@ -608,8 +618,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         return if (any) false else null
     }
     init {
-        viewModelScope.launch { catalog.refresh.collect { if (it is tv.sloopy.data.RefreshState.Done) scanSeasonPasses() } }
-        viewModelScope.launch { while (true) { delay(6 * 3600_000L); scanSeasonPasses() } }
+        safeScope.launch { catalog.refresh.collect { if (it is tv.sloopy.data.RefreshState.Done) scanSeasonPasses() } }
+        safeScope.launch { while (true) { delay(6 * 3600_000L); scanSeasonPasses() } }
     }
 
     // ---- Tonight ---------------------------------------------------------------------------------
@@ -641,10 +651,10 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         if (v.first.isNotEmpty() || v.second.isNotEmpty()) trendCache = System.currentTimeMillis() to v
         return v
     }
-    fun notInterested(title: String) = viewModelScope.launch { prefs.addTonightNotInterested(title); buildTonight() }
+    fun notInterested(title: String) = safeScope.launch { prefs.addTonightNotInterested(title); buildTonight() }
     private val _tonightBusy = MutableStateFlow(false)
     val tonightBusy: StateFlow<Boolean> = _tonightBusy
-    fun buildTonight() = viewModelScope.launch {
+    fun buildTonight() = safeScope.launch {
         val p = active.value ?: return@launch
         _tonightBusy.value = true
         try { buildTonightNow(p) } finally { _tonightBusy.value = false }
@@ -777,13 +787,13 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     private fun kotlinx.serialization.json.JsonObject.bool(k: String) = (this[k] as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull == "true"
 
     /** Asks the code server whether this stick may use the Toad; shows the strip icon when it may. */
-    fun refreshToad() = viewModelScope.launch { refreshToadNow() }
+    fun refreshToad() = safeScope.launch { refreshToadNow() }
     /**
      * Keeps asking until the answer arrives: a launch with the guide downloading can lose the
      * first request, and one lost request used to hide the Toad for the whole session. Backs
      * off 15 s → 1 min → 4 min → 16 min, then half-hourly once it is on (admin changes land).
      */
-    fun startToadWatch() = viewModelScope.launch {
+    fun startToadWatch() = safeScope.launch {
         var wait = 15_000L
         while (true) {
             refreshToadNow()
@@ -809,7 +819,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** One Claude call tags every live group (sports, kids, adult, foreign, ...). Cached per name set. */
-    fun refreshGroupTags() = viewModelScope.launch {
+    fun refreshGroupTags() = safeScope.launch {
         val p = active.value ?: return@launch
         val cats = kotlinx.coroutines.withTimeoutOrNull(60_000) { allLiveCategories.first { it.isNotEmpty() } } ?: return@launch
         val names = cats.map { tv.sloopy.core.model.Names.clean(it.name) }.distinct()
@@ -826,7 +836,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         prefs.setGroupTags(p.id, byId, digest)
     }
     fun groupsTagged(tag: String): List<CategoryEntity> = allLiveCategories.value.filter { groupTags.value[it.id] == tag }
-    fun hideTagged(tag: String, hide: Boolean) = viewModelScope.launch {
+    fun hideTagged(tag: String, hide: Boolean) = safeScope.launch {
         val p = active.value ?: return@launch
         val cur = hiddenGroups.value.toMutableSet()
         val ids = groupsTagged(tag).map { it.id }
@@ -852,7 +862,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             ?: cats.firstOrNull { tv.sloopy.core.model.Names.clean(it.name).lowercase().contains(want) }
     }
 
-    fun toadAsk(text: String) = viewModelScope.launch {
+    fun toadAsk(text: String) = safeScope.launch {
         val t = text.trim(); if (t.isEmpty()) return@launch
         _toadBusy.value = true; _toadError.value = null; _toadPlan.value = null; toadSteps = emptyList()
         prefs.pushToad(t)
@@ -912,7 +922,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         toadSteps = steps
         _toadPlan.value = ToadPlan(t, r.str("say") ?: "", lines, steps.isNotEmpty())
     }
-    fun toadRun() = viewModelScope.launch {
+    fun toadRun() = safeScope.launch {
         val steps = toadSteps; toadSteps = emptyList(); _toadPlan.value = null
         for (st in steps) runCatching { st.run() }
         if (steps.isNotEmpty() && steps.none { it.line == "nav" }) toast("Done.")
@@ -948,7 +958,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
      * check that raced it minted a fresh code over the saved one (the user's code changed, his
      * friends lost him, and the Toad allow-list no longer matched).
      */
-    fun ensureFriendCode() = viewModelScope.launch {
+    fun ensureFriendCode() = safeScope.launch {
         if (prefs.friendCode.first().isNullOrBlank()) {
             val c = tv.sloopy.sync.SyncClient.newCode()
             // A new code on a stick that has been used before means its settings store was empty:
@@ -957,13 +967,13 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             prefs.setFriendCode(c)
         }
     }
-    fun addFriend(code: String, name: String) = viewModelScope.launch {
+    fun addFriend(code: String, name: String) = safeScope.launch {
         val c = tv.sloopy.sync.SyncClient.normalise(code); if (c.length != 8) { _toast.value = "A friend code is eight letters and numbers"; return@launch }
         prefs.setFriends((friends.value.filter { it.first != c } + (c to name.trim().ifBlank { c })))
         refreshPresence()
     }
-    fun removeFriend(code: String) = viewModelScope.launch { prefs.setFriends(friends.value.filter { it.first != code }) }
-    fun refreshPresence() = viewModelScope.launch {
+    fun removeFriend(code: String) = safeScope.launch { prefs.setFriends(friends.value.filter { it.first != code }) }
+    fun refreshPresence() = safeScope.launch {
         val list = friends.value; if (list.isEmpty()) { _presence.value = emptyList(); return@launch }
         val root = friendsCall("/friends/list?ids=" + list.joinToString(",") { it.first }, null) ?: return@launch
         val arr = root["friends"] as? kotlinx.serialization.json.JsonArray ?: return@launch
@@ -972,7 +982,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             Presence(code, name, (o?.get("channel") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.takeIf { it.isNotBlank() }, (o?.get("at") as? kotlinx.serialization.json.JsonPrimitive)?.contentOrNull?.toLongOrNull() ?: 0L)
         }
     }
-    fun sendToFriend(code: String, c: ChannelEntity) = viewModelScope.launch {
+    fun sendToFriend(code: String, c: ChannelEntity) = safeScope.launch {
         val me = friendCode.value ?: return@launch
         val body = kotlinx.serialization.json.buildJsonObject {
             put("to", kotlinx.serialization.json.JsonPrimitive(code)); put("from", kotlinx.serialization.json.JsonPrimitive(me)); put("nick", kotlinx.serialization.json.JsonPrimitive(friendNick.value))
@@ -994,7 +1004,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         tune(dupes.value.byChannel[c.id]?.primary ?: c); goHome()
     }
     init {
-        viewModelScope.launch {
+        safeScope.launch {
             while (true) {
                 delay(45_000)
                 val me = friendCode.value
@@ -1013,15 +1023,15 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     // ---- Profiles --------------------------------------------------------------------------------
-    fun saveProfile(pr: Profile) = viewModelScope.launch {
+    fun saveProfile(pr: Profile) = safeScope.launch {
         val list = profiles.value.filter { it.id != pr.id } + pr
         prefs.setProfiles(profileJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(Profile.serializer()), list))
     }
-    fun deleteProfile(id: String) = viewModelScope.launch {
+    fun deleteProfile(id: String) = safeScope.launch {
         prefs.setProfiles(profileJson.encodeToString(kotlinx.serialization.builtins.ListSerializer(Profile.serializer()), profiles.value.filter { it.id != id }))
         if (prefs.activeProfile.first() == id) prefs.setActiveProfile("")
     }
-    fun switchProfile(id: String) = viewModelScope.launch { prefs.setActiveProfile(id); selectGroup(Groups.ALL); goHome() }
+    fun switchProfile(id: String) = safeScope.launch { prefs.setActiveProfile(id); selectGroup(Groups.ALL); goHome() }
     /** Category ids a profile allows for a library kind; null = everything. */
     fun allowedCats(kind: String): List<String>? = activeProfile.value?.let { if (kind == "vod") it.vodCats else it.seriesCats }
 
@@ -1047,25 +1057,25 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val scoresDay = MutableStateFlow(0)
     val followedTeams: StateFlow<List<FollowedTeam>> = prefs.followedTeams.map { l -> l.mapNotNull { FollowedTeam.decode(it) } }.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     fun follows(league: String, id: String) = followedTeams.value.any { it.league == league && it.id == id }
-    fun toggleFollow(t: FollowedTeam) = viewModelScope.launch {
+    fun toggleFollow(t: FollowedTeam) = safeScope.launch {
         val cur = followedTeams.value
         val next = if (cur.any { it.league == t.league && it.id == t.id }) cur.filterNot { it.league == t.league && it.id == t.id } else cur + t
         prefs.setFollowedTeams(next.map { it.encode() })
         _toast.value = if (next.size > cur.size) "Following the ${t.name}" else "No longer following the ${t.name}"
     }
     val hideScores: StateFlow<Boolean> = prefs.hideScores.stateIn(viewModelScope, SharingStarted.Eagerly, false)
-    fun setHideScores(v: Boolean) = viewModelScope.launch { prefs.setHideScores(v) }
+    fun setHideScores(v: Boolean) = safeScope.launch { prefs.setHideScores(v) }
     val networkMap: StateFlow<Map<String, Long>> = perProvider({ prefs.networkMap(it) }, emptyMap())
     /** Groups the Sports hub leaves alone (Settings › Sports). Channels there are never a game's guess. */
     val sportsGroupsOff: StateFlow<Set<String>> = perProvider({ prefs.sportsGroupsOff(it) }, emptySet())
-    fun setSportsGroupOff(categoryId: String, off: Boolean) = viewModelScope.launch {
+    fun setSportsGroupOff(categoryId: String, off: Boolean) = safeScope.launch {
         val p = active.value ?: return@launch
         val cur = sportsGroupsOff.value
         prefs.setSportsGroupsOff(p.id, if (off) cur + categoryId else cur - categoryId)
         gameChannelCache.clear(); refreshScores()
     }
     /** The whole tick list at once: Tick all, Untick all, Only US groups. */
-    fun setSportsGroupsOff(off: Set<String>) = viewModelScope.launch {
+    fun setSportsGroupsOff(off: Set<String>) = safeScope.launch {
         val p = active.value ?: return@launch
         prefs.setSportsGroupsOff(p.id, off); gameChannelCache.clear(); refreshScores()
     }
@@ -1115,7 +1125,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
      * library, no guide) and resolve the games afresh. Providers rename event feeds to the
      * matchup on game day, and the usual refresh is once a day at launch.
      */
-    fun refreshChannelsIfStale() = viewModelScope.launch {
+    fun refreshChannelsIfStale() = safeScope.launch {
         val p = active.value ?: return@launch
         if (p.kind == tv.sloopy.data.ProviderKind.DEMO) return@launch
         val age = System.currentTimeMillis() - prefs.refreshedAt(p.id, "channels")
@@ -1123,7 +1133,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         runCatching { catalog.refreshAll(p, includeLibrary = false, includeEpg = false) }.onFailure { TLog.w { "sports channel refresh: ${TLog.userMessage(it)}" } }
         gameChannelCache.clear(); refreshScores()
     }
-    fun setNetworkChannel(network: String, c: ChannelEntity?) = viewModelScope.launch {
+    fun setNetworkChannel(network: String, c: ChannelEntity?) = safeScope.launch {
         val p = active.value ?: return@launch
         val m = networkMap.value.toMutableMap(); if (c == null) m.remove(network) else m[network] = c.id
         prefs.setNetworkMap(p.id, m); gameChannelCache.clear(); refreshScores()
@@ -1161,7 +1171,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         // had set busy: the hub said "Nothing in play" while five games were live. Only the
         // newest job may clear the flag.
         val gen = ++scoresGen
-        scoresJob = viewModelScope.launch {
+        scoresJob = safeScope.launch {
             _scoresBusy.value = true
             try {
                 val p = active.value
@@ -1290,7 +1300,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
             ))
     }
     val sportsRailOrder: StateFlow<List<String>> = prefs.sportsRailOrder.stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
-    fun setSportsRailOrder(list: List<String>) = viewModelScope.launch { prefs.setSportsRailOrder(list) }
+    fun setSportsRailOrder(list: List<String>) = safeScope.launch { prefs.setSportsRailOrder(list) }
     /** The league's postseason games as resolved rows, kept a quarter hour. Empty outside the playoffs. */
     private val playoffCache = HashMap<String, Pair<Long, List<GameRow>>>()
     private val playoffNowCache = HashMap<String, Pair<Long, Boolean>>()
@@ -1325,7 +1335,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val recordings: StateFlow<List<tv.sloopy.data.db.RecordingEntity>> = active.flatMapLatest { p -> if (p == null) flowOf(emptyList()) else graph.db.recordings().all(p.id) }
         .stateIn(viewModelScope, SharingStarted.Eagerly, emptyList())
     val recordFolder: StateFlow<String?> = prefs.recordFolder.stateIn(viewModelScope, SharingStarted.Eagerly, null)
-    fun setRecordFolder(uri: String?) = viewModelScope.launch { prefs.setRecordFolder(uri) }
+    fun setRecordFolder(uri: String?) = safeScope.launch { prefs.setRecordFolder(uri) }
     /** The share's sign-in name, from the Vault (the password never comes back out). */
     fun smbUser(): String = graph.vault.getString(tv.sloopy.record.Smb.VAULT_USER) ?: ""
     /**
@@ -1333,7 +1343,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
      * folder once to prove the sign-in works, and only then makes it the recording folder.
      * A blank password keeps the one already saved. [onDone] gets null on success, else the reason.
      */
-    fun saveSmbFolder(host: String, share: String, path: String, user: String, password: String, onDone: (String?) -> Unit) = viewModelScope.launch {
+    fun saveSmbFolder(host: String, share: String, path: String, user: String, password: String, onDone: (String?) -> Unit) = safeScope.launch {
         if (host.isBlank() || share.isBlank()) { onDone("Server and share are needed"); return@launch }
         val url = tv.sloopy.record.Smb.url(host, share, path)
         graph.vault.putString(tv.sloopy.record.Smb.VAULT_USER, user.trim())
@@ -1342,11 +1352,11 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         r.onSuccess { prefs.setRecordFolder(url); onDone(null) }
             .onFailure { TLog.w { "smb test: ${TLog.userMessage(it)}" }; onDone(TLog.userMessage(it)) }
     }
-    init { viewModelScope.launch { graph.db.recordings().finishStale() } }
+    init { safeScope.launch { graph.db.recordings().finishStale() } }
 
     /** Records [channel] from [startEpoch] to [stopEpoch]; starts at once when the start has passed. */
     /** Starts a minute early and runs [padAfterSec] past the end, so late-running shows are not cut. */
-    fun scheduleRecording(channel: ChannelEntity, title: String, startEpoch: Long, stopEpoch: Long, padAfterSec: Long = 120) = viewModelScope.launch {
+    fun scheduleRecording(channel: ChannelEntity, title: String, startEpoch: Long, stopEpoch: Long, padAfterSec: Long = 120) = safeScope.launch {
         val p = active.value ?: return@launch
         val now = System.currentTimeMillis() / 1000
         if (stopEpoch <= now) { _toast.value = "That programme has already ended"; return@launch }
@@ -1358,13 +1368,13 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         _toast.value = if (startEpoch <= now) "Recording $title" else "Will record $title at ${tv.sloopy.ui.common.TimeFmt.hhmm(startEpoch)}"
     }
     /** Records what is on [channel] now until it ends, or for two hours when the guide has nothing. */
-    fun recordNow(channel: ChannelEntity) = viewModelScope.launch {
+    fun recordNow(channel: ChannelEntity) = safeScope.launch {
         val now = System.currentTimeMillis() / 1000
         val prog = programmesFor(channel, guideWindowStart(now)).firstOrNull { it.startEpoch <= now && it.stopEpoch > now }
         scheduleRecording(channel, prog?.title ?: channel.name, now, prog?.stopEpoch ?: (now + 7200))
     }
     fun stopRecording(r: tv.sloopy.data.db.RecordingEntity) { tv.sloopy.record.Recorder.stop(getApplication(), r.id) }
-    fun deleteRecording(r: tv.sloopy.data.db.RecordingEntity) = viewModelScope.launch {
+    fun deleteRecording(r: tv.sloopy.data.db.RecordingEntity) = safeScope.launch {
         val ctx = getApplication<android.app.Application>()
         if (r.status == "scheduled") tv.sloopy.record.Recorder.unschedule(ctx, r.id)
         if (r.status == "recording") tv.sloopy.record.Recorder.stop(ctx, r.id)
@@ -1372,7 +1382,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         graph.db.recordings().delete(r.id)
         graph.db.progress().remove(r.providerId, "recording", r.id)
     }
-    fun playRecording(r: tv.sloopy.data.db.RecordingEntity) = viewModelScope.launch {
+    fun playRecording(r: tv.sloopy.data.db.RecordingEntity) = safeScope.launch {
         val uri = r.uri ?: return@launch
         val resume = graph.db.progress().get(r.providerId, "recording", r.id)?.positionMs ?: 0L
         _playing.value = Playing.Vod(r.id, r.title, r.channelName + " · " + tv.sloopy.ui.common.TimeFmt.dateTime(r.startEpoch * 1000), null, "ts", "recording", null)
@@ -1395,7 +1405,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
      * [SYNC_GAP_MS] between runs (every channel change touches History, and the code server's KV
      * has a thousand writes a day for everyone), and whatever changed meanwhile rides the next one.
      */
-    fun syncNow(announce: Boolean = false) = viewModelScope.launch {
+    fun syncNow(announce: Boolean = false) = safeScope.launch {
         val code = syncCode.value ?: return@launch
         if (syncing) { syncPending = true; return@launch }
         syncing = true
@@ -1415,8 +1425,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         val at = tv.sloopy.sync.SyncClient.upload(codeServer.value, code, syncManager.encode(syncManager.build()))
         prefs.setSyncedAt(at)
     }
-    fun enableSync() = viewModelScope.launch { prefs.setSyncCode(tv.sloopy.sync.SyncClient.newCode()); _syncStatus.value = null; syncNow(announce = true) }
-    fun disableSync() = viewModelScope.launch { prefs.setSyncCode(null); prefs.setSyncedAt(0); _syncStatus.value = "Sync is off. The last backup stays on the server under the old code until it is replaced." }
+    fun enableSync() = safeScope.launch { prefs.setSyncCode(tv.sloopy.sync.SyncClient.newCode()); _syncStatus.value = null; syncNow(announce = true) }
+    fun disableSync() = safeScope.launch { prefs.setSyncCode(null); prefs.setSyncedAt(0); _syncStatus.value = "Sync is off. The last backup stays on the server under the old code until it is replaced." }
     /** Pulls the bundle behind [code] onto this stick and joins that code. */
     suspend fun restoreFromCode(code: String): String = applyBundle(fetchBundle(code), code, tv.sloopy.sync.SyncManager.RestoreOptions())
     /** Downloads and decrypts the other stick's backup so the viewer can choose what to bring over. */
@@ -1439,7 +1449,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         // synced-at stamp an upload writes) and Room re-emits on any table write, which until
         // 0.6.13 made each upload schedule the next one a minute later, all evening (the flat
         // 60-writes-an-hour line on the KV chart, 2026-10-16).
-        viewModelScope.launch {
+        safeScope.launch {
             val progressTick = active.flatMapLatest { p -> if (p == null) flowOf(emptyList()) else graph.db.progress().recent(p.id, 1) }
             val sources: List<kotlinx.coroutines.flow.Flow<Any?>> = listOf(
                 favouriteIds, favouriteVodIds, favouriteSeriesIds, groupOrder, lockedGroups, hiddenGroups, hiddenChannels, providerList, progressTick, prefs.collapseDupes, dupSplit, dupMerged, dupDismissed, dupPreferred,
@@ -1452,7 +1462,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
 
     val introEnabled: StateFlow<Boolean> = prefs.introEnabled.stateIn(viewModelScope, SharingStarted.Eagerly, true)
     val bufferSize: StateFlow<String> = prefs.bufferSize.stateIn(viewModelScope, SharingStarted.Eagerly, "large")
-    init { viewModelScope.launch { bufferSize.collect { player.setBuffer(it) } } }
+    init { safeScope.launch { bufferSize.collect { player.setBuffer(it) } } }
 
     // ---- External player (VLC) ----------------------------------------------------------------
     val externalPlayer: StateFlow<String> = prefs.externalPlayer.stateIn(viewModelScope, SharingStarted.Eagerly, "builtin")
@@ -1480,8 +1490,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     val theme: StateFlow<String> = prefs.theme.stateIn(viewModelScope, SharingStarted.Eagerly, "phosphor")
     val frameRateMatch: StateFlow<Boolean> = prefs.frameRateMatch.stateIn(viewModelScope, SharingStarted.Eagerly, false)
     init {
-        viewModelScope.launch { clock12.collect { tv.sloopy.ui.common.TimeFmt.twelveHour = it } }
-        viewModelScope.launch { theme.collect { tv.sloopy.ui.theme.Sloopy.palette = tv.sloopy.ui.theme.Palettes.byId(it) } }
+        safeScope.launch { clock12.collect { tv.sloopy.ui.common.TimeFmt.twelveHour = it } }
+        safeScope.launch { theme.collect { tv.sloopy.ui.theme.Sloopy.palette = tv.sloopy.ui.theme.Palettes.byId(it) } }
     }
     val osdSeconds: StateFlow<Int> = prefs.osdSeconds.stateIn(viewModelScope, SharingStarted.Eagerly, 4)
 
@@ -1494,7 +1504,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     private var nowJob: Job? = null
 
     init {
-        viewModelScope.launch {
+        safeScope.launch {
             active.collect { p ->
                 if (p != null) {
                     _group.value = prefs.lastGroup(p.id) ?: Groups.ALL
@@ -1502,10 +1512,10 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
-        viewModelScope.launch {
+        safeScope.launch {
             visibleChannels.collect { restartNowPlaying() }
         }
-        viewModelScope.launch {
+        safeScope.launch {
             // Quiet check a little after launch, then every six hours while the app is open.
             delay(15_000)
             while (true) { checkForUpdate(); delay(6 * 3600_000L) }
@@ -1514,13 +1524,13 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
 
     // ---- Providers ---------------------------------------------------------------------------
 
-    fun setActive(id: String) = viewModelScope.launch {
+    fun setActive(id: String) = safeScope.launch {
         prefs.setActiveProvider(id)
         _playing.value = null
         player.stop()
     }
 
-    fun addDemo() = viewModelScope.launch {
+    fun addDemo() = safeScope.launch {
         providers.upsert(Demo.record)
         prefs.setActiveProvider(Demo.PROVIDER_ID)
     }
@@ -1530,7 +1540,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         if (makeActive) prefs.setActiveProvider(record.id)
     }
 
-    fun removeProvider(id: String) = viewModelScope.launch {
+    fun removeProvider(id: String) = safeScope.launch {
         providers.remove(id)
         if (activeId.value == id) prefs.setActiveProvider(providerList.value.firstOrNull()?.id)
         graph.db.channels().deleteAll(id)
@@ -1543,12 +1553,12 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     /** Why the last guide download failed, shown on the guide so a viewer can report it. */
     private val _epgError = MutableStateFlow<String?>(null)
     val epgError: StateFlow<String?> = _epgError
-    val epgIntervalHours: StateFlow<Int> = prefs.epgIntervalHours.stateIn(viewModelScope, SharingStarted.Eagerly, 3)
+    val epgIntervalHours: StateFlow<Int> = prefs.epgIntervalHours.stateIn(viewModelScope, SharingStarted.Eagerly, 6)
     init {
         // Re-download the guide on the chosen cadence while the app is open.
-        viewModelScope.launch { epgIntervalHours.collectLatest { h -> while (true) { delay(h * 3600_000L); refreshEpgNow() } } }
+        safeScope.launch { epgIntervalHours.collectLatest { h -> while (true) { delay(h * 3600_000L); refreshEpgNow() } } }
     }
-    fun refreshEpgNow() = viewModelScope.launch {
+    fun refreshEpgNow() = safeScope.launch {
         val p = active.value ?: return@launch
         runCatching { catalog.refreshEpg(p, minIntervalMs = epgIntervalHours.value * 3600_000L) }
             .onSuccess { _epgError.value = null }
@@ -1556,12 +1566,22 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     private suspend fun ensureFresh(p: ProviderRecord) {
+        catalog.maintain(p.id)
         val count = graph.db.channels().count(p.id)
         val age = System.currentTimeMillis() - prefs.refreshedAt(p.id, "channels")
         if (count == 0 || age > 24L * 3600 * 1000) refresh(p) else refreshEpgNow()
     }
 
-    fun refresh(p: ProviderRecord? = active.value, force: Boolean = false) = viewModelScope.launch {
+    /** About › Rebuild the guide: wipe every programme row, compact the file, download again. */
+    suspend fun rebuildGuide(): String {
+        val p = active.value ?: return "No service to rebuild for"
+        return runCatching { catalog.wipeGuide(p.id) }.fold(
+            { refresh(p, force = true); "Guide wiped and compacted · downloading again" },
+            { "Could not rebuild: " + TLog.userMessage(it) },
+        )
+    }
+
+    fun refresh(p: ProviderRecord? = active.value, force: Boolean = false) = safeScope.launch {
         p ?: return@launch
         runCatching { catalog.refreshAll(p, includeEpg = false) }
             .onFailure { _toast.value = TLog.userMessage(it) }
@@ -1573,10 +1593,10 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun selectGroup(g: String) {
         _group.value = g
-        viewModelScope.launch { active.value?.let { prefs.setLastGroup(it.id, g) } }
+        safeScope.launch { active.value?.let { prefs.setLastGroup(it.id, g) } }
     }
 
-    fun toggleFavourite(c: ChannelEntity) = viewModelScope.launch {
+    fun toggleFavourite(c: ChannelEntity) = safeScope.launch {
         val p = active.value ?: return@launch
         if (c.id in favouriteIds.value) graph.db.favourites().remove(p.id, c.id)
         else graph.db.favourites().add(FavouriteEntity(p.id, c.id, System.currentTimeMillis()))
@@ -1584,7 +1604,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
 
     private fun restartNowPlaying() {
         nowJob?.cancel()
-        nowJob = viewModelScope.launch {
+        nowJob = safeScope.launch {
             while (true) {
                 val p = active.value
                 val ids = visibleChannels.value.mapNotNull { it.epgId }
@@ -1699,7 +1719,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 val have = guides[groupKey]?.rows?.keys ?: emptySet()
                 guideQueue.addAll(want.filter { it !in have })
             }
-            if (guideJob?.isActive != true) guideJob = viewModelScope.launch { drainGuideQueue(groupKey) }
+            if (guideJob?.isActive != true) guideJob = safeScope.launch { drainGuideQueue(groupKey) }
         }
     }
     private val _guideStats = MutableStateFlow("")
@@ -1737,7 +1757,8 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 val total = runCatching { catalog.programmeCount(p.id) }.getOrDefault(-1)
                 val wal = catalog.walBytes(getApplication()) / 1_000_000
                 val dbMb = runCatching { getApplication<android.app.Application>().getDatabasePath("sloopy.db").length() / 1_000_000 }.getOrDefault(0L)
-                _guideStats.value = "Last guide read: $rowsRead rows in $ms ms · ${"%,d".format(total)} programmes in the table · database $dbMb MB · log file $wal MB"
+                val free = tv.sloopy.data.Storage.mb(tv.sloopy.data.Storage.freeBytes(getApplication<android.app.Application>().filesDir.path))
+                _guideStats.value = "Last guide read: $rowsRead rows in $ms ms · ${"%,d".format(total)} programmes in the table · database $dbMb MB · log file $wal MB · $free MB free on the box"
             }
         }
     }
@@ -1786,7 +1807,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     fun kickSweep() { sweepKick.value++ }
     private fun startSweep() {
         sweepJob?.cancel()
-        sweepJob = viewModelScope.launch {
+        sweepJob = safeScope.launch {
             val gate = kotlinx.coroutines.sync.Semaphore(6)
             val gate2 = kotlinx.coroutines.sync.Semaphore(2)
             var done = 0; var total = 0
@@ -1841,10 +1862,10 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     }
     init {
         startSweep()
-        viewModelScope.launch { while (true) { delay(700); runCatching { flushChangedKeys() } } }
+        safeScope.launch { while (true) { delay(700); runCatching { flushChangedKeys() } } }
         // Warm the store for the group on screen while the picture plays, so Back draws a full
         // grid on its first frame instead of placeholders.
-        viewModelScope.launch {
+        safeScope.launch {
             combine(visibleChannels, _group) { l, g -> g to l }.collect { (g, l) ->
                 if (l.isNotEmpty()) {
                     val ws = guideWindowStart(); val now = System.currentTimeMillis() / 1000 / 3600 * 3600
@@ -1853,16 +1874,16 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
                 }
             }
         }
-        viewModelScope.launch { combine(currentChannel, visibleChannels, favouriteIds) { c, l, f -> Triple(c?.id, l.size, f.size) }.collect { kickSweep() } }
-        viewModelScope.launch { catalog.refresh.collect { if (it is tv.sloopy.data.RefreshState.Done) { epgCache.clear(); sweptAt.clear(); dropGuides(); kickSweep() } } }
-        viewModelScope.launch { _epgError.collect { kickSweep() } }
+        safeScope.launch { combine(currentChannel, visibleChannels, favouriteIds) { c, l, f -> Triple(c?.id, l.size, f.size) }.collect { kickSweep() } }
+        safeScope.launch { catalog.refresh.collect { if (it is tv.sloopy.data.RefreshState.Done) { epgCache.clear(); sweptAt.clear(); dropGuides(); kickSweep() } } }
+        safeScope.launch { _epgError.collect { kickSweep() } }
     }
 
-    fun forgetProgress(r: tv.sloopy.data.db.ProgressEntity) = viewModelScope.launch { graph.db.progress().remove(r.providerId, r.kind, r.itemId) }
+    fun forgetProgress(r: tv.sloopy.data.db.ProgressEntity) = safeScope.launch { graph.db.progress().remove(r.providerId, r.kind, r.itemId) }
 
     fun tune(c: ChannelEntity) {
         val p = active.value ?: return
-        viewModelScope.launch { prefs.setLastChannel(p.id, c.id); prefs.pushRecent(p.id, c.id); prefs.bumpWatch(p.id, c.id) }
+        safeScope.launch { prefs.setLastChannel(p.id, c.id); prefs.pushRecent(p.id, c.id); prefs.bumpWatch(p.id, c.id) }
         if (useVlc() && runCatching { openInVlc(catalog.liveUrl(p, c), c.name) }.getOrDefault(false)) return
         _playing.value = Playing.Live(c)
         try {
@@ -1894,7 +1915,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     /** Accumulates quick presses ("+90 s") and clears two seconds after the last one. */
     fun noteSeek(ms: Long) {
         _lastSeek.value = (if ((_lastSeek.value ?: 0L) * ms > 0) _lastSeek.value!! else 0L) + ms
-        seekClear?.cancel(); seekClear = viewModelScope.launch { delay(2000); _lastSeek.value = null }
+        seekClear?.cancel(); seekClear = safeScope.launch { delay(2000); _lastSeek.value = null }
     }
     fun seekBy(ms: Long) { val p = player.player; p.seekTo((p.currentPosition + ms).coerceIn(0, maxOf(0, p.duration))) }
 
@@ -1910,7 +1931,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     /** True when the built-in player took it (open the player screen); false when VLC did. */
     fun playVod(id: Long, title: String, subtitle: String?, image: String?, container: String, kind: String, parentId: Long?, resumeMs: Long): Boolean {
         val p = active.value ?: return false
-        if (kind == "recording") { viewModelScope.launch { graph.db.recordings().get(id)?.let { playRecording(it) } }; return true }
+        if (kind == "recording") { safeScope.launch { graph.db.recordings().get(id)?.let { playRecording(it) } }; return true }
         val url = if (kind == "episode") catalog.episodeUrl(p, id, container) else catalog.vodUrl(p, id, container)
         if (useVlc() && openInVlc(url, title)) return false
         _playing.value = Playing.Vod(id, title, subtitle, image, container, kind, parentId)
@@ -1921,7 +1942,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
     /** Called when leaving the VOD player to remember position. */
     // Written on a scope of its own: the activity calls this on its way out, when viewModelScope is
     // about to be cancelled, and a resume point that never lands is the bug nobody can reproduce.
-    private val detachedScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO)
+    private val detachedScope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + kotlinx.coroutines.Dispatchers.IO + noSpaceHandler)
     fun saveProgress() {
         val p = active.value ?: return
         val v = _playing.value as? Playing.Vod ?: return
@@ -1950,7 +1971,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
 
     fun resumeLastChannel() {
         if (_playing.value != null) return
-        viewModelScope.launch {
+        safeScope.launch {
             val p = active.value ?: return@launch
             val lastId = prefs.lastChannel(p.id)
             val list = channels.value.ifEmpty { graph.db.channels().allOnce(p.id) }
@@ -1983,7 +2004,7 @@ class SloopyViewModel(app: Application) : AndroidViewModel(app) {
         prefs.setPin(salt.toHex(), Vault.hashPin(pin, salt).toHex())
     }
 
-    fun setLocked(groupId: String, locked: Boolean) = viewModelScope.launch {
+    fun setLocked(groupId: String, locked: Boolean) = safeScope.launch {
         val p = active.value ?: return@launch
         val cur = lockedGroups.value.toMutableSet()
         if (locked) cur.add(groupId) else cur.remove(groupId)
