@@ -153,6 +153,15 @@ a grabbed group.
   (raised by the `migration()` helper) makes the root show "PREPARING THE GUIDE" while a schema
   migration runs, so an index build on a million rows is never a black screen. About's guide
   line adds the database file size.
+- 0.6.45 (2026-11-11), buddy: "No guide for ESPN, OK plays an old listing instead of live". The
+  guide's `cellAt` fell back to the row's last programme when nothing covered the cursor time, so
+  on a channel whose listings had run out the "now" cursor sat on a programme that ended hours
+  ago and OK played catch-up of it. `cellAt` is containment-only now (a gap is a gap: OK tunes
+  live, the hold menu offers Watch now, the detail panel says "No listings for this time · OK
+  plays the channel"); `moveTime` steps from the cursor time when it is in a gap. The 0.6.5
+  "No listings here · <channel>" band already covers the gap case visually. His wider ask, a
+  Catch up section on the strip with the guide showing only now and future, was not done: the
+  bug was the snap, not the past in the grid.
 - 0.6.44 (2026-11-05), the buddy's Chromecast: "closed twice in a row", crash line
   `IOException: write failed: ENOSPC`, About "database 1029 MB" with 299,805 programmes (the
   user's Shield: ~950k rows in 192 MB). Cause: an import killed partway (ANR kill, reboot) left

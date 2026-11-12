@@ -172,12 +172,12 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     }
     fun progsOf(c: ChannelEntity): List<ProgrammeEntity>? = guide?.takeIf { it.key == groupNow }?.rows?.get(tv.sloopy.data.channelEpgKey(c))
     /** The cell under the cursor time; else the next one; else the last in the window; else none. */
-    fun cellAt(list: List<ProgrammeEntity>?, t: Long): ProgrammeEntity? {
-        if (list == null) return null
-        return list.firstOrNull { it.startEpoch <= t && it.stopEpoch > t }
-            ?: list.firstOrNull { it.startEpoch > t && it.startEpoch < winEnd }
-            ?: list.lastOrNull { it.stopEpoch > winStart }
-    }
+    // Only a programme that covers the cursor time counts as the cell under the cursor. The old
+    // fallback snapped to the row's last programme when nothing covered the time, so on a channel
+    // whose listings had run out (ESPN with no guide for today) OK on "now" played catch-up of a
+    // programme that ended hours ago instead of the live channel. A gap is a gap: OK plays live.
+    fun cellAt(list: List<ProgrammeEntity>?, t: Long): ProgrammeEntity? =
+        list?.firstOrNull { it.startEpoch <= t && it.stopEpoch > t }
     val focused: Focused? = remember(cursorRow, cursorEpoch, guide, channels, groupNow) {
         channels.getOrNull(cursorRow)?.let { c -> Focused(c, cellAt(progsOf(c), cursorEpoch)) }
     }
@@ -200,8 +200,10 @@ fun GuideScreen(vm: SloopyViewModel, go: (String) -> Unit, onQuit: () -> Unit) {
     fun moveTime(dir: Int): Boolean {
         val c = channels.getOrNull(cursorRow) ?: return false
         val list = progsOf(c) ?: return false
-        val cur = cellAt(list, cursorEpoch) ?: return false
-        val next = (if (dir > 0) list.firstOrNull { it.startEpoch >= cur.stopEpoch && it.startEpoch < winEnd } else list.lastOrNull { it.stopEpoch <= cur.startEpoch && it.stopEpoch > winStart })
+        // From a gap the step goes to the first programme after the cursor time or the last before it.
+        val cur = cellAt(list, cursorEpoch)
+        val from = if (dir > 0) (cur?.stopEpoch ?: cursorEpoch) else (cur?.startEpoch ?: cursorEpoch)
+        val next = (if (dir > 0) list.firstOrNull { it.startEpoch >= from && it.startEpoch < winEnd } else list.lastOrNull { it.stopEpoch <= from && it.stopEpoch > winStart })
             ?: return false
         val a = maxOf(next.startEpoch, winStart)
         val xs = ((a - winStart) * pxPerSec).toInt()
@@ -650,6 +652,7 @@ private fun DetailPanel(vm: SloopyViewModel, f: Focused?, current: ChannelEntity
                 }
                 val p = shown.prog
                 Text(p?.title ?: tv.sloopy.core.model.Names.clean(shown.channel.name), style = Sloopy.titleHuge, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.padding(top = 10.dp))
+                if (p == null) Text("No listings for this time  ·  OK plays the channel", style = Sloopy.meta.copy(color = Sloopy.muted), modifier = Modifier.padding(top = 12.dp))
                 if (p != null) {
                     val left = when {
                         p.startEpoch <= now && p.stopEpoch > now -> "${(p.stopEpoch - now) / 60} min left"
